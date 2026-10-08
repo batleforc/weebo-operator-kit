@@ -1,0 +1,20 @@
+[package]
+name = "weebo-kit-application"
+description = "Port traits and use-case helpers shared by the weebo operators (secret stores)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+weebo-kit-api = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[features]
+# Exposes `test_support` (in-memory secret store) to other crates' tests.
+test-support = []

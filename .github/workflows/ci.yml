@@ -1,0 +1,44 @@
+name: CI
+
+# GitHub Actions syntax kept compatible with Forgejo Actions: no marketplace
+# action without a Forgejo equivalent, every tool comes from mise.toml.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/setup-mise
+      - name: Cache cargo registry
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      # weebo-kit-testkit's envtest has a bindgen step that needs libclang.
+      - name: Install libclang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          LIBCLANG_SO="$(find /usr/lib -iname 'libclang.so*' 2>/dev/null | head -n1)"
+          if [ -z "$LIBCLANG_SO" ]; then
+            echo "::error::libclang.so not found after installing libclang-dev" >&2
+            exit 1
+          fi
+          {
+            echo "LIBCLANG_PATH=$(dirname "$LIBCLANG_SO")"
+            echo "BINDGEN_EXTRA_CLANG_ARGS="
+          } >> "$GITHUB_ENV"
+      - run: mise install
+      - run: mise exec -- task lint
+      - run: mise exec -- task test
+      - run: mise exec -- task audit

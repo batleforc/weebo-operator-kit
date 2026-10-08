@@ -1,0 +1,8 @@
+[package]
+name = "weebo-kit-domain"
+description = "Pure building blocks shared by the weebo operators: reason codes, failures, the namespace allow-list"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true

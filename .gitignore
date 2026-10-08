@@ -1,0 +1,18 @@
+# Task internal cache (checksums/fingerprints)
+.task/
+
+# Claude Code per-user local settings
+.claude/settings.local.json
+
+# Build artifacts
+node_modules/
+target/
+dist/
+
+# Local env files
+.env
+.env.local
+
+# graphify knowledge graph (local, regenerated with `graphify update .`)
+graphify-out/
+

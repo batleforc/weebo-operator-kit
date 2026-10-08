@@ -1,0 +1,30 @@
+[package]
+name = "weebo-kit-runtime"
+description = "Operator runtime shared by the weebo operators: telemetry, leader election, graceful shutdown, TLS webhook server, reconcile metrics, status conditions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+weebo-kit-api = { workspace = true }
+weebo-kit-domain = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true }
+axum-server = { workspace = true }
+futures = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+kube-leader-election = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+# `start_paused` in the leader-election tests.
+tokio = { workspace = true, features = ["test-util"] }

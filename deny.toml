@@ -1,0 +1,40 @@
+# cargo-deny — supply-chain gate run by `task audit` and CI.
+#   advisories — RUSTSEC vulnerabilities, unmaintained and yanked crates
+#   licenses   — flag a copyleft transitive dependency
+#   sources    — only crates.io is trusted
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+ignore = []
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+
+# Weak-copyleft, but only a build tool of the test-only `envtest` harness
+# (rust2go → cbindgen); it never ends up in the operator binary.
+[[licenses.exceptions]]
+crate = "cbindgen"
+allow = ["MPL-2.0"]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

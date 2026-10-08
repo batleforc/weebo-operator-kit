@@ -1,0 +1,16 @@
+[package]
+name = "weebo-kit-api"
+description = "CRD field types shared by the weebo operators (conditions, secret refs and targets, TLS options)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+k8s-openapi = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

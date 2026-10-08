@@ -1,0 +1,53 @@
+version: "3"
+
+includes:
+  mise: ./.tasks/mise.yaml
+
+env:
+  LIBCLANG_PATH:
+    sh: echo "${LIBCLANG_PATH-/usr/lib64}"
+  BINDGEN_EXTRA_CLANG_ARGS:
+    sh: echo "${BINDGEN_EXTRA_CLANG_ARGS--I/usr/lib/gcc/x86_64-redhat-linux/16/include -I/usr/include}"
+
+tasks:
+  init:
+    desc: "Install the toolchain (mise) and the git hooks (cocogitto)"
+    cmds:
+      - task mise:install
+      - cog install-hook -a -o
+
+  doctor:
+    desc: "Check the local dev setup needed by weebo-kit-testkit's envtest (Go, libclang, control-plane binaries) and the git hooks"
+    cmds:
+      - |
+        ok=true
+        check() { if eval "$2" >/dev/null 2>&1; then echo "  [ok]   $1"; else echo "  [FAIL] $1 — $3"; ok=false; fi; }
+        check "go"              "mise exec -- go version"                    "mise install"
+        check "etcd"            "mise exec -- etcd --version"                "mise install"
+        check "kube-apiserver"  "mise exec -- kube-apiserver --version"      "mise install"
+        check "libclang.so"     "ls $LIBCLANG_PATH/libclang.so*"             "install clang-libs (or libclang-dev) and set LIBCLANG_PATH"
+        test -f .git/hooks/pre-commit && echo "  [ok]   git hooks" || echo "  [warn] git hooks not installed — task init"
+        $ok
+
+  lint:
+    desc: "cargo fmt --check + clippy -D warnings on the whole workspace, actionlint on CI"
+    cmds:
+      - mise exec -- cargo fmt --check
+      - mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+      - mise exec -- actionlint
+
+  test:
+    desc: "Every kit test: unit, contract (Vault against wiremock) and doctests"
+    cmds:
+      - mise exec -- cargo test --workspace
+
+  doc:
+    desc: "Build the kit's rustdoc (what the operators program against)"
+    cmds:
+      - mise exec -- cargo doc --workspace --no-deps
+
+  audit:
+    desc: "Check dependencies for CVE (cargo-deny + trivy on Cargo.lock)"
+    cmds:
+      - mise exec -- cargo deny check
+      - mise exec -- trivy fs --scanners vuln --exit-code 1 --severity HIGH,CRITICAL Cargo.lock

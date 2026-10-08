@@ -1,0 +1,16 @@
+[package]
+name = "weebo-kit-testkit"
+description = "Test harness shared by the weebo operators: envtest control plane, status polling"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+envtest = { workspace = true }
+kube = { workspace = true }
+rustls = { workspace = true }
+serde = { workspace = true }
+serde_norway = { workspace = true }
+tokio = { workspace = true }

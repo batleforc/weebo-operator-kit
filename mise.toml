@@ -1,0 +1,16 @@
+[tools]
+cocogitto = "latest"
+rust = { version = "latest", components = ["rust-src", "rustfmt", "llvm-tools", "clippy"], profile = "default" }
+task = "latest"
+gitleaks = "latest"
+rtk = "latest"
+"pipx:graphifyy" = "latest"
+# `task audit`
+"aqua:EmbarkStudios/cargo-deny" = "latest"
+trivy = "latest"
+# envtest (crates/weebo-kit-testkit): Go for its build-time bindings
+go = "latest"
+etcd = "3.5.32"
+"aqua:kubernetes/kubernetes/kube-apiserver" = "1.36.2"
+actionlint = "latest"
+shellcheck = "latest"
