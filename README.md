@@ -1,19 +1,23 @@
 # weebo-operator-kit
 
+The pipe dream of this project is to easen the creation of kubernetes operators in Rust, and in the end cover all the tool i may need to build / maintain / document them.
+
+In addition, i will use them in my project [Weebo-SI](https://github.com/batleforc/weebo-si) and in a futur project :eyes:.
+
 Shared core of the weebo Kubernetes operators
 ([weebo-forgejo](https://github.com/batleforc/weebo-forgejo),
 [weebo-authentik](https://github.com/batleforc/weebo-authentik), and the
 next ones): the plumbing every operator needs around its own business
 logic, in the same hexagonal layout the operators use.
 
-| Crate                   | What it gives an operator                                                                 |
-|-------------------------|-------------------------------------------------------------------------------------------|
-| `weebo-kit-domain`      | `reason_codes!` + `Reason`, `Failure<R>`/`Advisory<R>`, the namespace allow-list engine   |
-| `weebo-kit-api`         | CRD field types: `Condition`, `SecretKeyRef`, `ObjectRef`, `SecretTarget`, `TlsOptions`   |
-| `weebo-kit-application` | `SecretStore` ports, secret-emission helpers, `FakeSecretStore` (feature `test-support`) |
-| `weebo-kit-adapters`    | Kubernetes and Vault (Kubernetes auth, KV v2) secret stores, per-target routing           |
+| Crate                   | What it gives an operator                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `weebo-kit-domain`      | `reason_codes!` + `Reason`, `Failure<R>`/`Advisory<R>`, the namespace allow-list engine                                   |
+| `weebo-kit-api`         | CRD field types: `Condition`, `SecretKeyRef`, `ObjectRef`, `SecretTarget`, `TlsOptions`                                   |
+| `weebo-kit-application` | `SecretStore` ports, secret-emission helpers, `FakeSecretStore` (feature `test-support`)                                  |
+| `weebo-kit-adapters`    | Kubernetes and Vault (Kubernetes auth, KV v2) secret stores, per-target routing                                           |
 | `weebo-kit-runtime`     | telemetry (OTLP + Prometheus), leader election, health probes, graceful shutdown, TLS webhook server, metrics, conditions |
-| `weebo-kit-testkit`     | envtest control plane, status polling                                                     |
+| `weebo-kit-testkit`     | envtest control plane, status polling                                                                                     |
 
 Design, scope rules, versioning and the migration roadmap:
 [`docs/plan.md`](docs/plan.md).
