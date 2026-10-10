@@ -12,7 +12,7 @@ pub mod secret_ref;
 pub mod secret_routing;
 pub mod secret_vault;
 
-pub use secret_k8s::K8sSecretStore;
+pub use secret_k8s::{K8sSecretStore, MANAGED_BY_LABEL};
 pub use secret_ref::read_secret_key;
-pub use secret_routing::RoutingSecretStore;
+pub use secret_routing::{RoutingSecretStore, VaultResolver};
 pub use secret_vault::{VaultConfig, VaultLogins, VaultSecretStore};

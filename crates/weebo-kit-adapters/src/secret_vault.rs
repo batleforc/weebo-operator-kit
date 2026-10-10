@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex, RwLock};
+use vaultrs::api::kv2::requests::SetSecretMetadataRequest;
 use vaultrs::client::{Client as _, VaultClient, VaultClientSettingsBuilder};
 use vaultrs::error::ClientError;
 use vaultrs::{auth::kubernetes, kv2};
@@ -28,9 +29,10 @@ pub struct VaultConfig {
     pub path_prefix: String,
     pub kubernetes_auth_role: String,
     pub kubernetes_auth_mount: String,
-    /// Where the CA bundle is read from (e.g. `namespace/name/key` of its
-    /// `Secret`), `None` for the system trust store. Only compared: a
-    /// change forces a new login with the new CA.
+    /// Identifies the CA bundle (e.g. `namespace/name/key` of its `Secret`
+    /// plus a digest of its content), `None` for the system trust store.
+    /// Only compared: a change forces a new login with the new CA, so it
+    /// must change when the bundle's content does.
     pub ca_source: Option<String>,
 }
 
@@ -131,6 +133,77 @@ impl VaultSecretStore {
         Ok(())
     }
 
+    /// The KV v2 custom-metadata key naming the emitting CR.
+    pub const OWNER_METADATA_KEY: &'static str = "owner";
+
+    /// `<pathPrefix>/<namespace>/`: the only subtree a namespaced CR may
+    /// write to.
+    pub fn namespace_prefix(&self, namespace: &str) -> String {
+        format!("{}/{namespace}/", self.path_prefix)
+    }
+
+    /// The owner id recorded on `path` (`Ok(None)`: nothing stored, or
+    /// stored before owners were recorded).
+    pub async fn owner_of(&self, path: &str) -> Result<Option<String>, SecretStoreError> {
+        let first = {
+            let client = self.client.read().await;
+            kv2::read_metadata(&*client, &self.mount, path).await
+        };
+        let result = match first {
+            Err(e) if is_auth_error(&e) => {
+                self.relogin().await?;
+                let client = self.client.read().await;
+                kv2::read_metadata(&*client, &self.mount, path).await
+            }
+            other => other,
+        };
+        match result {
+            Ok(meta) => Ok(meta
+                .custom_metadata
+                .and_then(|m| m.get(Self::OWNER_METADATA_KEY).cloned())),
+            Err(ClientError::APIError { code: 404, .. }) => Ok(None),
+            // A policy without `read` on `<mount>/metadata/*`: ownership
+            // can't be checked, only the path confinement applies.
+            Err(ClientError::APIError { code: 403, .. }) => {
+                tracing::warn!(%path, "no read access to the KV metadata: secret ownership is not checked");
+                Ok(None)
+            }
+            Err(e) => Err(SecretStoreError(format!("Vault read metadata {path}: {e}"))),
+        }
+    }
+
+    /// Records `owner` on `path`'s metadata. Best effort: a policy without
+    /// `create`/`update` on `<mount>/metadata/*` only loses the ownership
+    /// record (warned), not the write.
+    pub async fn set_owner(&self, path: &str, owner: &str) -> Result<(), SecretStoreError> {
+        let set = || async {
+            let mut opts = SetSecretMetadataRequest::builder();
+            opts.custom_metadata(HashMap::from([(
+                Self::OWNER_METADATA_KEY.to_string(),
+                owner.to_string(),
+            )]));
+            let client = self.client.read().await;
+            kv2::set_metadata(&*client, &self.mount, path, Some(&mut opts)).await
+        };
+        let result = match set().await {
+            Err(e) if is_auth_error(&e) => {
+                self.relogin().await?;
+                set().await
+            }
+            other => other,
+        };
+        match result {
+            Ok(()) => Ok(()),
+            Err(ClientError::APIError { code: 403, .. }) => {
+                tracing::warn!(%path, "no write access to the KV metadata: secret ownership is not recorded");
+                Ok(())
+            }
+            Err(e) => Err(SecretStoreError(format!(
+                "Vault write metadata {path}: {e}"
+            ))),
+        }
+    }
+
     /// KV v2 `set` creates a new version even for identical data, so the
     /// current document is compared first: steady-state reconciles never
     /// churn the version history.
@@ -207,19 +280,32 @@ impl VaultSecretStore {
     }
 }
 
-struct CachedLogin {
-    config: VaultConfig,
-    store: Arc<VaultSecretStore>,
-    expires: Instant,
+enum Cached {
+    Login {
+        config: VaultConfig,
+        store: Arc<VaultSecretStore>,
+        expires: Instant,
+    },
+    /// A failed login, replayed until `expires` instead of hammering an
+    /// unreachable or misconfigured Vault on every reconcile.
+    Failed {
+        config: VaultConfig,
+        error: String,
+        expires: Instant,
+    },
 }
+
+/// How long a failed login is replayed before the next attempt.
+pub const LOGIN_FAILURE_TTL: Duration = Duration::from_secs(15);
 
 /// Vault logins cached per instance for 80% of their lease (each login
 /// mints a Vault token that lives its whole TTL — logging in on every
 /// reconcile churned tokens), and redone when the instance's Vault
-/// settings change.
+/// settings change. Logins of different instances never wait for each
+/// other: each instance has its own lock, held across its login only.
 #[derive(Default)]
 pub struct VaultLogins {
-    cache: Mutex<HashMap<String, CachedLogin>>,
+    slots: std::sync::Mutex<HashMap<String, Arc<Mutex<Option<Cached>>>>>,
 }
 
 impl VaultLogins {
@@ -236,40 +322,66 @@ impl VaultLogins {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<Option<Vec<u8>>, String>>,
     {
-        let mut cache = self.cache.lock().await;
-        if let Some(cached) = cache.get(key)
-            && cached.config == *config
-            && cached.expires > Instant::now()
-        {
-            return Ok(cached.store.clone());
+        let slot = self
+            .slots
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entry(key.to_string())
+            .or_default()
+            .clone();
+        let mut cached = slot.lock().await;
+        let now = Instant::now();
+        match &*cached {
+            Some(Cached::Login {
+                config: c,
+                store,
+                expires,
+            }) if c == config && *expires > now => return Ok(store.clone()),
+            Some(Cached::Failed {
+                config: c,
+                error,
+                expires,
+            }) if c == config && *expires > now => return Err(error.clone()),
+            _ => {}
         }
 
+        match Self::login(config, load_ca).await {
+            Ok(store) => {
+                *cached = store.cache_ttl().map(|ttl| Cached::Login {
+                    config: config.clone(),
+                    store: store.clone(),
+                    expires: Instant::now() + ttl,
+                });
+                Ok(store)
+            }
+            Err(error) => {
+                *cached = Some(Cached::Failed {
+                    config: config.clone(),
+                    error: error.clone(),
+                    expires: Instant::now() + LOGIN_FAILURE_TTL,
+                });
+                Err(error)
+            }
+        }
+    }
+
+    async fn login<F, Fut>(
+        config: &VaultConfig,
+        load_ca: F,
+    ) -> Result<Arc<VaultSecretStore>, String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<Option<Vec<u8>>, String>>,
+    {
         let jwt_path =
             std::env::var("VAULT_KUBERNETES_JWT_PATH").unwrap_or_else(|_| DEFAULT_JWT_PATH.into());
         let jwt = std::fs::read_to_string(&jwt_path)
             .map_err(|e| format!("reading the ServiceAccount token {jwt_path}: {e}"))?;
         let ca = load_ca().await?;
-        let store = Arc::new(
-            VaultSecretStore::new(config, &jwt, ca.as_deref())
-                .await
-                .map_err(|e| e.0)?,
-        );
-        match store.cache_ttl() {
-            Some(ttl) => {
-                cache.insert(
-                    key.to_string(),
-                    CachedLogin {
-                        config: config.clone(),
-                        store: store.clone(),
-                        expires: Instant::now() + ttl,
-                    },
-                );
-            }
-            None => {
-                cache.remove(key);
-            }
-        }
-        Ok(store)
+        VaultSecretStore::new(config, &jwt, ca.as_deref())
+            .await
+            .map(Arc::new)
+            .map_err(|e| e.0)
     }
 }
 

@@ -12,7 +12,7 @@ logic, in the same hexagonal layout the operators use.
 | `weebo-kit-api`         | CRD field types: `Condition`, `SecretKeyRef`, `ObjectRef`, `SecretTarget`, `TlsOptions`   |
 | `weebo-kit-application` | `SecretStore` ports, secret-emission helpers, `FakeSecretStore` (feature `test-support`) |
 | `weebo-kit-adapters`    | Kubernetes and Vault (Kubernetes auth, KV v2) secret stores, per-target routing           |
-| `weebo-kit-runtime`     | telemetry, leader election, graceful shutdown, TLS webhook server, metrics, conditions    |
+| `weebo-kit-runtime`     | telemetry (OTLP + Prometheus), leader election, health probes, graceful shutdown, TLS webhook server, metrics, conditions |
 | `weebo-kit-testkit`     | envtest control plane, status polling                                                     |
 
 Design, scope rules, versioning and the migration roadmap:

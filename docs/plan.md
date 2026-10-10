@@ -106,6 +106,32 @@ Cas particuliers tranchés :
   et serveur webhook du kit, testkit envtest/polling du kit. Seules les
   descriptions des CRD générées changent (texte neutre), pas les schémas.
 
+### v0.2.0 — durcissement prod (cassant)
+
+Issu de la revue « prod ready » de weebo-forgejo :
+
+- **Propriété des secrets** : le port `SecretStore` prend un
+  `SecretOwner { kind, namespace, name }` au lieu du namespace par défaut.
+  `K8sSecretStore::new` prend en plus l'annotation propriétaire (ex.
+  `forgejo.weebo.io/owner`) ; un Secret sans le label `managed-by` ou
+  appartenant à un autre CR n'est jamais écrasé ni supprimé (les Secrets
+  0.1.0, label seul, sont adoptés). Création par POST, puis `replace`
+  gardé par `resourceVersion` (les clés retirées disparaissent). Vault :
+  propriétaire dans le `custom_metadata` KV (best effort sans droit
+  `metadata`), et un CR namespacé reste sous `<pathPrefix>/<namespace>/`.
+- `emit::check_target(s)` : un CR namespacé n'écrit que dans son
+  namespace (`TargetViolation`), vérifié avant tout appel et par les stores.
+- `RoutingSecretStore::lazy` : Vault n'est contacté qu'à la première cible
+  Vault ; `VaultLogins` verrouille par instance et rejoue un échec 15 s.
+- **Leader election** réécrite (plus de `kube-leader-election`) : écritures
+  du Lease gardées par `resourceVersion` (jamais deux leaders), expiration
+  jugée sur l'horloge monotone locale ; `leader::is_leader()` pour une jauge.
+- `health` : `/readyz`, `/livez`, `/healthz` ; `webhook_server::spawn`
+  prend `Health` + `Shutdown` et draine (`WEEBO_SHUTDOWN_DRAIN_SECONDS`).
+- `telemetry::init` renvoie un `Telemetry` (flush à l'arrêt) ; Prometheus
+  sur `WEEBO_METRICS_ADDR` (`serve_metrics`), logs JSON (`LOG_FORMAT=json`).
+  OpenTelemetry 0.33.
+
 ### Itération 2 — weebo-authentik
 
 À faire, dans l'ordre (chaque étape compile et passe ses tests seule) :

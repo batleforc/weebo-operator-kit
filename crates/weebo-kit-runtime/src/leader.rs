@@ -2,11 +2,15 @@
 //! may reconcile — two would both attempt-create the same remote object.
 
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use k8s_openapi::api::coordination::v1::{Lease, LeaseSpec};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{MicroTime, ObjectMeta};
+use k8s_openapi::jiff::Timestamp;
 use kube::Client;
-use kube_leader_election::{LeaseLock, LeaseLockParams, LeaseLockResult};
+use kube::api::{Api, PostParams};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
@@ -14,6 +18,13 @@ use tokio::time::Instant;
 /// hiccup) without losing leadership spuriously ([`hold`]).
 pub const LEASE_TTL: Duration = Duration::from_secs(15);
 pub const LEASE_RENEW_INTERVAL: Duration = Duration::from_secs(5);
+
+static LEADER: AtomicBool = AtomicBool::new(false);
+
+/// Whether this process currently holds the leader lease (for a gauge).
+pub fn is_leader() -> bool {
+    LEADER.load(Ordering::Relaxed)
+}
 
 /// The held lease, renewed in the background.
 pub struct Leadership {
@@ -26,6 +37,7 @@ impl Leadership {
     /// wait out the TTL. Call once every controller returned.
     pub async fn release(self) {
         self.renewal.abort();
+        LEADER.store(false, Ordering::Relaxed);
         match self.lease.step_down().await {
             Ok(()) => tracing::info!("released the leader lease"),
             Err(err) => tracing::warn!(error = %err, "releasing the leader lease failed"),
@@ -52,14 +64,16 @@ pub async fn acquire_leadership(
         LEASE_TTL,
     ));
 
-    tracing::info!("waiting for the leader lease");
+    tracing::info!(%namespace, lease = %lease_name, "waiting for the leader lease");
     acquire(&lease, LEASE_RENEW_INTERVAL).await;
+    LEADER.store(true, Ordering::Relaxed);
     tracing::info!("acquired the leader lease");
 
     let renewal = tokio::spawn({
         let lease = lease.clone();
         async move {
             let why = hold(&lease, LEASE_RENEW_INTERVAL, LEASE_TTL).await;
+            LEADER.store(false, Ordering::Relaxed);
             tracing::error!("{why}, exiting");
             std::process::exit(1);
         }
@@ -74,23 +88,144 @@ pub fn lease(
     holder_id: String,
     ttl: Duration,
 ) -> LeaseLock {
-    LeaseLock::new(
-        client,
-        namespace,
-        LeaseLockParams {
-            holder_id,
-            lease_name: name.to_string(),
-            lease_ttl: ttl,
-        },
-    )
+    LeaseLock {
+        api: Api::namespaced(client, namespace),
+        name: name.to_string(),
+        holder: holder_id,
+        ttl,
+        observed: Mutex::new(None),
+    }
+}
+
+/// A `coordination.k8s.io/v1` `Lease` used as a lock, client-go style:
+///
+/// - every write carries the `resourceVersion` it was computed from, so of
+///   two replicas taking over an expired lease at once only one succeeds
+///   (the other gets a conflict) — no split brain;
+/// - expiry is judged on this replica's **monotonic clock**: the lease is
+///   free once its record hasn't changed for `leaseDurationSeconds` since
+///   this replica first saw that record — skew between the nodes' wall
+///   clocks never matters. A record stale by more than [`STALE_FACTOR`]
+///   TTLs by the wall clock (a leader long gone) is taken without waiting.
+pub struct LeaseLock {
+    api: Api<Lease>,
+    name: String,
+    holder: String,
+    ttl: Duration,
+    observed: Mutex<Option<(String, Instant)>>,
+}
+
+/// See [`LeaseLock`].
+pub const STALE_FACTOR: u32 = 3;
+
+impl LeaseLock {
+    fn spec(&self, transitions: i32, acquired: Option<MicroTime>) -> LeaseSpec {
+        let now = MicroTime(Timestamp::now());
+        LeaseSpec {
+            holder_identity: Some(self.holder.clone()),
+            lease_duration_seconds: Some(self.ttl.as_secs().max(1) as i32),
+            acquire_time: Some(acquired.unwrap_or_else(|| now.clone())),
+            renew_time: Some(now),
+            lease_transitions: Some(transitions),
+            ..Default::default()
+        }
+    }
+
+    /// When this replica first saw the lease's current record.
+    fn observed_since(&self, lease: &Lease) -> Instant {
+        let version = lease.metadata.resource_version.clone().unwrap_or_default();
+        let mut observed = self.observed.lock().unwrap_or_else(|p| p.into_inner());
+        match &*observed {
+            Some((v, at)) if *v == version => *at,
+            _ => {
+                let now = Instant::now();
+                *observed = Some((version, now));
+                now
+            }
+        }
+    }
+
+    /// Replaces the lease with `spec`, guarded by the `resourceVersion` it
+    /// was read at. `Ok(false)` on a conflict: someone else wrote first.
+    async fn write(&self, mut lease: Lease, spec: LeaseSpec) -> Result<bool, kube::Error> {
+        lease.spec = Some(spec);
+        match self
+            .api
+            .replace(&self.name, &PostParams::default(), &lease)
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(kube::Error::Api(e)) if e.code == 409 => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// `Ok(true)` when this replica holds the lease after the call.
+    pub async fn try_acquire_or_renew(&self) -> Result<bool, kube::Error> {
+        let Some(lease) = self.api.get_opt(&self.name).await? else {
+            let lease = Lease {
+                metadata: ObjectMeta {
+                    name: Some(self.name.clone()),
+                    ..Default::default()
+                },
+                spec: Some(self.spec(0, None)),
+            };
+            return match self.api.create(&PostParams::default(), &lease).await {
+                Ok(_) => Ok(true),
+                Err(kube::Error::Api(e)) if e.code == 409 => Ok(false),
+                Err(e) => Err(e),
+            };
+        };
+        let observed_since = self.observed_since(&lease);
+        let spec = lease.spec.clone().unwrap_or_default();
+        let transitions = spec.lease_transitions.unwrap_or(0);
+        let holder = spec.holder_identity.as_deref().filter(|h| !h.is_empty());
+
+        if holder == Some(self.holder.as_str()) {
+            let renewed = self.spec(transitions, spec.acquire_time.clone());
+            return self.write(lease, renewed).await;
+        }
+        if holder.is_some() {
+            let ttl = spec
+                .lease_duration_seconds
+                .map_or(self.ttl, |s| Duration::from_secs(s.max(0) as u64));
+            let expired_locally = observed_since.elapsed() >= ttl;
+            let stale = spec.renew_time.as_ref().is_some_and(|r| {
+                let age = Timestamp::now().duration_since(r.0);
+                age.as_secs() > (ttl * STALE_FACTOR).as_secs() as i64
+            });
+            if !expired_locally && !stale {
+                return Ok(false);
+            }
+        }
+        let acquired = self.spec(transitions + 1, None);
+        self.write(lease, acquired).await
+    }
+
+    /// Clears the holder if it is still this replica, so the next leader
+    /// doesn't wait out the TTL.
+    pub async fn step_down(&self) -> Result<(), kube::Error> {
+        let Some(lease) = self.api.get_opt(&self.name).await? else {
+            return Ok(());
+        };
+        let mut spec = lease.spec.clone().unwrap_or_default();
+        if spec.holder_identity.as_deref() != Some(self.holder.as_str()) {
+            return Ok(());
+        }
+        // Empty, not absent: what client-go (and the previous
+        // implementation) leave behind, and what tools expect.
+        spec.holder_identity = Some(String::new());
+        spec.renew_time = None;
+        self.write(lease, spec).await.map(|_| ())
+    }
 }
 
 /// Blocks until this replica holds the lease.
 pub async fn acquire(lease: &LeaseLock, retry: Duration) {
     loop {
         match lease.try_acquire_or_renew().await {
-            Ok(LeaseLockResult::Acquired(_)) => return,
-            Ok(LeaseLockResult::NotAcquired(_)) => {}
+            Ok(true) => return,
+            Ok(false) => {}
             Err(err) => tracing::error!(error = %err, "leader lease acquisition failed, retrying"),
         }
         tokio::time::sleep(retry).await;
@@ -105,11 +240,10 @@ pub async fn acquire(lease: &LeaseLock, retry: Duration) {
 pub async fn hold(lease: &LeaseLock, renew: Duration, ttl: Duration) -> String {
     hold_with(
         || async {
-            match lease.try_acquire_or_renew().await {
-                Ok(LeaseLockResult::Acquired(_)) => Ok(true),
-                Ok(LeaseLockResult::NotAcquired(_)) => Ok(false),
-                Err(err) => Err(err.to_string()),
-            }
+            lease
+                .try_acquire_or_renew()
+                .await
+                .map_err(|err| err.to_string())
         },
         renew,
         ttl,

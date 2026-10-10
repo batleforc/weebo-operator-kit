@@ -27,10 +27,11 @@ pub struct SecretTarget {
     pub name: String,
     /// Kubernetes `Secret` namespace (Vault: the namespace segment of the
     /// default path). Defaults to the CR's own namespace; required on
-    /// cluster-scoped CRs.
+    /// cluster-scoped CRs. A namespaced CR may only name its own namespace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
-    /// Vault only: explicit KV v2 path under the instance's mount.
+    /// Vault only: explicit KV v2 path under the instance's mount. On a
+    /// namespaced CR it must stay under `<pathPrefix>/<namespace>/`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 }
