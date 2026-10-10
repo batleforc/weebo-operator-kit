@@ -229,6 +229,12 @@ requêtes HTTP.
   lit comme une fuite.
 - Premier run (authentik, 200 `AuthentikGroup`) : 42 MiB au repos, ~20 ms
   de CPU et 9 req/objet, 200 objets convergés en ~1 s, aucune fuite.
+  Forgejo (200 `ForgejoOrganization`) : 33 MiB au repos, 5-8 ms de CPU et
+  6 req/objet. L'écart vient du squelette de controller : forgejo filtre
+  sa watch (prédicats generation/annotations/finalizers) et réconcilie
+  une fois par création, authentik deux (le patch de son finalizer et de
+  son status relancent un reconcile), et relit le Secret du token à chaque
+  réconciliation — argument de plus pour l'itération 3.
   Il a révélé deux défauts du kit, corrigés : les métriques exportées en
   `…_reconcile_total_total` / `…_duration_seconds_seconds` (l'exporter
   Prometheus ajoute lui-même `_total` et l'unité), et les buckets OTel par
