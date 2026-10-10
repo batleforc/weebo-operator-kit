@@ -178,6 +178,24 @@ Issu de la revue « prod ready » de weebo-forgejo :
    (`lastTransitionTime`, `observedGeneration`) + Event à chaque
    changement de `Ready` (RBAC `events.k8s.io` ajouté au chart).
 
+### v0.4.0 — des Events pour chaque erreur et chaque changement d'état
+
+- `weebo_kit_runtime::events`, après le patch de status :
+  `announce_outcome` remplace `announce_ready_change` — un `Warning` à
+  **chaque** reconcile finissant sur `Ready: False` (plus seulement aux
+  transitions), un `Normal` quand `Ready` redevient `True` et pour chaque
+  autre condition qui apparaît, change ou disparaît.
+- `announce_change` : un `Normal` pour une étape que les conditions ne
+  portent pas (objet distant créé, supprimé par le finalizer…).
+- `announce_error`/`spawn_error` : les erreurs qui arrêtent un reconcile
+  avant le status (appel API, finalizer, cleanup), depuis l'`error_policy`
+  (actions `Reconcile`/`Cleanup`).
+- Le `Recorder` de kube regroupe les répétitions en série : un seul
+  `Recorder` partagé par opérateur.
+- Le kit ne définit toujours aucun code : l'opérateur passe les siens
+  (authentik : `KubernetesApiError`, `Created`, `Deleted` ajoutés).
+- Additif : `announce_ready_change` reste (forgejo l'utilise encore).
+
 ### Itération 3 — généraliser l'application
 
 Candidats identifiés dans forgejo, à rendre génériques une fois

@@ -50,7 +50,9 @@ pub fn conditions<R: Reason>(
 }
 
 /// Emits an Event when `Ready`'s status or reason changed between the
-/// `previous` and `current` condition lists. An Event is a courtesy:
+/// `previous` and `current` condition lists — transitions only; prefer
+/// [`crate::events::announce_outcome`], which also warns on every repeated
+/// failure. An Event is a courtesy:
 /// failing to record one is logged, never returned (it must not fail a
 /// reconcile whose status patch already succeeded).
 pub async fn announce_ready_change(
