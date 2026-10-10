@@ -132,30 +132,51 @@ Issu de la revue « prod ready » de weebo-forgejo :
   sur `WEEBO_METRICS_ADDR` (`serve_metrics`), logs JSON (`LOG_FORMAT=json`).
   OpenTelemetry 0.33.
 
-### Itération 2 — weebo-authentik
+### v0.3.0 — adoption des Secrets d'avant le label
 
-À faire, dans l'ordre (chaque étape compile et passe ses tests seule) :
+- `K8sSecretStore` adopte aussi un Secret **sans label ni annotation**
+  dont les `managedFields` montrent que le field manager de l'opérateur a
+  écrit son `data` : les Secrets émis avant que l'opérateur ne pose le
+  label `managed-by` (authentik ≤ 0.15, SSA nu) sont repris au lieu d'être
+  vus comme étrangers.
+- `VaultConfig::ca_source_of(secret_ref, pem)` : la `ca_source`
+  (`namespace/name/key@sha256:…`) que chaque opérateur recalculait.
+- Non cassant pour forgejo (ajouts seulement).
 
-1. `testkit`, `telemetry`, `Shutdown`, serveur webhook, leader election :
-   remplacement direct (authentik a une boucle de renouvellement plus
-   simple — celle du kit tolère les échecs transitoires et rend la main
-   avant l'expiration du lease).
-2. `ReasonCode` via `reason_codes!` + `Reason` ; `Condition` du kit dans
-   `AuthentikStatus` (schéma identique).
-3. `SecretKeyRef`, `TlsOptions`, `SecretStoreBackend` du kit ; `VaultConfig`
-   construit depuis `VaultSecretStoreSpec` d'authentik. **Comparer le
-   `secret_vault.rs` d'authentik (372 lignes) avec celui du kit** et
-   reprendre ce qu'il a de plus avant de le supprimer.
-4. Port `SecretStore` : authentik a une méthode spécifique
-   (`write_oauth2_credentials`). La réécrire au-dessus du `SecretStore`
-   générique (`write` d'une map de clés) — et décider si
-   `secretTargets` multiples est exposé dans ses CRD (changement de CRD).
-5. Allow-list : moteur du kit sans dimension. Changement de comportement
-   à annoncer : les motifs de namespace `team-*` deviennent des globs
-   (authentik ne faisait que de l'égalité stricte) et le message de refus
-   change.
-6. `ReconcileMetrics` et conditions/Events du kit : les noms de métriques
-   d'authentik (`weebo_authentik_*`) sont conservés par le préfixe.
+### Itération 2 — weebo-authentik (faite, sur le kit v0.3.0)
+
+1. `testkit` (envtest/polling du kit, `testkit::envtest::start()` garde le
+   chemin `deploy/crd/`), `telemetry`, `Shutdown`, serveur webhook (TLS
+   rechargé, drain, désactivé sans certificat), `health`
+   (`/readyz`/`/livez`, probes HTTPS du chart), leader election du kit
+   (plus de `kube-leader-election`), jauge `weebo_authentik_leader`.
+   OpenTelemetry 0.32 → 0.33.
+2. `ReasonCode` via `reason_codes!` + `Reason` (catalogue inchangé) ;
+   `Condition` du kit dans `AuthentikStatus` (schéma identique, seule la
+   description de `reason` change).
+3. `SecretKeyRef`, `TlsOptions`, `SecretStoreBackend` du kit ;
+   `VaultConfig` construit depuis le `VaultSecretStoreSpec` d'authentik
+   (défaut `pathPrefix: weebo-authentik` conservé côté opérateur).
+   Le `secret_vault.rs` d'authentik n'avait rien de plus que celui du kit
+   (qui ajoute timeout, propriétaire, re-login hors verrou, rejeu des
+   échecs) : supprimé, avec `secret_k8s.rs`, `secret_fanout.rs` et leur
+   contrat wiremock (couvert par celui du kit).
+4. Port `SecretStore` du kit : `write_oauth2_credentials` devient
+   `Oauth2Credentials::to_secret_data()` + `emit::write_all` ;
+   `RoutingSecretStore::lazy` par instance. **CRD cassant** :
+   `AuthentikApplication.spec.secretTargets` prend le `SecretTarget` du
+   kit (`name` requis, `namespace` ajouté, `backend` par défaut
+   `kubernetes`). Propriété des secrets : label
+   `app.kubernetes.io/managed-by: weebo-authentik`, annotation
+   `authentik.weebo.io/owner` ; un `path` Vault explicite doit rester
+   sous `<pathPrefix>/<namespace>/`.
+5. Allow-list : moteur du kit sans dimension. Changements de
+   comportement : motifs `team-*`/`*` en glob, message de refus
+   `no AuthentikNamespacePolicy rule allows <Kind> in namespace "<ns>"`.
+6. `ReconcileMetrics` (`weebo_authentik_reconcile_*` conservés ; label
+   `result` : `synced`/`errored` → `success`/`error`) et conditions du kit
+   (`lastTransitionTime`, `observedGeneration`) + Event à chaque
+   changement de `Ready` (RBAC `events.k8s.io` ajouté au chart).
 
 ### Itération 3 — généraliser l'application
 

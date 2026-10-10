@@ -8,8 +8,9 @@
 //! owner annotation naming the emitting CR ([`SecretOwner::id`]). A Secret
 //! without them — created by someone else — is never overwritten nor
 //! deleted, nor is one owned by another CR. Secrets emitted before the
-//! owner annotation existed (label only) are adopted by the first CR
-//! writing them.
+//! owner annotation existed (label only), or before the label existed
+//! (neither, but written under the operator's field manager), are adopted
+//! by the first CR writing them.
 
 use std::collections::BTreeMap;
 
@@ -27,12 +28,12 @@ pub const MANAGED_BY_LABEL: &str = "app.kubernetes.io/managed-by";
 
 pub struct K8sSecretStore {
     client: Client,
-    field_manager: &'static str,
     marks: Marks,
 }
 
-/// The label and annotation telling who emitted a `Secret`.
+/// The field manager, label and annotation telling who emitted a `Secret`.
 struct Marks {
+    field_manager: &'static str,
     managed_by: &'static str,
     owner_annotation: &'static str,
 }
@@ -59,8 +60,8 @@ impl K8sSecretStore {
     ) -> Self {
         Self {
             client,
-            field_manager,
             marks: Marks {
+                field_manager,
                 managed_by,
                 owner_annotation,
             },
@@ -99,8 +100,26 @@ impl Marks {
             (Some(by), Some(id)) if by == self.managed_by && *id == owner.id() => Ownership::Owned,
             (Some(by), None) if by == self.managed_by => Ownership::Owned,
             (Some(by), Some(id)) if by == self.managed_by => Ownership::Foreign(id.clone()),
+            (None, None) if self.written_by_us(secret) => Ownership::Owned,
             _ => Ownership::Foreign("not managed by this operator".to_string()),
         }
+    }
+
+    /// Unlabelled, but last written under this operator's field manager:
+    /// emitted by a release that didn't label its Secrets yet.
+    fn written_by_us(&self, secret: &Secret) -> bool {
+        secret
+            .metadata
+            .managed_fields
+            .iter()
+            .flatten()
+            .any(|entry| {
+                entry.manager.as_deref() == Some(self.field_manager)
+                    && entry
+                        .fields_v1
+                        .as_ref()
+                        .is_some_and(|fields| fields.0.get("f:data").is_some())
+            })
     }
 
     fn desired(
@@ -161,7 +180,7 @@ impl SecretStore for K8sSecretStore {
             None => api
                 .create(
                     &PostParams {
-                        field_manager: Some(self.field_manager.to_string()),
+                        field_manager: Some(self.marks.field_manager.to_string()),
                         ..Default::default()
                     },
                     &desired,
@@ -204,7 +223,7 @@ impl SecretStore for K8sSecretStore {
                     api.replace(
                         &target.name,
                         &PostParams {
-                            field_manager: Some(self.field_manager.to_string()),
+                            field_manager: Some(self.marks.field_manager.to_string()),
                             ..Default::default()
                         },
                         &updated,
@@ -264,10 +283,13 @@ impl SecretStore for K8sSecretStore {
 
 #[cfg(test)]
 mod tests {
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::{FieldsV1, ManagedFieldsEntry};
+
     use super::*;
 
     fn marks() -> Marks {
         Marks {
+            field_manager: "op-operator",
             managed_by: "op",
             owner_annotation: "example.io/owner",
         }
@@ -300,6 +322,44 @@ mod tests {
         assert!(!owned(&secret(Some("op"), Some("Token/ns/other"))));
         assert!(!owned(&secret(None, None)));
         assert!(!owned(&secret(Some("helm"), Some("Token/ns/app"))));
+    }
+
+    fn with_manager(mut secret: Secret, manager: &str, fields: serde_json::Value) -> Secret {
+        secret.metadata.managed_fields = Some(vec![ManagedFieldsEntry {
+            manager: Some(manager.into()),
+            fields_v1: Some(FieldsV1(fields)),
+            ..Default::default()
+        }]);
+        secret
+    }
+
+    #[test]
+    fn unlabelled_secrets_of_our_field_manager_are_adopted() {
+        let m = marks();
+        let owned = |s: &Secret| m.ownership(s, &OWNER) == Ownership::Owned;
+        let data = serde_json::json!({"f:data": {"f:k": {}}});
+        assert!(owned(&with_manager(
+            secret(None, None),
+            "op-operator",
+            data.clone()
+        )));
+        assert!(!owned(&with_manager(
+            secret(None, None),
+            "kubectl",
+            data.clone()
+        )));
+        // Our manager only touched the metadata: not a Secret we emitted.
+        assert!(!owned(&with_manager(
+            secret(None, None),
+            "op-operator",
+            serde_json::json!({"f:metadata": {}})
+        )));
+        // Another CR's annotation still wins over the field manager.
+        assert!(!owned(&with_manager(
+            secret(None, Some("Token/ns/other")),
+            "op-operator",
+            data
+        )));
     }
 
     #[test]

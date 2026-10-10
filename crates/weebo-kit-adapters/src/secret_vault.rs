@@ -8,11 +8,13 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
 use vaultrs::api::kv2::requests::SetSecretMetadataRequest;
 use vaultrs::client::{Client as _, VaultClient, VaultClientSettingsBuilder};
 use vaultrs::error::ClientError;
 use vaultrs::{auth::kubernetes, kv2};
+use weebo_kit_api::SecretKeyRef;
 use weebo_kit_application::ports::SecretStoreError;
 
 /// The operator's projected ServiceAccount token, exchanged for a Vault
@@ -34,6 +36,20 @@ pub struct VaultConfig {
     /// Only compared: a change forces a new login with the new CA, so it
     /// must change when the bundle's content does.
     pub ca_source: Option<String>,
+}
+
+impl VaultConfig {
+    /// The [`ca_source`](Self::ca_source) of a CA bundle read from
+    /// `secret_ref`: `namespace/name/key@sha256:<digest of pem>`.
+    pub fn ca_source_of(secret_ref: &SecretKeyRef, pem: &[u8]) -> String {
+        format!(
+            "{}/{}/{}@sha256:{:x}",
+            secret_ref.namespace,
+            secret_ref.name,
+            secret_ref.key,
+            Sha256::digest(pem)
+        )
+    }
 }
 
 /// Per-request budget for every Vault call, login included.
@@ -434,6 +450,18 @@ mod tests {
         );
         assert_eq!(cache_ttl_from_lease(0, true), None);
         assert_eq!(cache_ttl_from_lease(100, false), None);
+    }
+
+    #[test]
+    fn ca_source_changes_with_the_bundle() {
+        let r = SecretKeyRef {
+            name: "ca".into(),
+            namespace: "vault".into(),
+            key: "ca.crt".into(),
+        };
+        let a = VaultConfig::ca_source_of(&r, b"one");
+        assert!(a.starts_with("vault/ca/ca.crt@sha256:"), "{a}");
+        assert_ne!(a, VaultConfig::ca_source_of(&r, b"two"));
     }
 
     #[test]
