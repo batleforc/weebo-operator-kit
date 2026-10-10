@@ -1,0 +1,18 @@
+[package]
+name = "weebo-kit-perf"
+description = "Resource and performance harness shared by the weebo operators: runs the operator binary against envtest, samples its process and metrics, checks a resource budget"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+http = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+weebo-kit-testkit = { workspace = true }

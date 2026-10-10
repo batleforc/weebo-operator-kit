@@ -39,6 +39,7 @@ métier).
 | `weebo-kit-adapters`    | outbound     | kit-application, kube, vaultrs| `K8sSecretStore`, `VaultSecretStore` + `VaultLogins`, `RoutingSecretStore`, `read_secret_key`   |
 | `weebo-kit-runtime`     | inbound/bin  | kit-domain, kit-api, kube     | télémétrie, leader election, `Shutdown`, serveur webhook TLS, métriques, conditions + Events    |
 | `weebo-kit-testkit`     | tests        | envtest, kube                 | `EnvTestCluster::start(crd_dir)`, `wait_for`/`wait_for_absence`                                 |
+| `weebo-kit-perf`        | tests        | kit-testkit, kube             | `PerfRun` (binaire release contre envtest), `/proc`, métriques, `Budget::small_cluster`          |
 
 ## Ce qui va dans le kit (et ce qui n'y va pas)
 
@@ -195,6 +196,51 @@ Issu de la revue « prod ready » de weebo-forgejo :
 - Le kit ne définit toujours aucun code : l'opérateur passe les siens
   (authentik : `KubernetesApiError`, `Created`, `Deleted` ajoutés).
 - Additif : `announce_ready_change` reste (forgejo l'utilise encore).
+
+### v0.5.0 — ce que coûte un opérateur (`weebo-kit-perf`)
+
+But : pouvoir ajouter un opérateur sur un petit cluster sans se demander
+ce qu'il va prendre. Inspiré du soak/profil de batlehub (#195), ramené à
+ce qui compte pour un opérateur — la charge, ce sont des CR, pas des
+requêtes HTTP.
+
+- `PerfRun` lance le **binaire release** de l'opérateur contre envtest
+  (sans webhook), attend le bail de leader (temps de démarrage), mesure
+  chaque phase puis SIGTERM (temps d'arrêt).
+- Par phase : RSS (médiane, pic, pente MiB/min), CPU (moyenne, pic, en
+  millicores), descripteurs, threads (`/proc/<pid>`), réconciliations
+  et erreurs, p95 de `<prefix>_reconcile_duration_seconds`, requêtes à
+  l'apiserver de l'opérateur (`apiserver_request_total`, celles du harnais
+  retirées), temps de convergence des objets.
+- Forme du run, comme le soak de batlehub : warm-up → repos `baseline` →
+  charges → repos `final`. Les fuites (RSS, fds, threads) se jugent entre
+  les deux fenêtres **au repos**, la baseline prise après le warm-up.
+- Le trafic propre de l'apiserver d'envtest (son bail d'identité, les
+  endpoints `kubernetes`…) est mesuré avant le lancement de l'opérateur
+  et retiré de chaque phase ; la ventilation `verbe ressource` des
+  requêtes est dans le rapport (c'est elle qui dit d'où vient un dépassement).
+- `Budget::small_cluster()` : repos < 64 MiB et 10 m, pic < 192 MiB,
+  ≤ 60 req/min au repos (le bail de leader en coûte ~24), ≤ 20 req/objet,
+  ≤ 50 ms de CPU/objet, convergence ≤ 60 s/100 objets, p95 ≤ 2 s,
+  croissance RSS au repos ≤ 10 %, +16 fds, +4 threads. Chaque opérateur
+  peut ajuster le sien.
+- Le warm-up est un cycle complet de la taille de la charge mesurée :
+  sinon le remplissage des pools (connexions, arènes) au cycle suivant se
+  lit comme une fuite.
+- Premier run (authentik, 200 `AuthentikGroup`) : 42 MiB au repos, ~20 ms
+  de CPU et 9 req/objet, 200 objets convergés en ~1 s, aucune fuite.
+  Il a révélé deux défauts du kit, corrigés : les métriques exportées en
+  `…_reconcile_total_total` / `…_duration_seconds_seconds` (l'exporter
+  Prometheus ajoute lui-même `_total` et l'unité), et les buckets OTel par
+  défaut (0, 5, 10… s) qui rangeaient toute réconciliation dans le
+  premier et faisaient lire un p95 de ~5 s.
+- Rapport Markdown + JSON dans `target/perf/`, comparaison report-only
+  avec un JSON précédent (`WEEBO_PERF_BASELINE`), `assert_within` qui
+  échoue au-delà du budget (`WEEBO_PERF_REPORT_ONLY=1` pour seulement
+  rapporter).
+- Pas encore : profil CPU (flamegraphs), recherche du point de rupture,
+  workflow CI réutilisable qui commente la PR (comme `profile.yaml`/
+  `soak.yaml` de batlehub).
 
 ### Itération 3 — généraliser l'application
 

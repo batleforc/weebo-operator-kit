@@ -4045,6 +4045,20 @@ name = "weebo-kit-domain"
 version = "0.4.0"
 
 [[package]]
+name = "weebo-kit-perf"
+version = "0.4.0"
+dependencies = [
+ "http",
+ "k8s-openapi",
+ "kube",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "weebo-kit-testkit",
+]
+
+[[package]]
 name = "weebo-kit-runtime"
 version = "0.4.0"
 dependencies = [

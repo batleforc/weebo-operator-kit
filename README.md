@@ -18,6 +18,7 @@ logic, in the same hexagonal layout the operators use.
 | `weebo-kit-adapters`    | Kubernetes and Vault (Kubernetes auth, KV v2) secret stores, per-target routing                                           |
 | `weebo-kit-runtime`     | telemetry (OTLP + Prometheus), leader election, health probes, graceful shutdown, TLS webhook server, metrics, conditions |
 | `weebo-kit-testkit`     | envtest control plane, status polling                                                                                     |
+| `weebo-kit-perf`        | what the operator costs: its release binary against envtest, RSS/CPU/fds/threads, API traffic, convergence, a budget     |
 
 Design, scope rules, versioning and the migration roadmap:
 [`docs/plan.md`](docs/plan.md).

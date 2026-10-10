@@ -7,6 +7,7 @@ members = [
     "crates/weebo-kit-adapters",
     "crates/weebo-kit-runtime",
     "crates/weebo-kit-testkit",
+    "crates/weebo-kit-perf",
 ]
 
 [workspace.package]
@@ -22,6 +23,7 @@ weebo-kit-api = { path = "crates/weebo-kit-api" }
 weebo-kit-application = { path = "crates/weebo-kit-application" }
 weebo-kit-adapters = { path = "crates/weebo-kit-adapters" }
 weebo-kit-runtime = { path = "crates/weebo-kit-runtime" }
+weebo-kit-testkit = { path = "crates/weebo-kit-testkit" }
 
 # Same versions as the operators using the kit: a mismatch would link two
 # copies of `kube`/`k8s-openapi` and the types wouldn't line up.
@@ -53,6 +55,7 @@ uuid = { version = "1", features = ["v4"] }
 futures = "0.3"
 envtest = "0.3"
 sha2 = "0.10"
+http = "1"
 
 [profile.test]
 debug = false
