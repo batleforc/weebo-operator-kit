@@ -1,0 +1,79 @@
+# weebo-operator-kit's shared Rust tasks: lint, audit, coverage and the
+# envtest prerequisites. An operator includes them remotely, pinned to the
+# kit tag of its Cargo.toml and to the file's sha256 (`task kit:sync`
+# rewrites both):
+#
+#   includes:
+#     rust:
+#       taskfile: https://raw.githubusercontent.com/batleforc/weebo-operator-kit/vX.Y.Z/tasks/rust.yaml
+#       checksum: <sha256>
+#       vars: { COVERAGE_IGNORE: '(testkit|/tests/)' }
+#
+# Tasks run from the operator's root; tools come from its mise.toml.
+version: "3"
+
+vars:
+  # `task rust:doctor`: tools checked on top of the envtest ones.
+  DOCTOR_TOOLS: '{{.DOCTOR_TOOLS | default ""}}'
+  # `task rust:coverage`.
+  COVERAGE_IGNORE: '{{.COVERAGE_IGNORE | default "(testkit|test_support|/tests/)"}}'
+  COVERAGE_FAIL_UNDER: '{{.COVERAGE_FAIL_UNDER | default "85"}}'
+  # A dotenv file sourced before the run when present (live-test
+  # credentials), and the variables that must be set after it.
+  COVERAGE_ENV_FILE: '{{.COVERAGE_ENV_FILE | default ""}}'
+  COVERAGE_REQUIRE_ENV: '{{.COVERAGE_REQUIRE_ENV | default ""}}'
+
+tasks:
+  lint:
+    desc: "cargo fmt --check + clippy -D warnings on the whole workspace"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - mise exec -- cargo fmt --check
+      - mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+
+  audit:
+    desc: "Dependency CVEs: cargo-deny (advisories, licenses, sources — deny.toml), then trivy on Cargo.lock as a second opinion"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - mise exec -- cargo deny check
+      - mise exec -- trivy fs --scanners vuln --exit-code 1 --severity HIGH,CRITICAL Cargo.lock
+
+  coverage:
+    desc: "Line coverage of every test target, ignored tests included (cargo llvm-cov), failing under COVERAGE_FAIL_UNDER %; writes target/lcov.info"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - |
+        set -eu
+        env_file="{{.COVERAGE_ENV_FILE}}"
+        if [ -n "$env_file" ] && [ -f "$env_file" ]; then set -a; . "./$env_file"; set +a; fi
+        for name in {{.COVERAGE_REQUIRE_ENV}}; do
+          eval "test -n \"\${$name:-}\"" || { echo "$name is not set (export it${env_file:+ or write it to $env_file})" >&2; exit 1; }
+        done
+        mise exec -- cargo llvm-cov clean --workspace
+        # --include-ignored: the live suites are #[ignore] for `task test`.
+        # The perf test runs for its coverage only: an instrumented debug
+        # binary can't be held to the release budget (`task perf`).
+        WEEBO_PERF_REPORT_ONLY=1 mise exec -- cargo llvm-cov --no-report --workspace --all-targets --no-fail-fast -- --include-ignored
+        mise exec -- cargo llvm-cov report --ignore-filename-regex '{{.COVERAGE_IGNORE}}' --lcov --output-path target/lcov.info
+        mise exec -- cargo llvm-cov report --ignore-filename-regex '{{.COVERAGE_IGNORE}}' --summary-only --fail-under-lines {{.COVERAGE_FAIL_UNDER}}
+
+  doctor:
+    desc: "Check the local setup envtest needs (Go, libclang, control-plane binaries), DOCTOR_TOOLS and the git hooks"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - |
+        ok=true
+        check() { if eval "$2" >/dev/null 2>&1; then echo "  [ok]   $1"; else echo "  [FAIL] $1 — $3"; ok=false; fi; }
+        check "go"              "mise exec -- go version"                    "mise install"
+        check "etcd"            "mise exec -- etcd --version"                "mise install"
+        check "kube-apiserver"  "mise exec -- kube-apiserver --version"      "mise install"
+        check "libclang.so"     "ls ${LIBCLANG_PATH:-/usr/lib64}/libclang.so*" "install clang-libs (or libclang-dev) and set LIBCLANG_PATH"
+        for tool in {{.DOCTOR_TOOLS}}; do
+          check "$tool" "mise which $tool" "mise install"
+        done
+        if [ -f .git/hooks/pre-commit ] && [ -f .git/hooks/commit-msg ]; then
+          echo "  [ok]   git hooks"
+        else
+          echo "  [warn] git hooks not installed — task init (cog install-hook -a -o)"
+        fi
+        $ok

@@ -1,0 +1,12 @@
+# Accepted findings of `task audit` (trivy), each scoped and justified.
+misconfigurations:
+  - id: KSV-0041
+    paths:
+      - deploy/charts/{{project-name}}/templates/operator.yaml
+    statement: >-
+      The operator writes the credentials its CRs emit into the namespaces
+      their secret targets name, and reads the Secrets they reference
+      (an instance's token): cluster-wide Secret access is the feature.
+      Secrets are read by name, never listed or watched, and only replaced
+      or deleted when the operator owns them (the kit's managed-by label
+      and owner annotation).

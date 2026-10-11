@@ -1,9 +1,10 @@
 #!/bin/sh
 # cog.toml pre_bump_hooks entry — keeps every version in the repo in
 # lockstep with the tag cocogitto is about to create: Cargo.toml's
-# [workspace.package] version (the crates inherit it) and
+# [workspace.package] version (the crates inherit it),
 # packages/operator-docs' package.json (its release tarball is named after
-# it). cog stages nothing by itself here, so the edited files are added
+# it), the library chart's version, and the operator template's pins on
+# the kit (crates, tasks/ checksums, workflows, library chart). cog stages nothing by itself here, so the edited files are added
 # explicitly to land inside cog's bump commit.
 set -e
 
@@ -31,3 +32,12 @@ git add Cargo.toml Cargo.lock
 # package.json + its package-lock.json, nothing else (no git tag from npm).
 (cd packages/operator-docs && npm version "$VERSION" --no-git-tag-version --allow-same-version >/dev/null)
 git add packages/operator-docs/package.json packages/operator-docs/package-lock.json
+
+# The library chart, published under that version.
+sed -i -E "s/^version: .*/version: $VERSION/" charts/weebo-operator-lib/Chart.yaml
+git add charts/weebo-operator-lib/Chart.yaml
+
+# A new operator starts on the release it was generated from; the tasks/
+# checksums are this tree's, the one being tagged.
+./templates/pin-kit.sh templates/operator "v$VERSION" .
+git add templates/operator

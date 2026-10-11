@@ -1,0 +1,43 @@
+# weebo-operator-kit's shared repository checks: CI workflows,
+# Containerfiles, the docs site's npm dependencies. Included remotely like
+# tasks/rust.yaml:
+#
+#   includes:
+#     repo:
+#       taskfile: https://raw.githubusercontent.com/batleforc/weebo-operator-kit/vX.Y.Z/tasks/repo.yaml
+#       checksum: <sha256>
+#       vars: { CONTAINERFILES: "Containerfile Containerfile.hardened", NPM_DIR: docs }
+version: "3"
+
+vars:
+  # Space-separated; none skips the Containerfile checks.
+  CONTAINERFILES: '{{.CONTAINERFILES | default ""}}'
+  # trivy config's ignore file, used when present.
+  TRIVY_IGNOREFILE: '{{.TRIVY_IGNOREFILE | default ".trivyignore.yaml"}}'
+  # A directory with a package-lock.json (the docs site); none skips npm.
+  NPM_DIR: '{{.NPM_DIR | default ""}}'
+
+tasks:
+  lint:
+    desc: "actionlint on .github/workflows, hadolint on CONTAINERFILES"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - mise exec -- actionlint
+      - for: { var: CONTAINERFILES }
+        cmd: mise exec -- hadolint {{.ITEM}}
+
+  audit:
+    desc: "Shipped npm dependencies of NPM_DIR (npm audit --omit=dev) and misconfigurations of CONTAINERFILES (trivy config)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      # From package-lock.json alone; dev tooling never reaches the built
+      # site.
+      - '{{if .NPM_DIR}}mise exec -- npm audit --prefix {{.NPM_DIR}} --omit=dev --audit-level=high{{else}}true{{end}}'
+      # Root user, unpinned bases... Image *contents* need a built image:
+      # the publish workflow scans what it pushes.
+      - for: { var: CONTAINERFILES }
+        cmd: >-
+          ignore=""; if [ -f "{{.TRIVY_IGNOREFILE}}" ]; then ignore="--ignorefile {{.TRIVY_IGNOREFILE}}"; fi;
+          mise exec -- trivy config --exit-code 1 --severity HIGH,CRITICAL $ignore
+          --skip-dirs '**/node_modules' --skip-dirs '**/target'
+          --file-patterns 'dockerfile:{{base .ITEM}}' {{dir .ITEM}}

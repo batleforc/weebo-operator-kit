@@ -1,0 +1,55 @@
+name: CI
+
+# GitHub Actions syntax kept compatible with Forgejo Actions: no marketplace
+# action without a Forgejo equivalent, every tool comes from mise.toml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+jobs:
+  # weebo-operator-kit's checks: task lint, test:all, audit, lint:helm.
+  checks:
+    uses: batleforc/weebo-operator-kit/.github/workflows/checks.yml@v0.8.0
+    permissions:
+      contents: read
+    with:
+      test-task: "test:all"
+      helm-task: "lint:helm"
+
+  regen-and-diff:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      - run: mise install
+      # The CRDs and their chart copies are committed and must never drift
+      # from the Rust types.
+      - run: mise exec -- task recu --force
+      - name: Fail if committed generated files are stale
+        run: |
+          git diff --exit-code deploy/
+          # A generated file that's new must be committed too.
+          test -z "$(git status --porcelain deploy/crd deploy/charts/*/templates)"
+
+  image-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Build-only proof that the image builds; publishing is a release
+      # workflow's job.
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: Containerfile
+          push: false

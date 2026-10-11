@@ -1,0 +1,25 @@
+[package]
+name = "adapters-inbound"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+domain = { workspace = true }
+api = { workspace = true }
+application = { workspace = true }
+axum = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+weebo-kit-runtime = { workspace = true }
+
+[dev-dependencies]
+testkit = { workspace = true }
+weebo-kit-api = { workspace = true }
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }

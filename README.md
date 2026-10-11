@@ -26,6 +26,16 @@ Plus one npm package for the operators' documentation sites:
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | [`@weebo/operator-docs`](packages/operator-docs/README.md) | CRD reference generator (`weebo-crd-docs`), manifest builder, BatleHub theme, layouts, routes |
 
+And what the operators kept copying around the code:
+
+| Path                                                       | What it gives an operator                                                                  |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [`charts/weebo-operator-lib`](charts/weebo-operator-lib/README.md) | Library chart (`oci://ghcr.io/batleforc/charts`): every chart resource but the CRDs, from one parameter set |
+| `tasks/{rust,helm,repo}.yaml`                              | Shared Taskfiles, included remotely and pinned by checksum: lint, audit, coverage, doctor, chart lint/CRDs |
+| `.github/workflows/checks.yml`                             | Reusable CI: lint, test, audit, chart lint (`perf.yml`: the weekly resource budget)        |
+| `templates/operator`                                       | `cargo-generate` template of a new operator, wired on all of the above                     |
+| `templates/{cog.toml,kit.yaml,pin-kit.sh}`                 | `cog.toml`, `task kit:cog` and `task kit:sync TAG=vX.Y.Z` (every pin on a kit release)     |
+
 Design, scope rules, versioning and the migration roadmap:
 [`docs/plan.md`](docs/plan.md).
 
@@ -41,6 +51,12 @@ weebo-kit-runtime = { git = "https://github.com/batleforc/weebo-operator-kit", t
 
 Keep `kube` and `k8s-openapi` on the kit's versions.
 
+A new operator starts from the template:
+
+```bash
+cargo generate --git https://github.com/batleforc/weebo-operator-kit --tag vX.Y.Z templates/operator
+```
+
 ```json
 // operator's docs/package.json: the tarball attached to the kit's release
 "@weebo/operator-docs": "https://github.com/batleforc/weebo-operator-kit/releases/download/vX.Y.Z/weebo-operator-docs-X.Y.Z.tgz"
@@ -51,8 +67,9 @@ Keep `kube` and `k8s-openapi` on the kit's versions.
 ```bash
 task init     # toolchain (mise) + git hooks (cocogitto)
 task doctor   # envtest prerequisites (Go, libclang, etcd, kube-apiserver)
-task lint     # fmt --check, clippy -D warnings, actionlint
+task lint     # fmt --check, clippy -D warnings, actionlint, library chart (chart:check)
 task test     # unit + contract tests + doctests
+task test:all # + the operator template rendered, built and tested (template:check)
 task audit    # cargo-deny + trivy + npm audit (operator-docs)
 task doc      # rustdoc
 task docs:check  # operator-docs: version sync, tsc, generator tests

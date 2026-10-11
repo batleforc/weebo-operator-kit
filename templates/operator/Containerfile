@@ -1,0 +1,44 @@
+# ── Build stage ───────────────────────────────────────────────────────────────
+# The workspace is rustls end to end (kube's rustls-tls, reqwest's `rustls`
+# feature) — no OpenSSL needed at build or run time.
+FROM rust:1-slim-bookworm@sha256:2c3a22f0a5533ea2dd5a16627bc841228151faa2d4de2644ac9987e4a2f1f2fa AS builder
+
+WORKDIR /build
+
+# Cache dependency compilation separately from source changes: manifests
+# first, every crate stubbed, deps built, then the real sources.
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+RUN find crates -name '*.rs' -delete && \
+    for crate in crates/*/; do \
+      mkdir -p "$crate/src" && echo "pub fn _stub() {}" > "$crate/src/lib.rs"; \
+    done && \
+    for bin in operator crdgen; do echo "fn main() {}" > "crates/$bin/src/main.rs"; done
+
+# --locked: build exactly what Cargo.lock resolves. Failure is tolerated
+# here only because stubs may not satisfy every crate; the real build below
+# is the one that gates.
+RUN cargo build --locked --release -p operator 2>/dev/null; exit 0
+
+COPY crates/ crates/
+RUN find crates -name '*.rs' -exec touch {} + && \
+    cargo build --locked --release -p operator
+
+# ── Runtime image ─────────────────────────────────────────────────────────────
+# distroless/cc matches bookworm's glibc ABI and ships ca-certificates — no
+# shell, no package manager, minimal surface for a network-facing webhook.
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f AS runtime
+
+COPY --from=builder /build/target/release/{{project-name}}-operator /usr/local/bin/operator
+
+# 65532 is distroless's `nonroot`. Numeric so Kubernetes can enforce
+# `runAsNonRoot` without resolving names; the Helm chart pins the same UID.
+USER 65532:65532
+
+LABEL org.opencontainers.image.title="{{project-name}}-operator" \
+      org.opencontainers.image.description="Kubernetes operator managing {{product}} objects as CRDs" \
+      org.opencontainers.image.source="https://github.com/batleforc/{{project-name}}" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="batleforc"
+
+ENTRYPOINT ["/usr/local/bin/operator"]

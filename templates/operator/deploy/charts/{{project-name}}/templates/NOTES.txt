@@ -1,0 +1,25 @@
+{% raw %}{{ include "weebo-operator.notes" . }}{% endraw %}
+
+1. Connect a {{product}} with an API token:
+
+     kubectl -n {% raw %}{{ .Release.Namespace }}{% endraw %} create secret generic {{product | downcase}}-admin --from-literal=token=<token>
+
+     kubectl apply -f - <<YAML
+     apiVersion: {{product | downcase}}.weebo.io/v1alpha1
+     kind: {{product}}Instance
+     metadata:
+       name: main
+     spec:
+       url: https://{{product | downcase}}.example.com
+       tokenSecretRef:
+         namespace: {% raw %}{{ .Release.Namespace }}{% endraw %}
+         name: {{product | downcase}}-admin
+         key: token
+     YAML
+
+2. Then declare {{product}}Object resources referencing it
+   (`spec.instanceRef: main`).
+
+Argo CD: paste the health check of the
+{% raw %}{{ include "weebo-operator.fullname" . }}-argocd-health{% endraw %} ConfigMap into argocd-cm under
+`resource.customizations.health.{{product | downcase}}.weebo.io_*`.

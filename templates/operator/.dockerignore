@@ -1,0 +1,4 @@
+target/
+deploy/
+.git/
+.task/

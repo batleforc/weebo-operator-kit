@@ -1,0 +1,93 @@
+version: "3"
+
+includes:
+  mise: ./.tasks/mise.yaml
+  # cog.toml, rendered from weebo-operator-kit's template (task kit:cog),
+  # and the pins on the kit (task kit:sync).
+  kit: ./.tasks/kit.yaml
+  # The kit's shared tasks, pinned to the kit tag of Cargo.toml and to
+  # their sha256: `task kit:sync` rewrites both. `task --offline` runs from
+  # Task's cache.
+  rust:
+    taskfile: https://raw.githubusercontent.com/batleforc/weebo-operator-kit/v0.8.0/tasks/rust.yaml
+    checksum: 75360142235715643265ae41de1f531dda6562a2472e8d9af21ad65f7d753d63
+  repo:
+    taskfile: https://raw.githubusercontent.com/batleforc/weebo-operator-kit/v0.8.0/tasks/repo.yaml
+    checksum: 162d15bf9c41f494efcb6d73e089ac685d23bc98269a41daf62db26534f52f72
+    vars:
+      CONTAINERFILES: Containerfile
+  helm:
+    taskfile: https://raw.githubusercontent.com/batleforc/weebo-operator-kit/v0.8.0/tasks/helm.yaml
+    checksum: 6c19c4aaf796049f50c6a7ce608ac32bb653d7b6030c3baf64794b8d16251de6
+    vars:
+      CHART: deploy/charts/{{project-name}}
+
+# `crates/testkit` builds the `envtest` crate, whose bindgen step needs a
+# real libclang.so and the C headers. Defaults match Fedora's clang-libs +
+# gcc; an exported value wins, even an empty one (CI on Ubuntu sets
+# BINDGEN_EXTRA_CLANG_ARGS="" — libclang-dev finds its own headers there).
+env:
+  LIBCLANG_PATH:
+    sh: echo "${LIBCLANG_PATH-/usr/lib64}"
+  BINDGEN_EXTRA_CLANG_ARGS:
+    sh: echo "${BINDGEN_EXTRA_CLANG_ARGS--I/usr/lib/gcc/x86_64-redhat-linux/16/include -I/usr/include}"
+
+tasks:
+  init:
+    desc: "Install the toolchain (mise), render cog.toml from the kit and install the git hooks"
+    cmds:
+      - task mise:install
+      - task: kit:cog
+
+  doctor:
+    desc: "Check the local dev setup needed by envtest (Go, libclang, control-plane binaries), the chart tools and the git hooks"
+    cmds:
+      - task: rust:doctor
+        vars: { DOCTOR_TOOLS: "helm hadolint cargo-llvm-cov" }
+
+  recu:
+    desc: "Regenerate every committed artifact: the CRDs (crdgen) and their copies in the chart"
+    cmds:
+      - mise exec -- cargo run -q -p crdgen -- --out deploy/crd/
+      # The chart ships the CRDs as templates (Helm never upgrades crds/),
+      # under `crds.install` + `helm.sh/resource-policy: keep`.
+      - task: helm:crds
+
+  lint:
+    desc: "cargo fmt --check + clippy -D warnings, actionlint on CI, hadolint on the Containerfile"
+    cmds:
+      - task: rust:lint
+      - task: repo:lint
+
+  lint:helm:
+    desc: "helm lint + smoke renders of the operator chart (the kit's value combinations)"
+    cmds:
+      - task: helm:lint
+
+  test:
+    desc: "Fast unit + contract tests (lib-level, no cluster)"
+    cmds:
+      # --no-fail-fast: one failing crate must not hide the others' results.
+      - mise exec -- cargo test --workspace --lib --bins --no-fail-fast
+
+  test:integration:
+    desc: "Every test target, including the envtest integration tests under crates/*/tests"
+    cmds:
+      - mise exec -- cargo test --workspace --tests --no-fail-fast
+
+  test:all:
+    desc: "Every test suite: unit/contract + integration"
+    cmds:
+      - task: test
+      - task: test:integration
+
+  coverage:
+    desc: "Line coverage of every test layer (cargo llvm-cov), failing under 85%; writes target/lcov.info"
+    cmds:
+      - task: rust:coverage
+
+  audit:
+    desc: "Check dependencies and the Containerfile for CVE (cargo-deny + trivy)"
+    cmds:
+      - task: rust:audit
+      - task: repo:audit

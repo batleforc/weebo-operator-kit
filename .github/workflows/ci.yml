@@ -8,14 +8,45 @@ on:
     tags: ["v*"]
   pull_request:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  check:
+  # The reusable workflow the operators call, on the kit itself: its
+  # `lint` also checks the library chart through the template's chart.
+  checks:
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read
+    with:
+      # The kit's workspace fits the default runner.
+      free-disk-space: false
+
+  operator-docs:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      - run: mise install node task
+      - run: mise exec -- task docs:check
+
+  # A new operator, rendered from templates/operator on this tree, builds,
+  # lints and passes its tests (envtest included).
+  template:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup
       - uses: ./.github/actions/setup-mise
       - name: Cache cargo registry
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -23,8 +54,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-      # weebo-kit-testkit's envtest has a bindgen step that needs libclang.
+          key: cargo-template-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
       - name: Install libclang
         run: |
           sudo apt-get update
@@ -39,7 +69,4 @@ jobs:
             echo "BINDGEN_EXTRA_CLANG_ARGS="
           } >> "$GITHUB_ENV"
       - run: mise install
-      - run: mise exec -- task lint
-      - run: mise exec -- task test
-      - run: mise exec -- task docs:check
-      - run: mise exec -- task audit
+      - run: mise exec -- task template:check

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: weebo-operator-lib
+description: Library chart shared by the weebo operators' charts (Deployment, RBAC, admission webhook + cert-manager, PDB, metrics, NetworkPolicy).
+type: library
+# The kit's workspace version (.hooks/bump-versions.sh), published to
+# oci://ghcr.io/batleforc/charts by .github/workflows/release.yml.
+version: 0.8.0
+home: https://github.com/batleforc/weebo-operator-kit
+sources:
+  - https://github.com/batleforc/weebo-operator-kit
+maintainers:
+  - name: batleforc
+    url: https://github.com/batleforc

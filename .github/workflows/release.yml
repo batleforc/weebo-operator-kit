@@ -4,7 +4,12 @@ name: Release
 # the tag's GitHub Release (created when missing). That tarball is how the
 # operators' docs sites consume the package:
 #   "@weebo/operator-docs": "https://github.com/batleforc/weebo-operator-kit/releases/download/vX.Y.Z/weebo-operator-docs-X.Y.Z.tgz"
-# The crates need nothing here: operators depend on them by git tag.
+# It also pushes the library chart (charts/weebo-operator-lib) to
+# oci://ghcr.io/batleforc/charts, where the operators' charts depend on it:
+#   dependencies:
+#     - { name: weebo-operator-lib, version: X.Y.Z, repository: oci://ghcr.io/batleforc/charts }
+# The crates need nothing here: operators depend on them by git tag, and
+# on tasks/ and the reusable workflows by the tag's URLs.
 on:
   push:
     tags: ["v*"]
@@ -38,3 +43,35 @@ jobs:
             gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
           fi
           gh release upload "$TAG" "$asset" --clobber
+
+  library-chart:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Pushes the chart to ghcr.io.
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      - run: mise install helm
+      - name: Chart version matches the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(awk '/^version:/ {print $2}' charts/weebo-operator-lib/Chart.yaml)"
+          if [ "$version" != "${TAG#v}" ]; then
+            echo "::error::charts/weebo-operator-lib is $version, the tag says ${TAG#v} (.hooks/bump-versions.sh)" >&2
+            exit 1
+          fi
+      - name: Package and push
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$TOKEN" | mise exec -- helm registry login ghcr.io -u "$ACTOR" --password-stdin
+          mise exec -- helm lint charts/weebo-operator-lib
+          mkdir -p dist
+          mise exec -- helm package charts/weebo-operator-lib --destination dist
+          mise exec -- helm push dist/weebo-operator-lib-*.tgz oci://ghcr.io/batleforc/charts

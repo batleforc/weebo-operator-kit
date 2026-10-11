@@ -1,0 +1,25 @@
+apiVersion: v2
+name: {{project-name}}
+description: Kubernetes operator managing {{product}} objects as CRDs.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+# Native `preStop: sleep` and the admission/policy APIs used here.
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/batleforc/{{project-name}}
+sources:
+  - https://github.com/batleforc/{{project-name}}
+keywords:
+  - {{product | downcase}}
+  - operator
+  - kubernetes-operator
+  - crd
+maintainers:
+  - name: batleforc
+    url: https://github.com/batleforc
+dependencies:
+  # Every resource but the CRDs (templates/operator.yaml); its version is
+  # the kit's, as in Cargo.toml (`task kit:sync` keeps them in step).
+  - name: weebo-operator-lib
+    version: 0.8.0
+    repository: oci://ghcr.io/batleforc/charts

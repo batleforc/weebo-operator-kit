@@ -1,0 +1,65 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/api",
+    "crates/application",
+    "crates/adapters-outbound",
+    "crates/adapters-inbound",
+    "crates/operator",
+    "crates/crdgen",
+    "crates/testkit",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+repository = "https://github.com/batleforc/{{project-name}}"
+
+[workspace.dependencies]
+domain = { path = "crates/domain" }
+api = { path = "crates/api" }
+application = { path = "crates/application" }
+adapters-outbound = { path = "crates/adapters-outbound" }
+adapters-inbound = { path = "crates/adapters-inbound" }
+testkit = { path = "crates/testkit" }
+
+# Shared operator kit. To iterate on it locally, temporarily swap the
+# `git`/`tag` pair for `path = "../weebo-operator-kit/crates/<crate>"` —
+# never push with a path dependency (CI and container builds don't see it).
+weebo-kit-domain = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.8.0" }
+weebo-kit-api = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.8.0" }
+weebo-kit-adapters = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.8.0" }
+weebo-kit-runtime = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.8.0" }
+weebo-kit-testkit = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.8.0" }
+
+# Same versions as the kit: a mismatch would link two copies of
+# `kube`/`k8s-openapi` and the types wouldn't line up.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_norway = "0.9"
+thiserror = "2.0"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+kube = { version = "4.0", features = ["derive", "runtime", "client", "unstable-runtime"] }
+k8s-openapi = { version = "0.28", features = ["v1_36", "schemars"] }
+schemars = "1.2"
+axum = "0.8"
+rustls = { version = "0.23", features = ["ring"] }
+wiremock = "0.6"
+opentelemetry = "0.33"
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
+futures = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+
+# Debug info on test binaries balloons target/ across this many crates
+# (envtest alone links kube-apiserver/etcd); CI runners have run out of
+# disk mid-build over this without it.
+[profile.test]
+debug = false

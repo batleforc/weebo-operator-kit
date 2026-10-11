@@ -1,0 +1,17 @@
+# Task internal cache (checksums/fingerprints)
+.task/
+
+# Claude Code per-user local settings
+.claude/settings.local.json
+
+# Build artifacts
+node_modules/
+target/
+dist/
+
+# The kit's library chart, fetched by `task helm:deps` (Chart.lock pins it)
+deploy/charts/*/charts/
+
+# Local env files
+.env
+.env.local

@@ -477,11 +477,67 @@ crates `publish = false`, h2 et rustls montés pour RUSTSEC-2026-0258/
   servent à suivre une tendance d'une semaine à l'autre, le budget reste
   un garde-fou.
 
-### Hors Rust (plus tard)
+### Hors Rust (fait, publié avec la release qui suit v0.8.0)
 
-- Chart Helm : un *library chart* (RBAC, webhook + cert-manager, PDB,
-  ServiceMonitor) consommé par le chart de chaque opérateur.
-- Taskfile : includes distants (`lint`, `audit`, `doctor`, `coverage`).
-- CI : workflows réutilisables (`workflow_call`) pour lint/test/audit.
-- Gabarit `cargo-generate` d'un nouvel opérateur : workspace hexagonal
-  câblé sur le kit, une CRD `XInstance` + une ressource exemple.
+Ce que les opérateurs recopiaient autour du code : chart, tâches, CI, et
+le squelette d'un nouvel opérateur. Même règle que pour les crates : rien
+ne nomme un produit, ce qui varie est un paramètre.
+
+- **Library chart** `charts/weebo-operator-lib` (`type: library`, version
+  = celle du workspace, poussée sur `oci://ghcr.io/batleforc/charts` par
+  `release.yml`). Toutes les ressources d'un chart d'opérateur sauf les
+  CRD : Deployment, ServiceAccount, ClusterRole(+Binding), Role du Lease,
+  Role d'exemple namespacé, Service et `ValidatingWebhookConfiguration`
+  du webhook, Issuer/Certificate cert-manager, PDB, Service de métriques,
+  ServiceMonitor, PrometheusRule (alertes du kit sur ses métriques, noms
+  dérivés du nom du chart), NetworkPolicy, health check Argo CD, en-tête
+  de `NOTES.txt`. Référence = le chart de forgejo : mêmes noms de
+  ressources, même contrat de values ; un chart d'opérateur se réduit à
+  `templates/operator.yaml` (`weebo-operator.all`) + `_params.tpl`
+  (groupe, kinds, kinds admis par le webhook, env, egress, règles et
+  alertes propres). Vérifié : le chart forgejo réécrit ainsi rend les
+  mêmes objets que l'actuel, à l'ordre d'une variable d'environnement et
+  au texte des alertes près (son alerte sur l'API Forgejo passe en
+  `params.alerts`).
+- **Tâches partagées** `tasks/{rust,helm,repo}.yaml`, incluses à
+  distance (Task ≥ 3.54) depuis
+  `raw.githubusercontent.com/…/vX.Y.Z/tasks/…` et épinglées par
+  `checksum:` (sha256, vérifié par Task ; `task --offline` tourne sur le
+  cache) : `rust:{lint,audit,coverage,doctor}`, `helm:{deps,lint,crds}`
+  (smoke renders du contrat de values, CRD enveloppées en templates
+  `crds.install` + `keep`, l'ancien `sync-chart-crds.sh` de forgejo),
+  `repo:{lint,audit}` (actionlint, hadolint, trivy config, npm audit). Le
+  kit les inclut lui-même depuis son arbre.
+- **Épinglage** : `templates/pin-kit.sh <repo> <tag> [kit]` aligne
+  `Cargo.toml`, les includes distants et leurs checksums, les workflows
+  réutilisables et la dépendance du chart sur une release ;
+  `task kit:sync TAG=vX.Y.Z` (dans `templates/kit.yaml`) l'exécute puis
+  `helm dependency update` et `kit:cog`. Le `pre_bump` du kit l'applique
+  au gabarit avec les checksums de l'arbre tagué.
+- **CI** : `.github/workflows/checks.yml` (`workflow_call`) — jobs
+  `lint`, `test`, `audit` et `helm` (si `helm-task`), même contrat que
+  `perf.yml` (`.github/actions/setup-mise` chez l'appelant). Les jobs
+  propres (coverage contre le vrai système distant, images, fichiers
+  régénérés) restent dans le workflow de l'opérateur. Le CI du kit
+  l'appelle sur lui-même.
+- **Gabarit `cargo-generate`** `templates/operator` :
+  `cargo generate --git https://github.com/batleforc/weebo-operator-kit --tag vX.Y.Z templates/operator`
+  (placeholder `product`, en CamelCase). Workspace hexagonal câblé sur
+  le kit (domain, api, application, adapters-outbound, adapters-inbound,
+  operator, crdgen, testkit), CRD `<Product>Instance` (URL + token) et
+  `<Product>Object` (objet distant d'exemple, finalizer), gateway HTTP
+  à remplacer par le vrai client, tests unitaires + contrat wiremock +
+  envtest ; chart sur la library chart, Taskfile sur les tâches
+  partagées, CI sur `checks.yml`, `cog.toml` rendu par `task init`.
+  `task template:check` (dans `test:all`, donc avant chaque tag, et en
+  CI) le génère sur l'arbre du kit (crates et library chart par chemin),
+  le compile, le lint, le teste et vérifie que ses CRD et son chart
+  commités sont ceux qu'il régénère.
+
+Reste à faire côté opérateurs : passer forgejo et authentik sur la
+library chart (authentik gagne au passage le contrat de values de forgejo :
+probes, drain, métriques, NetworkPolicy…), sur les tâches partagées et
+sur `checks.yml`, puis supprimer leurs copies (`.tasks/helm.yaml`,
+`deploy/scripts/sync-chart-crds.sh`, templates du chart). Le paquet
+`weebo-operator-lib` de ghcr doit être rendu public une fois, à la
+première publication.

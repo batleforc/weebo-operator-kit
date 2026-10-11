@@ -1,0 +1,111 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: {{product | downcase}}instances.{{product | downcase}}.weebo.io
+spec:
+  group: {{product | downcase}}.weebo.io
+  names:
+    kind: {{product}}Instance
+    plural: {{product | downcase}}instances
+    singular: {{product | downcase}}instance
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.url
+      name: URL
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for {{product}}InstanceSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              Connection to one {{product}} server. Cluster-scoped: an org-wide piece
+              of infrastructure, not owned by a namespace. `Ready` tells whether the
+              server answers with the token below.
+            properties:
+              tokenSecretRef:
+                description: |-
+                  The API token the operator authenticates with. Read on every
+                  reconcile: rotating it needs no restart.
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - key
+                - name
+                - namespace
+                type: object
+              url:
+                description: Base URL of the {{product}} server, e.g. `https://example.com`.
+                type: string
+            required:
+            - tokenSecretRef
+            - url
+            type: object
+          status:
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: '`Ready`, carrying one of the operator''s reason codes.'
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              remoteId:
+                description: |-
+                  Identifier of the remote object, as {{product}} returned it. Its
+                  presence means this CR created (and owns) that object: the
+                  finalizer only deletes what is recorded here.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: {{product}}Instance
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -2,11 +2,28 @@ version: "3"
 
 includes:
   mise: ./.tasks/mise.yaml
+  # The shared tasks the operators include remotely (tasks/), included
+  # here from the working tree.
+  rust: ./tasks/rust.yaml
+  repo:
+    taskfile: ./tasks/repo.yaml
+    vars:
+      NPM_DIR: packages/operator-docs
+  helm:
+    taskfile: ./tasks/helm.yaml
+    vars:
+      CHART: "{{.TEMPLATE_OUT}}/deploy/charts/weebo-example"
+      CRD_DIR: "{{.TEMPLATE_OUT}}/deploy/crd"
   # The operators' cog.toml template (templates/), rendered here too.
   kit:
     taskfile: ./templates/kit.yaml
     vars:
       KIT_DIR: "{{.ROOT_DIR}}"
+
+vars:
+  # Where `task template:render` writes the operator template, rendered
+  # for a product named Example.
+  TEMPLATE_OUT: "{{.ROOT_DIR}}/target/template/weebo-example"
 
 env:
   LIBCLANG_PATH:
@@ -22,24 +39,17 @@ tasks:
       - cog install-hook -a -o
 
   doctor:
-    desc: "Check the local dev setup needed by weebo-kit-testkit's envtest (Go, libclang, control-plane binaries) and the git hooks"
+    desc: "Check the local dev setup needed by weebo-kit-testkit's envtest (Go, libclang, control-plane binaries), the template tools and the git hooks"
     cmds:
-      - |
-        ok=true
-        check() { if eval "$2" >/dev/null 2>&1; then echo "  [ok]   $1"; else echo "  [FAIL] $1 — $3"; ok=false; fi; }
-        check "go"              "mise exec -- go version"                    "mise install"
-        check "etcd"            "mise exec -- etcd --version"                "mise install"
-        check "kube-apiserver"  "mise exec -- kube-apiserver --version"      "mise install"
-        check "libclang.so"     "ls $LIBCLANG_PATH/libclang.so*"             "install clang-libs (or libclang-dev) and set LIBCLANG_PATH"
-        test -f .git/hooks/pre-commit && echo "  [ok]   git hooks" || echo "  [warn] git hooks not installed — task init"
-        $ok
+      - task: rust:doctor
+        vars: { DOCTOR_TOOLS: "helm cargo-generate" }
 
   lint:
-    desc: "cargo fmt --check + clippy -D warnings on the whole workspace, actionlint on CI"
+    desc: "cargo fmt --check + clippy -D warnings, actionlint, and the library chart through the operator template's chart"
     cmds:
-      - mise exec -- cargo fmt --check
-      - mise exec -- cargo clippy --workspace --all-targets -- -D warnings
-      - mise exec -- actionlint
+      - task: rust:lint
+      - task: repo:lint
+      - task: chart:check
 
   test:
     desc: "Every kit test: unit, contract (Vault against wiremock) and doctests"
@@ -54,11 +64,69 @@ tasks:
   audit:
     desc: "Check dependencies for CVE (cargo-deny + trivy on Cargo.lock, npm audit on packages/operator-docs)"
     cmds:
-      - mise exec -- cargo deny check
-      - mise exec -- trivy fs --scanners vuln --exit-code 1 --severity HIGH,CRITICAL Cargo.lock
+      - task: rust:audit
       # What the package brings into an operator's site; its dev tooling
       # (the peers it is type-checked against) is the operators' to audit.
-      - mise exec -- npm audit --prefix packages/operator-docs --omit=dev --audit-level=high
+      - task: repo:audit
+
+  test:all:
+    desc: "Every test, then the operator template rendered and built on this working tree (the release suite, before every tag)"
+    cmds:
+      - task: test
+      - task: template:check
+
+  chart:check:
+    desc: "helm lint the library chart, then render the operator template's chart on it and run the shared helm:lint (smoke renders)"
+    cmds:
+      - mise exec -- helm lint charts/weebo-operator-lib
+      - task: template:render
+      - task: helm:lint
+
+  template:render:
+    desc: "Render templates/operator (cargo-generate) for a product named Example into TEMPLATE_OUT, wired on this working tree (kit crates and library chart by path)"
+    cmds:
+      - |
+        set -eu
+        out="{{.TEMPLATE_OUT}}"
+        mkdir -p "$(dirname "$out")"
+        find "$(dirname "$out")" -mindepth 1 -maxdepth 1 -name "$(basename "$out")" -exec rm -r {} +
+        # Rendered outside the kit's tree, then moved: cargo-generate adds a
+        # project generated inside a workspace to that workspace's members.
+        tmp="$(mktemp -d)"
+        mise exec -- cargo-generate generate --path templates/operator --name weebo-example \
+          --define product=Example --destination "$tmp" --vcs none --silent
+        mv "$tmp/weebo-example" "$out"
+        rmdir "$tmp"
+        # The tag the template pins is the next release, not yet
+        # published: the working tree stands in for it.
+        sed -i -E 's|^(weebo-kit-[a-z]+)( = \{ )git = "https://github.com/batleforc/weebo-operator-kit", tag = "[^"]*"|\1\2path = "{{.ROOT_DIR}}/crates/\1"|' "$out/Cargo.toml"
+        if grep -q 'tag = "' "$out/Cargo.toml"; then echo "a kit dependency of the template is not in the expected form" >&2; exit 1; fi
+        sed -i 's|repository: oci://ghcr.io/batleforc/charts|repository: file://{{.ROOT_DIR}}/charts/weebo-operator-lib|' "$out"/deploy/charts/*/Chart.yaml
+
+  template:check:
+    desc: "Render the operator template, then build, lint and test it (envtest included) and check its committed CRDs and chart are what it generates"
+    deps: [template:render]
+    vars:
+      MANIFEST: "--manifest-path {{.TEMPLATE_OUT}}/Cargo.toml"
+    env:
+      # Its own target/, shared with nothing of the kit's build.
+      CARGO_TARGET_DIR: "{{.ROOT_DIR}}/target/template/target"
+    # Run from the kit (its mise.toml has every tool), on the rendered
+    # workspace.
+    cmds:
+      - mise exec -- cargo fmt --all --check {{.MANIFEST}}
+      - mise exec -- cargo clippy {{.MANIFEST}} --workspace --all-targets -- -D warnings
+      - mise exec -- cargo test {{.MANIFEST}} --workspace --no-fail-fast
+      - mise exec -- cargo run -q {{.MANIFEST}} -p crdgen -- --out {{.TEMPLATE_OUT}}/deploy/crd/
+      - task: helm:crds
+      - |
+        # What crdgen and helm:crds just produced is what the template
+        # commits: compared with a fresh render.
+        out="{{.TEMPLATE_OUT}}"; generated="$(mktemp -d)"
+        cp -r "$out/deploy" "$generated/"
+        task template:render >/dev/null
+        diff -r "$generated/deploy/crd" "$out/deploy/crd"
+        diff -r -x charts -x Chart.lock "$generated/deploy/charts" "$out/deploy/charts"
 
   docs:version:
     desc: "Fail when packages/operator-docs' version differs from the workspace's (its release tarball is named after it)"

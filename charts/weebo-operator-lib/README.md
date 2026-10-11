@@ -1,0 +1,104 @@
+# weebo-operator-lib
+
+Library chart of the weebo operators: every resource an operator chart
+deploys except its CRDs — Deployment, ServiceAccount and RBAC, leader
+election Role, admission webhook (Service, cert-manager Issuer and
+Certificate, `ValidatingWebhookConfiguration`), PodDisruptionBudget,
+metrics Service, ServiceMonitor, PrometheusRule, NetworkPolicy, and the
+Argo CD health check. Published to `oci://ghcr.io/batleforc/charts` at
+every kit release, under the kit's version.
+
+Nothing here names a product: names come from the operator chart's own
+`Chart.yaml` (`.Chart.Name`), what varies is a parameter set.
+
+## An operator chart
+
+```yaml
+# Chart.yaml
+dependencies:
+  - name: weebo-operator-lib
+    version: X.Y.Z # the kit's, as in Cargo.toml (task kit:sync)
+    repository: oci://ghcr.io/batleforc/charts
+```
+
+```yaml
+# templates/operator.yaml — the whole chart, CRDs aside
+{{ include "weebo-operator.all" (dict "ctx" . "params" (include "operator.params" . | fromYaml)) }}
+```
+
+```yaml
+# templates/_params.tpl
+{{- define "operator.params" -}}
+group: example.weebo.io        # the CRDs' API group
+versions: [v1alpha1]           # admitted versions (webhook rules)
+kinds:                         # every kind the operator watches (ClusterRole)
+  - exampleinstances
+  - exampleobjects
+namespacedKinds:               # what a team may manage (rbac.namespacedExample)
+  - exampleobjects
+admitted:                      # kinds sent to /validate; empty: no webhook configuration
+  - exampleobjects
+env:                           # the operator's own environment variables
+  - name: WEEBO_EXAMPLE_MAX_INFLIGHT
+    value: {{ .Values.exampleMaxInflight | quote }}
+egress:                        # NetworkPolicy egress to the remote system
+  - comment: Example instances.
+    rules: {{ toJson .Values.networkPolicy.egress.example }}
+clusterRules: []               # extra ClusterRole rules
+alerts: []                     # extra PrometheusRule rules, after the kit's
+{{- end -}}
+```
+
+`NOTES.txt` can start with `{{ include "weebo-operator.notes" . }}` (what
+is installed, prerequisites, warnings) and add the operator's first steps.
+
+The CRDs ship as templates under `crds.install`, with the chart's labels
+and `helm.sh/resource-policy: keep`: the kit's `helm:crds` task
+(`tasks/helm.yaml`) wraps crdgen's output with
+`weebo-operator.crdMetadata`.
+
+## Values
+
+The values contract is the one of `templates/operator`'s chart
+(`deploy/charts/<operator>/values.yaml` and its `values.schema.json`):
+`replicaCount`, `image`, `serviceAccount`, `crds`, `reconcileConcurrency`,
+`logFormat`, `leaderElection`, `webhook`, `certManager`, `metrics`,
+`serviceMonitor`, `prometheusRule`, `probes`, `shutdown`,
+`podDisruptionBudget`, `rbac.namespacedExample`, `resources`, scheduling,
+security contexts, `networkPolicy` and `extraEnv`. An operator adds its
+own keys next to them (and `weebo-operator-lib: {}`, which Helm sets for
+the dependency, to its schema).
+
+Kept as they were in weebo-forgejo's chart: resource names
+(`<fullname>`, `-webhook`, `-webhook-tls`, `-leader-election`, `-metrics`,
+`-argocd-health`, `-author`), the Lease name (`<chart>-operator-leader`),
+the webhook name (`validate.<group>`).
+
+## Templates
+
+| Template                                   | Renders                                                      |
+| ------------------------------------------ | ------------------------------------------------------------ |
+| `weebo-operator.all`                       | everything below, `---`-separated, skipping what is disabled  |
+| `weebo-operator.deployment`                | the operator Deployment (probes, drain, `params.env`)         |
+| `weebo-operator.serviceAccount`            | `serviceAccount.create`                                       |
+| `weebo-operator.clusterRole` / `…Binding`  | `params.kinds` (+ status, finalizers), Secrets, Events        |
+| `weebo-operator.leaderElectionRole`        | Lease Role + RoleBinding in the release namespace             |
+| `weebo-operator.namespacedExampleRole`     | `rbac.namespacedExample` on `params.namespacedKinds`          |
+| `weebo-operator.service`                   | the webhook Service                                           |
+| `weebo-operator.issuer` / `.certificate`   | cert-manager, when `webhook.certManager.enabled`              |
+| `weebo-operator.validatingWebhookConfiguration` | `validate.<group>` on `params.admitted`                  |
+| `weebo-operator.podDisruptionBudget`       | when enabled and `replicaCount > 1`                           |
+| `weebo-operator.metricsService`            | `metrics.prometheus.enabled`                                  |
+| `weebo-operator.serviceMonitor`            | `serviceMonitor.enabled`                                      |
+| `weebo-operator.prometheusRule`            | the kit's alerts (`<Chart>OperatorDown`, `NoLeader`, `MultipleLeaders`, `ReconcileErrors`, `ReconcileSlow`) + `params.alerts` |
+| `weebo-operator.networkPolicy`             | `networkPolicy.enabled`, egress with `params.egress`          |
+| `weebo-operator.argocdHealthConfigMap`     | the Ready-condition health check (Lua)                        |
+
+Each takes `(dict "ctx" . "params" $params)`. Helpers take the root
+context: `weebo-operator.fullname`, `.labels`, `.selectorLabels`,
+`.serviceAccountName`, `.image`, `.leaseName`, `.webhookTlsSecretName`,
+`.metricPrefix`, `.alertPrefix`, `.notes`, `.crdMetadata`,
+`.argocdHealthLua`.
+
+`task chart:check` (kit) lints this chart through the template's chart
+and runs the shared smoke renders on it.

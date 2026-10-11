@@ -1,0 +1,21 @@
+[tools]
+cocogitto = "latest"
+rust = { version = "latest", components = ["rust-src", "rustfmt", "llvm-tools", "clippy"], profile = "default" }
+task = "latest"
+gitleaks = "latest"
+# `task audit`
+"aqua:EmbarkStudios/cargo-deny" = "latest"
+trivy = "latest"
+# `task coverage` (needs rust's llvm-tools component, already listed)
+"aqua:taiki-e/cargo-llvm-cov" = "latest"
+# envtest (crates/testkit): Go for its build-time bindings, and the real
+# control-plane binaries it starts
+go = "latest"
+etcd = "3.5.32"
+"aqua:kubernetes/kubernetes/kube-apiserver" = "1.36.2"
+# CI / container / chart linting
+actionlint = "latest"
+# actionlint shells out to shellcheck for every `run:` script
+shellcheck = "latest"
+hadolint = "latest"
+helm = "latest"

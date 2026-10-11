@@ -32,11 +32,24 @@ read it before any non-trivial change.
   them (tests in `weebo-kit-runtime`/`weebo-kit-perf` fail otherwise). See
   its README.
 
+- `charts/weebo-operator-lib`, `tasks/*.yaml`, `.github/workflows/checks.yml`
+  and `templates/operator` are consumed by tag (OCI chart, raw URLs pinned
+  by sha256, `uses: …@vX.Y.Z`, `cargo generate --tag`): same naming rule,
+  and a change that breaks an operator is a breaking release. The chart
+  keeps weebo-forgejo's resource names and values contract. The template
+  is checked by `task template:check` (in `test:all`); its pins on the kit
+  are rewritten by `.hooks/bump-versions.sh` (`templates/pin-kit.sh`).
+  Never render the template inside the kit's tree with cargo-generate
+  directly: it adds the project to the kit's workspace and rewrites
+  `Cargo.toml` (`task template:render` renders outside, then moves).
+
 ## Commands
 
 ```bash
-task lint    # fmt --check, clippy -D warnings, actionlint
+task lint    # fmt --check, clippy -D warnings, actionlint, chart:check
 task test    # unit + contract + doctests
+task test:all       # + template:check (the operator template, built and tested)
+task template:render  # the template rendered for "Example" in target/template/
 task audit   # cargo-deny + trivy + npm audit (operator-docs)
 task doctor  # envtest prerequisites
 task docs:check  # operator-docs: version sync, tsc, generator tests

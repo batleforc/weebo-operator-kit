@@ -1,0 +1,23 @@
+# A new weebo operator, wired on the kit:
+#   cargo generate --git https://github.com/batleforc/weebo-operator-kit --tag vX.Y.Z templates/operator
+# (or `--path ../weebo-operator-kit/templates/operator`). See README.md.
+[template]
+cargo_generate_version = ">=0.23.0"
+# The hooks run, they are not part of the operator.
+ignore = ["hooks"]
+# GitHub workflows, .tasks/ and the chart's operator.yaml use
+# `{{ }}` themselves: copied as is. The other chart files wrap their Helm
+# syntax in `{% raw %}` blocks.
+exclude = [
+  ".github/**",
+  ".tasks/**",
+  "deploy/charts/*/templates/operator.yaml",
+]
+
+[hooks]
+pre = ["hooks/pre.rhai"]
+
+[placeholders.product]
+type = "string"
+prompt = "Product the operator drives, in CamelCase (the kinds' prefix: <Product>Instance, <Product>Object; group <product>.weebo.io)"
+regex = "^[A-Z][A-Za-z0-9]*$"
