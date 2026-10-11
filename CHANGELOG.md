@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.9.0](https://github.com/batleforc/weebo-operator-kit/compare/9718abdf885f89e4742a3f324ae281139eee0ba5..v0.9.0) - 2026-10-11
+#### Features
+- library chart, shared tasks, reusable CI and operator template - ([9718abd](https://github.com/batleforc/weebo-operator-kit/commit/9718abdf885f89e4742a3f324ae281139eee0ba5)) - Max Batleforc
+
+- - -
+
 ## [v0.8.0](https://github.com/batleforc/weebo-operator-kit/compare/003f8b64886bb4c85a15608e43b9e5c83219bbaa..v0.8.0) - 2026-10-11
 #### Features
 - (**perf**) measure the resource budget every week - ([003f8b6](https://github.com/batleforc/weebo-operator-kit/commit/003f8b64886bb4c85a15608e43b9e5c83219bbaa)) - Max Batleforc, Claude Opus 5.5
