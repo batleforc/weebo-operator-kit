@@ -1,0 +1,138 @@
+name: Resource budget
+
+# Reusable: an operator calls it on a schedule to measure what it costs a
+# cluster again (`task perf`, weebo-kit-perf, the release binary against
+# envtest) and to keep the "Resource budget" page of its docs current:
+#
+#   on:
+#     schedule: [{ cron: "0 4 * * 1" }]
+#     workflow_dispatch:
+#   jobs:
+#     perf:
+#       uses: batleforc/weebo-operator-kit/.github/workflows/perf.yml@vX.Y.Z
+#       permissions: { contents: write, pull-requests: write }
+#
+# The new report goes to `<docs>/perf/<label>.json`, the docs are
+# regenerated (`npm run gen:crds`), and the change is pushed to a branch
+# with a pull request whose body compares the run with the committed one.
+# The job fails when the run exceeds the budget, after publishing it.
+#
+# Expected from the caller's repository: `.github/actions/setup-mise`, a
+# `task perf` writing `target/perf/<label>.json` and `.md`, the docs site
+# in `<docs>/` with a `gen:crds` script. Opening the pull request with the
+# workflow's token needs "Allow GitHub Actions to create and approve pull
+# requests" (Settings → Actions); without it, the branch is pushed and the
+# job summary links to it.
+on:
+  workflow_call:
+    inputs:
+      label:
+        description: "The report's name (target/perf/<label>.json); the repository's name by default"
+        type: string
+        default: ""
+      docs-dir:
+        description: "The docs site's directory"
+        type: string
+        default: docs
+      branch:
+        description: "The branch the refreshed report is pushed to"
+        type: string
+        default: perf/refresh
+
+permissions: {}
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    permissions:
+      # Pushes the refresh branch, opens its pull request.
+      contents: write
+      pull-requests: write
+    env:
+      LABEL: ${{ inputs.label || github.event.repository.name }}
+      DOCS: ${{ inputs.docs-dir }}
+      BRANCH: ${{ inputs.branch }}
+    steps:
+      # Credentials kept: the job pushes the refresh branch.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/setup-mise
+      - name: Cache cargo registry
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      # The perf test builds the testkit's envtest, whose bindgen step needs
+      # libclang.
+      - name: Install libclang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          LIBCLANG_SO="$(find /usr/lib -iname 'libclang.so*' 2>/dev/null | head -n1)"
+          if [ -z "$LIBCLANG_SO" ]; then
+            echo "::error::libclang.so not found after installing libclang-dev" >&2
+            exit 1
+          fi
+          {
+            echo "LIBCLANG_PATH=$(dirname "$LIBCLANG_SO")"
+            echo "BINDGEN_EXTRA_CLANG_ARGS="
+          } >> "$GITHUB_ENV"
+      - run: mise install
+
+      - name: Measure
+        id: measure
+        run: |
+          # Compared with the committed report; the verdict is kept for the
+          # last step, the report is published either way.
+          set +e
+          WEEBO_PERF_BASELINE="$DOCS/perf/$LABEL.json" mise exec -- task perf
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+          test -f "target/perf/$LABEL.json"
+      - name: Keep the report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: perf-${{ env.LABEL }}
+          path: target/perf/
+      - run: cat "target/perf/$LABEL.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Regenerate the docs
+        run: |
+          mkdir -p "$DOCS/perf"
+          cp "target/perf/$LABEL.json" "$DOCS/perf/$LABEL.json"
+          mise exec -- npm ci --prefix "$DOCS" --no-fund --no-audit
+          mise exec -- npm run gen:crds --prefix "$DOCS"
+
+      - name: Push the refresh and open its pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.repository.default_branch }}
+          REPO: ${{ github.repository }}
+        run: |
+          git add -- "$DOCS"
+          if git diff --cached --quiet; then
+            echo "Nothing changed in $DOCS." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          title="docs(perf): resource budget measured on $(date -u +%F)"
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "$title"
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+          body="target/perf/$LABEL.md"
+          if [ "$(gh pr view "$BRANCH" --json state -q .state 2>/dev/null)" = OPEN ]; then
+            gh pr edit "$BRANCH" --title "$title" --body-file "$body"
+          elif ! gh pr create --head "$BRANCH" --base "$BASE" --title "$title" --body-file "$body"; then
+            {
+              echo
+              echo "Could not open the pull request with the workflow's token (Settings → Actions → \"Allow GitHub Actions to create and approve pull requests\")."
+              echo "Open it from https://github.com/$REPO/compare/$BASE...$BRANCH"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::pushed $BRANCH; open its pull request from https://github.com/$REPO/compare/$BASE...$BRANCH"
+          fi
+
+      - name: Within budget
+        if: steps.measure.outputs.status != '0'
+        run: |
+          echo "::error::the operator exceeds its resource budget — see the report above"
+          exit 1

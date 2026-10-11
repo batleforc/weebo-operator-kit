@@ -253,9 +253,8 @@ requêtes HTTP.
   avec un JSON précédent (`WEEBO_PERF_BASELINE`), `assert_within` qui
   échoue au-delà du budget (`WEEBO_PERF_REPORT_ONLY=1` pour seulement
   rapporter).
-- Pas encore : profil CPU (flamegraphs), recherche du point de rupture,
-  workflow CI réutilisable qui commente la PR (comme `profile.yaml`/
-  `soak.yaml` de batlehub).
+- Pas encore : profil CPU (flamegraphs), recherche du point de rupture
+  (le workflow de mesure régulière est arrivé en v0.8.0, ci-dessous).
 
 ### Itération 3 — généraliser l'application (faite, v0.6.0)
 
@@ -455,6 +454,28 @@ se met lui-même à jour et réinstalle les hooks. Le kit s'inclut avec
 Authentik gagne au passage `task audit` (`deny.toml` repris de forgejo,
 crates `publish = false`, h2 et rustls montés pour RUSTSEC-2026-0258/
 -0285) et un job `audit` en CI ; son changelog pointait sur un autre repo.
+
+### v0.8.0 — le budget de ressources mesuré chaque semaine
+
+- `.github/workflows/perf.yml`, réutilisable (`workflow_call`) : chaque
+  opérateur l'appelle sur un `schedule` (lundi 04:00 UTC) et à la main.
+  Il lance `task perf` (binaire release contre envtest) comparé au
+  rapport commité (`WEEBO_PERF_BASELINE`), publie le rapport (artefact +
+  résumé du job), copie le JSON dans `docs/perf/<label>.json`, régénère la
+  doc et pousse la branche `perf/refresh` avec une PR dont le corps est le
+  comparatif Markdown. Le job échoue après publication quand le budget est
+  dépassé : un dépassement se voit, sans perdre la mesure.
+- Ouvrir la PR avec le `GITHUB_TOKEN` demande « Allow GitHub Actions to
+  create and approve pull requests » ; sans ce réglage la branche est
+  poussée et le résumé du job donne le lien pour ouvrir la PR. Une PR
+  ouverte par ce token ne déclenche pas la CI (limite de GitHub).
+- Le rapport `weebo-kit-perf` se date : `measured_at` (UTC) et
+  `kit_version` ; la page « Resource budget » les affiche (le `perfNote`
+  de l'opérateur n'ajoute plus que ce que le rapport ne dit pas), et
+  `perfScheduled` y mentionne la mesure hebdomadaire.
+- Les chiffres d'un runner GitHub ne sont pas ceux d'un nœud : ils
+  servent à suivre une tendance d'une semaine à l'autre, le budget reste
+  un garde-fou.
 
 ### Hors Rust (plus tard)
 

@@ -186,6 +186,8 @@ impl PerfRun {
             startup_secs: self.startup.as_secs_f64(),
             shutdown_secs: shutdown.as_secs_f64(),
             phases: self.phases,
+            measured_at: Some(k8s_openapi::jiff::Timestamp::now().to_string()),
+            kit_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         }
     }
 

@@ -54,6 +54,13 @@ pub struct Report {
     #[serde(default)]
     pub background_api_requests_per_min: f64,
     pub phases: Vec<PhaseReport>,
+    /// When the run finished (UTC, RFC 3339) — absent from reports
+    /// written before it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measured_at: Option<String>,
+    /// The `weebo-kit-perf` version that measured it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit_version: Option<String>,
 }
 
 /// What an operator may cost to sit on a small cluster next to others.
@@ -229,6 +236,9 @@ impl Report {
         let failed = checks.iter().filter(|c| !c.ok).count();
         let mut md = String::new();
         let _ = writeln!(md, "## Operator resources — `{}`\n", self.label);
+        if let (Some(at), Some(kit)) = (&self.measured_at, &self.kit_version) {
+            let _ = writeln!(md, "Measured {at} with weebo-kit-perf {kit}.\n");
+        }
         let _ = writeln!(
             md,
             "{} — startup {:.1} s, shutdown {:.1} s.\n",
@@ -410,6 +420,8 @@ mod tests {
             startup_secs: 2.0,
             shutdown_secs: 1.0,
             background_api_requests_per_min: 20.0,
+            measured_at: Some("2026-10-11T10:00:00Z".into()),
+            kit_version: Some("0.0.0".into()),
             phases: vec![
                 phase(BASELINE, PhaseKind::Idle, 30.0, 20),
                 phase("burst", PhaseKind::Load, 40.0, 25),
@@ -461,6 +473,10 @@ mod tests {
         let now = report(36.0);
         let md = now.to_markdown(&Budget::small_cluster(), Some(&base));
         assert!(md.contains("1 limit(s) exceeded"), "{md}");
+        assert!(
+            md.contains("Measured 2026-10-11T10:00:00Z with weebo-kit-perf 0.0.0"),
+            "{md}"
+        );
         assert!(md.contains("**over**"));
         assert!(md.contains("(+16%)"), "{md}");
         let json = serde_json::to_string(&now).unwrap();

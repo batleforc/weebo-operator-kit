@@ -37,7 +37,10 @@ export const PAGES = ["reason-codes", "events", "metrics", "resource-budget"];
  *   small-cluster budget, as the operator's perf test sets them.
  * @property {string} [perfReport] A `weebo-kit-perf` JSON report committed
  *   with the docs (`target/perf/<label>.json`, copied).
- * @property {string} [perfNote] What that run was (kit version, date…).
+ * @property {string} [perfNote] What that run was, beyond the date and kit
+ *   version the report records itself (the machine…).
+ * @property {boolean} [perfScheduled] The kit's `perf.yml` workflow refreshes
+ *   the report on a schedule.
  * @property {string} [perfTask] The command that runs it. Default `task perf`.
  */
 
@@ -84,6 +87,7 @@ export function generateReference(config, { root, group }) {
       perfTask: config.perfTask,
       reportPath: config.perfReport,
       note: config.perfNote,
+      scheduled: config.perfScheduled,
     }),
   };
   fs.mkdirSync(dir, { recursive: true });

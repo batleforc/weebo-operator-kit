@@ -291,7 +291,7 @@ Served on every replica, on the admission webhook's HTTPS port
   );
 }
 
-export function budgetPage({ budget, overrides = {}, report, perfTask = "task perf", reportPath, note }) {
+export function budgetPage({ budget, overrides = {}, report, perfTask = "task perf", reportPath, note, scheduled = false }) {
   const m = report ? measuredOf(report) : undefined;
   const rows = LIMITS.filter(([key]) => budget[key] != null).map(([key, what, unit]) => {
     const limit = num(budget[key], unit);
@@ -303,8 +303,13 @@ export function budgetPage({ budget, overrides = {}, report, perfTask = "task pe
     return row;
   });
   const wl = report ? m.workload : undefined;
+  // The report dates itself (weebo-kit-perf ≥ 0.8); `note` adds to it.
+  const when = report?.measured_at
+    ? `on ${report.measured_at.slice(0, 10)}${report.kit_version ? ` with weebo-kit-perf ${report.kit_version}` : ""}`
+    : undefined;
+  const about = [when, note].filter(Boolean).join(", ");
   const measuredIntro = report
-    ? `The last run committed with the docs (\`${reportPath}\`${note ? `, ${note}` : ""}) measured
+    ? `The last run committed with the docs (\`${reportPath}\`${about ? `, ${about}` : ""}) measured
 ${wl ? `${wl.objects}${wl.resource ? ` \`${wl.resource}\`` : " objects"} per load` : "its loads"}; each value is the worst phase for that limit.`
     : "No run has been committed with the docs yet: see below.";
   return page(
@@ -338,7 +343,7 @@ The run fails when a limit is exceeded and writes its report to
 size it; \`WEEBO_PERF_BASELINE=<a previous JSON>\` compares with an earlier
 run; \`WEEBO_PERF_REPORT_ONLY=1\` reports without failing.${
       reportPath
-        ? ` To refresh this page, copy the JSON report to \`docs/${reportPath}\` and regenerate the docs.`
+        ? `${scheduled ? " A scheduled workflow (`.github/workflows/perf.yml`, the kit's) measures it again every week on a CI runner and opens a pull request with the new report and its comparison with this one." : ""} By hand, copy the JSON report to \`docs/${reportPath}\` and regenerate the docs.`
         : ""
     }
 `,
