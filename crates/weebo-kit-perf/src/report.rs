@@ -440,6 +440,21 @@ mod tests {
         assert!((growth.measured - 20.0).abs() < 1e-9);
     }
 
+    /// The docs package renders this budget on every operator's site (its
+    /// "resource budget" page) from a copy: it must not drift.
+    #[test]
+    fn the_docs_package_publishes_this_budget() {
+        let published: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../packages/operator-docs/src/reference/small-cluster-budget.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(Budget::small_cluster()).unwrap(),
+            published,
+            "update packages/operator-docs/src/reference/small-cluster-budget.json"
+        );
+    }
+
     #[test]
     fn markdown_names_the_overruns_and_the_baseline_delta() {
         let base = report(31.0);

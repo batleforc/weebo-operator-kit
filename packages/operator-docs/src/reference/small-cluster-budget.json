@@ -1,0 +1,15 @@
+{
+  "startup_secs": 15.0,
+  "shutdown_secs": 15.0,
+  "idle_rss_mib": 64.0,
+  "peak_rss_mib": 192.0,
+  "idle_cpu_millicores": 10.0,
+  "cpu_ms_per_object": 50.0,
+  "idle_api_requests_per_min": 60.0,
+  "api_requests_per_object": 20.0,
+  "convergence_secs_per_100": 60.0,
+  "reconcile_p95_secs": 2.0,
+  "rss_growth_pct": 10.0,
+  "fd_growth": 16,
+  "thread_growth": 4
+}

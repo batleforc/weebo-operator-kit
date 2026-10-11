@@ -41,4 +41,5 @@ jobs:
       - run: mise install
       - run: mise exec -- task lint
       - run: mise exec -- task test
+      - run: mise exec -- task docs:check
       - run: mise exec -- task audit

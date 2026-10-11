@@ -93,6 +93,15 @@ Cas particuliers tranchés :
   opérateurs : deux versions différentes lieraient deux copies de `kube`
   dont les types ne se correspondent pas. Monter `kube` = release du kit
   puis des opérateurs.
+- Le paquet npm `@weebo/operator-docs` (`packages/operator-docs`) suit la
+  version du workspace (`.hooks/bump-versions.sh`, hook `pre_bump` de
+  cog ; `task docs:check` échoue sinon). Chaque tag `vX.Y.Z` attache
+  `weebo-operator-docs-X.Y.Z.tgz` à sa release GitHub
+  (`.github/workflows/release.yml`) ; le site de doc d'un opérateur en
+  dépend par l'URL de ce tarball. Ses peers `fumadocs-*`/`next` sont
+  épinglés : les monter = release du kit puis des sites. Même règle que
+  `path` : un `file:` vers le checkout voisin (installé avec
+  `npm install --install-links`) pour itérer, jamais poussé.
 
 ## État de la migration
 
@@ -319,9 +328,133 @@ Reste propre à chaque opérateur : `RefKind`/`ReferencedCr` et le
 `KubeClusterReader` (listes de CRD), `Governed` et les dimensions de
 l'allow-list (organisations/utilisateurs chez forgejo), la règle des
 admins de site, `Outcome`/`ReconcileOutcome`, les clés `key-owner` de
-forgejo, la résolution par nom côté gateway chez authentik. Authentik ne
-revérifie toujours pas la policy dans ses reconcilers (forgejo si) : à
-faire quand il aura un `PolicySource`.
+forgejo, la résolution par nom côté gateway chez authentik.
+
+Depuis, authentik revérifie aussi la policy dans ses reconcilers, comme
+forgejo, sans changement du kit : `KubePolicySource` implémente
+`PolicySource<NamespaceRule>` (règles telles que l'écrit
+`AuthentikNamespacePolicy`), lu par le webhook et par les reconcilers
+d'`AuthentikApplication`/`AuthentikAccessPolicy` (un même `enforce`).
+Refus → `Ready: False` `NamespaceNotAllowed`, aucun appel à Authentik,
+rien de supprimé ; chaque changement de policy relance tous les CR de ces
+deux kinds.
+
+### Doc — `@weebo/operator-docs` (faite, publiée avec la release qui suit v0.6.0)
+
+Les deux sites Fumadocs/Next portaient chacun leur copie du générateur de
+pages CRD, du formulaire de manifeste, du thème et de l'échafaudage
+`src/app/**`, sur des versions différentes (fumadocs 16.11/next 16.2 chez
+authentik, 16.16/16.4 chez forgejo). Paquet `packages/operator-docs`,
+sources TypeScript compilées par le site (`transpilePackages`) :
+
+- **Générateur** `weebo-crd-docs` (bin, et `generateCrdDocs` en lib) :
+  fusion des deux copies. Ce qui était propre à un opérateur passe dans
+  son `docs/crd-docs.config.mjs` : exemples (toujours vérifiés contre le
+  schéma), guides liés, ordre de la barre latérale, préfixe des kinds
+  (nom des exemples), texte d'intro de l'index. Repris d'authentik : la
+  première phrase qui ne coupe pas sur `i.e.`/`e.g.`, le gras retiré des
+  descriptions, `crd-schemas/index.json` (la liste de kinds de
+  `CrdBuilder`) ; de forgejo : la colonne des short names (seulement si
+  un kind en a). Nouveau : le générateur vide lui-même ses sorties
+  précédentes (un CRD supprimé ne laisse plus de page).
+- **Formulaire de manifeste** (`crd-form`) : `CrdForm`, `CrdBuilder`,
+  `fields`, `ChoicePicker`, utilitaires de schéma, thème YAML. La table
+  des choix guidés (`CrdChoices`) devient une donnée de l'opérateur
+  (`src/lib/crd-choices.ts`), passée par `docsMdxComponents(CHOICES)` ;
+  la mécanique est celle d'authentik (`preset`, `require` en chemin
+  pointé), un sur-ensemble de celle de forgejo.
+- **Site** : `defineSite` (nom, phrase d'accroche, repo), `baseOptions`
+  (marque, lien GitHub, thème), `DocsRootProvider` + `siteMetadata`,
+  `createDocsPage`, `OperatorHome` (la page d'accueil « proof sheet »,
+  avec les mots de l'opérateur), les handlers de recherche statique,
+  `llms.txt`, `llms-full.txt`, Markdown par page et images OG,
+  `withBasePath`, et `withOperatorDocs` pour tout `next.config.mjs`
+  (export statique, MDX, `basePath` passé au code client). Les fichiers de
+  route restent dans l'opérateur (Next lit `revalidate`/`dynamic` dans le
+  fichier même), réduits à quelques lignes.
+- **Thème** : `css/theme.css` (tokens BatleHub, pont Fumadocs, règles des
+  composants, `@source` sur les composants du paquet) ; les polices
+  restent dans le layout racine de l'opérateur (`next/font`), le thème les
+  lit par `--font-silkscreen`/`--font-jetbrains-mono`. Le style des
+  diagrammes (`diagram-style`) aussi.
+- Versions alignées sur forgejo : fumadocs-core/ui 16.16.2, fumadocs-mdx
+  15.4.6, next 16.4.0, react 19.3, en `peerDependencies` épinglées.
+- `task docs:check` (version = workspace, `tsc` contre les peers, tests du
+  générateur, dans la CI) et `task docs:pack` ; `task audit` audite les
+  dépendances du paquet.
+
+Migration : générées à nouveau, les pages `crds/*.mdx` et les schémas des
+deux opérateurs sont identiques à l'octet près ; forgejo gagne
+`crd-schemas/index.json`. Authentik monte en fumadocs 16.16/next 16.4 et
+corrige au passage son lien « Edit on GitHub » (il oubliait le préfixe
+`docs/`). Chaque opérateur ne garde que son contenu, sa config du
+générateur, ses choix guidés, son layout racine (polices, `metadataBase`)
+et ses diagrammes métier (`GroupSyncDiagram`/`TeamAccessDiagram` chez
+forgejo).
+
+Puis les pages que le kit rend communes, sous `content/docs/reference/`,
+écrites par le même `weebo-crd-docs` (section `reference` de la config) et
+vérifiées par la même étape de CI que les pages CRD : le texte est celui du
+kit, écrit une fois dans le paquet ; l'opérateur ne fournit que ses
+données, lues dans ses sources plutôt que recopiées.
+
+- **Codes de raison** : le catalogue `reason_codes!` de l'opérateur
+  (`crates/domain/src/error.rs`) est lu tel quel — codes, doc comments
+  (colonne « signification », les renvois vers le code ou les notes de
+  conception retirés), sévérités (le `match` de `fn severity`), code de
+  succès. Où chaque code apparaît (`Ready`, condition propre, Event,
+  refus d'admission) se déduit de la sévérité et d'un balayage texte des
+  sources hors tests (`Denial::new`, `announce_change`,
+  `controller::finalize`, paires `(Code, events::…)` de l'`error_policy`) :
+  le `KubernetesApiError` d'authentik, qui n'atteint jamais un status, en
+  sort « Event `Warning` avant tout status ». Colonne « que faire »
+  optionnelle dans la config (forgejo y a reporté celle de son guide).
+- **Events** : les règles d'`events::outcome_events` et du squelette de
+  controller (Warning à chaque échec, Normal aux changements, erreurs
+  avant status, `Cleanup`, libération et `force-orphan` sous le domaine du
+  groupe des CRD), avec les codes de l'opérateur.
+- **Métriques & santé** : `<préfixe>_reconcile_total`,
+  `…_reconcile_duration_seconds` (buckets), `…_webhook_decisions_total`, la
+  jauge `<préfixe>_leader` quand les sources la déclarent, les métriques
+  propres de l'opérateur (config, noms vérifiés dans les sources), des
+  requêtes PromQL, `/readyz`/`/livez` et les réglages du runtime
+  (concurrence, requeue, bail, drain, TLS).
+- **Budget de ressources** : `Budget::small_cluster()`, les surcharges de
+  l'opérateur, et le dernier rapport `task perf` commité sous
+  `docs/perf/` (mêmes calculs que `Report::check`, pire phase par limite).
+- Les valeurs du kit citées par les pages (`small-cluster-budget.json`,
+  `kit-runtime.json`) sont des copies : des tests de `weebo-kit-perf` et
+  `weebo-kit-runtime` échouent si elles divergent des constantes Rust
+  (`webhook_server::DEFAULT_PORT` ajouté pour ça).
+
+Forgejo remplace par des liens les tableaux de son guide « Monitoring »
+(codes de raison, métriques) et son paragraphe sur les Events ; authentik
+n'avait rien d'équivalent. Rapports commités : forgejo mesuré sur le kit
+v0.5.0, authentik sur v0.6.0.
+
+### `cog.toml` commun (fait, publié avec la release qui suit v0.6.0)
+
+`templates/cog.toml` est le `cog.toml` de chaque opérateur et du kit ;
+seul le nom du repo (lien du changelog) varie. `templates/kit.yaml`,
+copié dans le dossier de tâches de l'opérateur et inclus sous `kit:`,
+le rend : `task kit:cog` lit le template au tag du kit qu'épingle le
+`Cargo.toml` (`KIT_DIR=../weebo-operator-kit` pour un checkout voisin),
+se met lui-même à jour et réinstalle les hooks. Le kit s'inclut avec
+`KIT_DIR` = lui-même.
+
+- `commit-msg` : `cog verify` (Conventional Commits).
+- `pre-commit` : `task recu` s'il existe, `task lint`, les correcteurs de
+  fins de ligne et d'espaces, `task test`, `task audit`, gitleaks.
+- `pre_bump_hooks` (avant le tag) : `task audit`, `task test:all` (ou
+  `task test` sans lui), puis `.hooks/bump-versions.sh` (versions du
+  repo, `Cargo.lock` compris).
+- Contrat de chaque repo : tâches `lint`, `test`, `audit` (`recu`,
+  `test:all` facultatives), `.hooks/{bump-versions,end-of-line,
+  whitespace-fixer}.sh`, `branch_whitelist = ["main"]`.
+
+Authentik gagne au passage `task audit` (`deny.toml` repris de forgejo,
+crates `publish = false`, h2 et rustls montés pour RUSTSEC-2026-0258/
+-0285) et un job `audit` en CI ; son changelog pointait sur un autre repo.
 
 ### Hors Rust (plus tard)
 
@@ -331,20 +464,3 @@ faire quand il aura un `PolicySource`.
 - CI : workflows réutilisables (`workflow_call`) pour lint/test/audit.
 - Gabarit `cargo-generate` d'un nouvel opérateur : workspace hexagonal
   câblé sur le kit, une CRD `XInstance` + une ressource exemple.
-- Doc : une lib (paquet npm, ex. `@weebo/operator-docs`) pour le format
-  commun des sites Fumadocs/Next des opérateurs, qui portent aujourd'hui
-  chacun leur copie :
-  - le générateur `docs/scripts/gen-crd-docs.mjs` (CRD YAML → pages
-    `crds/*.mdx` + `public/crd-schemas/*.json`), dont les deux copies ont
-    déjà divergé (~200 lignes de diff) ;
-  - les composants `crd-form` (`CrdForm`, `CrdBuilder`, `fields`,
-    `ChoicePicker` : construire un CR depuis son schéma) et le style des
-    diagrammes (`diagram-style.ts`) ;
-  - la mise en page et l'arborescence attendues (`index`, `guides/`,
-    `crds/`, `meta.json`), le thème, et les pages que les conditions du
-    kit rendent communes (codes de raison, Events, métriques, budget
-    `weebo-kit-perf`) ;
-  - les versions de `fumadocs-*`/`next` alignées (aujourd'hui 16.11 et
-    16.16).
-  Chaque opérateur garde son contenu (`content/docs`) et ses diagrammes
-  métier.

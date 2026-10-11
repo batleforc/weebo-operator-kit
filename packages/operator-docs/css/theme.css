@@ -1,0 +1,17 @@
+/* The weebo operator docs theme, in one import. The operator's global.css
+   imports Tailwind and Fumadocs' own CSS first, then this file:
+
+     @import 'tailwindcss';
+     @import 'fumadocs-ui/css/neutral.css';
+     @import 'fumadocs-ui/css/preset.css';
+     @import '@weebo/operator-docs/css/theme.css';
+
+   Three layers, in this order: tokens.css decides every value, fd-bridge.css
+   maps Fumadocs' variables onto them, global.css holds the component rules. */
+@import './tokens.css';
+@import './fd-bridge.css';
+@import './global.css';
+
+/* Tailwind only scans the app's own files by default: the package's
+   components carry utility classes too. */
+@source '../src';

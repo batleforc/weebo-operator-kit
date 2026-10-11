@@ -23,6 +23,10 @@ pub const TLS_RELOAD_INTERVAL: Duration = Duration::from_secs(60);
 /// requests to this pod (endpoint removal lags the termination).
 pub const DEFAULT_DRAIN: Duration = Duration::from_secs(5);
 
+/// Default of `WEBHOOK_PORT`: the HTTPS port `/validate` and the probes are
+/// served on.
+pub const DEFAULT_PORT: u16 = 8443;
+
 /// In-flight requests get this long to finish once draining is over.
 pub const GRACEFUL_SHUTDOWN: Duration = Duration::from_secs(10);
 
@@ -80,7 +84,7 @@ pub async fn spawn(
     let port: u16 = std::env::var("WEBHOOK_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(8443);
+        .unwrap_or(DEFAULT_PORT);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let tls = RustlsConfig::from_pem_file(&cert, &key).await?;
 

@@ -1,0 +1,29 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: gadgets.example.weebo.io
+spec:
+  group: example.weebo.io
+  names:
+    kind: ExampleGadget
+    plural: examplegadgets
+    shortNames: []
+    singular: examplegadget
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            description: 'A gadget: cluster-wide.'
+            properties:
+              url:
+                description: Where the gadget lives | pipe escaped.
+                type: string
+            required:
+            - url
+            type: object
+        type: object
+    served: true
+    storage: true

@@ -21,17 +21,34 @@ read it before any non-trivial change.
 - `kube`/`k8s-openapi` versions must match the operators'.
 - A change that breaks an operator's build is a breaking release (0.x:
   minor bump).
+- `packages/operator-docs` (`@weebo/operator-docs`, npm) is the operators'
+  docs-site format: CRD page generator, manifest builder, theme, layout,
+  routes. Same naming rule (what varies is `defineSite`, the generator's
+  config or `CrdChoices`); its version is the workspace's
+  (`.hooks/bump-versions.sh`); its `fumadocs-*`/`next` peers are pinned,
+  moving them is a release. Its reference pages (reason codes, Events,
+  metrics, budget) quote kit values from copies in `src/reference/*.json`:
+  changing a runtime constant or `Budget::small_cluster()` means updating
+  them (tests in `weebo-kit-runtime`/`weebo-kit-perf` fail otherwise). See
+  its README.
 
 ## Commands
 
 ```bash
 task lint    # fmt --check, clippy -D warnings, actionlint
 task test    # unit + contract + doctests
-task audit   # cargo-deny + trivy
+task audit   # cargo-deny + trivy + npm audit (operator-docs)
 task doctor  # envtest prerequisites
+task docs:check  # operator-docs: version sync, tsc, generator tests
+task docs:pack   # dist/weebo-operator-docs-<version>.tgz (release asset)
 ```
 
-Commits follow Conventional Commits (cocogitto, `cog.toml`).
+Commits follow Conventional Commits (cocogitto). `cog.toml` is rendered
+from `templates/cog.toml` (`task kit:cog`), the same template every
+operator renders (`templates/kit.yaml`, copied into its task directory):
+edit the template, never a rendered `cog.toml`. Its hooks: `cog verify`
+on every message; `recu`, `lint`, `test`, `audit` before every commit;
+`audit` and `test:all` (or `test`) before every tag.
 
 Every rule of the user's global Weebo Dev Env guideline (Taskfile with
 `desc`, mise, signed commits by the user only, `task audit`) applies.

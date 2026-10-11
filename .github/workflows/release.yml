@@ -1,0 +1,40 @@
+name: Release
+
+# On a version tag: packs packages/operator-docs and attaches the tarball to
+# the tag's GitHub Release (created when missing). That tarball is how the
+# operators' docs sites consume the package:
+#   "@weebo/operator-docs": "https://github.com/batleforc/weebo-operator-kit/releases/download/vX.Y.Z/weebo-operator-docs-X.Y.Z.tgz"
+# The crates need nothing here: operators depend on them by git tag.
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  operator-docs:
+    runs-on: ubuntu-latest
+    permissions:
+      # Creates the release and uploads the asset.
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      # Only what the package needs, not the Rust/Go toolchain.
+      - run: mise install node task
+      - run: mise exec -- task docs:check
+      - run: mise exec -- task docs:pack
+      - name: Attach the tarball to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Named after package.json's version: a tag it doesn't match fails here.
+          asset="dist/weebo-operator-docs-${TAG#v}.tgz"
+          test -f "$asset"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" "$asset" --clobber

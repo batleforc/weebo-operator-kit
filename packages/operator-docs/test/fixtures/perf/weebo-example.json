@@ -1,0 +1,117 @@
+{
+  "label": "weebo-example",
+  "startup_secs": 0.5,
+  "shutdown_secs": 0.1,
+  "background_api_requests_per_min": 20.0,
+  "phases": [
+    {
+      "name": "startup",
+      "kind": "idle",
+      "wall_secs": 30.0,
+      "usage": {
+        "samples": 10,
+        "rss_peak_mib": 21.0,
+        "rss_median_mib": 20.0,
+        "cpu_seconds": 0.5,
+        "cpu_mean_millicores": 2.0,
+        "cpu_peak_millicores": 20.0,
+        "rss_slope_mib_per_min": 0.0,
+        "fds_max": 20,
+        "threads_max": 8
+      },
+      "reconciles": 0.0,
+      "reconcile_errors": 0.0,
+      "reconcile_p95_secs": null,
+      "api_requests": 10.0,
+      "api_requests_per_min": 30.0,
+      "api_top": [],
+      "objects": null,
+      "convergence_secs": null
+    },
+    {
+      "name": "burst",
+      "kind": "load",
+      "wall_secs": 30.0,
+      "usage": {
+        "samples": 10,
+        "rss_peak_mib": 29.0,
+        "rss_median_mib": 28.0,
+        "cpu_seconds": 1.0,
+        "cpu_mean_millicores": 2.0,
+        "cpu_peak_millicores": 20.0,
+        "rss_slope_mib_per_min": 0.0,
+        "fds_max": 25,
+        "threads_max": 8
+      },
+      "reconciles": 0.0,
+      "reconcile_errors": 0.0,
+      "reconcile_p95_secs": 0.03,
+      "api_requests": 600.0,
+      "api_requests_per_min": 30.0,
+      "api_top": [
+        [
+          "PATCH widgets",
+          200.0
+        ],
+        [
+          "POST events",
+          100.0
+        ],
+        [
+          "POST widgets",
+          100.0
+        ]
+      ],
+      "objects": 100,
+      "convergence_secs": 2.0
+    },
+    {
+      "name": "baseline",
+      "kind": "idle",
+      "wall_secs": 30.0,
+      "usage": {
+        "samples": 10,
+        "rss_peak_mib": 31.0,
+        "rss_median_mib": 30.0,
+        "cpu_seconds": 0.5,
+        "cpu_mean_millicores": 2.0,
+        "cpu_peak_millicores": 20.0,
+        "rss_slope_mib_per_min": 0.0,
+        "fds_max": 20,
+        "threads_max": 8
+      },
+      "reconciles": 0.0,
+      "reconcile_errors": 0.0,
+      "reconcile_p95_secs": null,
+      "api_requests": 10.0,
+      "api_requests_per_min": 30.0,
+      "api_top": [],
+      "objects": null,
+      "convergence_secs": null
+    },
+    {
+      "name": "final",
+      "kind": "idle",
+      "wall_secs": 30.0,
+      "usage": {
+        "samples": 10,
+        "rss_peak_mib": 37.0,
+        "rss_median_mib": 36.0,
+        "cpu_seconds": 0.5,
+        "cpu_mean_millicores": 2.0,
+        "cpu_peak_millicores": 20.0,
+        "rss_slope_mib_per_min": 0.0,
+        "fds_max": 22,
+        "threads_max": 8
+      },
+      "reconciles": 0.0,
+      "reconcile_errors": 0.0,
+      "reconcile_p95_secs": null,
+      "api_requests": 10.0,
+      "api_requests_per_min": 30.0,
+      "api_top": [],
+      "objects": null,
+      "convergence_secs": null
+    }
+  ]
+}

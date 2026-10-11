@@ -1,0 +1,48 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.weebo.io
+spec:
+  group: example.weebo.io
+  names:
+    kind: ExampleWidget
+    plural: examplewidgets
+    shortNames:
+    - ewg
+    singular: examplewidget
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            description: |-
+              A widget, i.e. the remote object. It is mirrored
+              as-is.
+
+              - first mode
+              - second mode
+            properties:
+              name:
+                description: Name of the remote object.
+                type: string
+              labels:
+                additionalProperties:
+                  type: string
+                type: object
+              extra:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              replicas:
+                default: 1
+                format: int32
+                type: integer
+            required:
+            - name
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true

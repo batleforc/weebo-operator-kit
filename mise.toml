@@ -13,4 +13,6 @@ go = "latest"
 etcd = "3.5.32"
 "aqua:kubernetes/kubernetes/kube-apiserver" = "1.36.2"
 actionlint = "latest"
+# packages/operator-docs (`task docs:check`, `task docs:pack`)
+node = "24"
 shellcheck = "latest"

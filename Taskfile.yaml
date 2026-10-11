@@ -2,6 +2,11 @@ version: "3"
 
 includes:
   mise: ./.tasks/mise.yaml
+  # The operators' cog.toml template (templates/), rendered here too.
+  kit:
+    taskfile: ./templates/kit.yaml
+    vars:
+      KIT_DIR: "{{.ROOT_DIR}}"
 
 env:
   LIBCLANG_PATH:
@@ -47,7 +52,37 @@ tasks:
       - mise exec -- cargo doc --workspace --no-deps
 
   audit:
-    desc: "Check dependencies for CVE (cargo-deny + trivy on Cargo.lock)"
+    desc: "Check dependencies for CVE (cargo-deny + trivy on Cargo.lock, npm audit on packages/operator-docs)"
     cmds:
       - mise exec -- cargo deny check
       - mise exec -- trivy fs --scanners vuln --exit-code 1 --severity HIGH,CRITICAL Cargo.lock
+      # What the package brings into an operator's site; its dev tooling
+      # (the peers it is type-checked against) is the operators' to audit.
+      - mise exec -- npm audit --prefix packages/operator-docs --omit=dev --audit-level=high
+
+  docs:version:
+    desc: "Fail when packages/operator-docs' version differs from the workspace's (its release tarball is named after it)"
+    internal: true
+    cmds:
+      - |
+        crate=$(awk '/^\[workspace\.package\]/{p=1;next} /^\[/{p=0} p && /^version = /{gsub(/"/,"",$3); print $3}' Cargo.toml)
+        npm=$(mise exec -- node -p "require('./packages/operator-docs/package.json').version")
+        if [ "$crate" != "$npm" ]; then
+          echo "packages/operator-docs is $npm, the workspace is $crate — .hooks/bump-versions.sh $crate"
+          exit 1
+        fi
+
+  docs:check:
+    desc: "Check @weebo/operator-docs: version in step with the workspace, types against its pinned peers, generator tests"
+    dir: packages/operator-docs
+    cmds:
+      - task: docs:version
+      - mise exec -- npm ci --no-fund --no-audit
+      - mise exec -- npm run check
+
+  docs:pack:
+    desc: "Pack @weebo/operator-docs into dist/weebo-operator-docs-<version>.tgz, the release asset the operators' docs sites install"
+    cmds:
+      - task: docs:version
+      - mkdir -p dist
+      - mise exec -- npm pack ./packages/operator-docs --pack-destination dist

@@ -33,7 +33,7 @@ pub const RECONCILE: &str = "Reconcile";
 pub const CLEANUP: &str = "Cleanup";
 
 /// Events cap the note at 1 KiB.
-const MAX_NOTE_CHARS: usize = 1000;
+pub(crate) const MAX_NOTE_CHARS: usize = 1000;
 
 /// The Events a reconcile that went from `previous` to `current`
 /// deserves, `Ready`'s first.

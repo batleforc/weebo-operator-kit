@@ -20,6 +20,12 @@ logic, in the same hexagonal layout the operators use.
 | `weebo-kit-testkit`     | envtest control plane, status polling                                                                                     |
 | `weebo-kit-perf`        | what the operator costs: its release binary against envtest, RSS/CPU/fds/threads, API traffic, convergence, a budget     |
 
+Plus one npm package for the operators' documentation sites:
+
+| Package                                                  | What it gives an operator's docs site                                                        |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| [`@weebo/operator-docs`](packages/operator-docs/README.md) | CRD reference generator (`weebo-crd-docs`), manifest builder, BatleHub theme, layouts, routes |
+
 Design, scope rules, versioning and the migration roadmap:
 [`docs/plan.md`](docs/plan.md).
 
@@ -35,6 +41,11 @@ weebo-kit-runtime = { git = "https://github.com/batleforc/weebo-operator-kit", t
 
 Keep `kube` and `k8s-openapi` on the kit's versions.
 
+```json
+// operator's docs/package.json: the tarball attached to the kit's release
+"@weebo/operator-docs": "https://github.com/batleforc/weebo-operator-kit/releases/download/vX.Y.Z/weebo-operator-docs-X.Y.Z.tgz"
+```
+
 ## Development
 
 ```bash
@@ -42,8 +53,10 @@ task init     # toolchain (mise) + git hooks (cocogitto)
 task doctor   # envtest prerequisites (Go, libclang, etcd, kube-apiserver)
 task lint     # fmt --check, clippy -D warnings, actionlint
 task test     # unit + contract tests + doctests
-task audit    # cargo-deny + trivy
+task audit    # cargo-deny + trivy + npm audit (operator-docs)
 task doc      # rustdoc
+task docs:check  # operator-docs: version sync, tsc, generator tests
+task docs:pack   # dist/weebo-operator-docs-<version>.tgz
 ```
 
 To iterate on the kit and an operator together, point the operator at a
