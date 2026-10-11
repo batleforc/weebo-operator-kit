@@ -6,11 +6,13 @@
 //! schema: they talk about "the instance" and "the remote object", never a
 //! product name.
 
+pub mod annotations;
 pub mod refs;
 pub mod secret;
 pub mod status;
 pub mod tls;
 
+pub use annotations::Annotations;
 pub use refs::{LocalSecretKeyRef, ObjectRef, SecretKeyRef};
 pub use secret::{SecretStoreBackend, SecretTarget};
 pub use status::Condition;

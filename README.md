@@ -13,10 +13,10 @@ logic, in the same hexagonal layout the operators use.
 | Crate                   | What it gives an operator                                                                                                 |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `weebo-kit-domain`      | `reason_codes!` + `Reason`, `Failure<R>`/`Advisory<R>`, the namespace allow-list engine                                   |
-| `weebo-kit-api`         | CRD field types: `Condition`, `SecretKeyRef`, `ObjectRef`, `SecretTarget`, `TlsOptions`                                   |
-| `weebo-kit-application` | `SecretStore` ports, secret-emission helpers, `FakeSecretStore` (feature `test-support`)                                  |
-| `weebo-kit-adapters`    | Kubernetes and Vault (Kubernetes auth, KV v2) secret stores, per-target routing                                           |
-| `weebo-kit-runtime`     | telemetry (OTLP + Prometheus), leader election, health probes, graceful shutdown, TLS webhook server, metrics, conditions |
+| `weebo-kit-api`         | CRD field types: `Condition`, `SecretKeyRef`, `ObjectRef`, `SecretTarget`, `TlsOptions`; the common annotations          |
+| `weebo-kit-application` | `SecretStore`/`PolicySource` ports, secret-emission helpers, `*Ref` resolution, `FakeSecretStore` (feature `test-support`) |
+| `weebo-kit-adapters`    | Kubernetes and Vault secret stores, per-target routing, instance resolution, the importer's adoption flow                 |
+| `weebo-kit-runtime`     | telemetry, leader election, health, shutdown, TLS webhook server, `/validate`, controller skeleton, status, Events       |
 | `weebo-kit-testkit`     | envtest control plane, status polling                                                                                     |
 | `weebo-kit-perf`        | what the operator costs: its release binary against envtest, RSS/CPU/fds/threads, API traffic, convergence, a budget     |
 

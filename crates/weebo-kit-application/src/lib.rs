@@ -4,6 +4,7 @@
 
 pub mod emit;
 pub mod ports;
+pub mod refs;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

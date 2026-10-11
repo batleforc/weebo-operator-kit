@@ -10,6 +10,12 @@ use weebo_kit_api::{SecretStoreBackend, SecretTarget};
 #[error("secret store: {0}")]
 pub struct SecretStoreError(pub String);
 
+/// A Kubernetes read made for the use-case (a referenced CR, a policy, a
+/// `Secret`) failed — usually transient, retried like any error.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("Kubernetes API error: {0}")]
+pub struct ClusterError(pub String);
+
 /// The CR emitting a secret. Stores record [`SecretOwner::id`] on every
 /// value they write and refuse to overwrite or delete a value recorded for
 /// another owner — or, for Kubernetes, a `Secret` they didn't create: a CR
@@ -80,6 +86,15 @@ pub trait SecretStore: Send + Sync {
         target: &SecretTarget,
         owner: &SecretOwner<'_>,
     ) -> Result<(), SecretStoreError>;
+}
+
+/// The namespace policies — one rule list per policy object, the rules as
+/// the operator's policy CRD spells them (`R`) — for the admission
+/// webhook and the reconcilers' own re-check. An empty list: no policy
+/// exists, everything is allowed.
+#[async_trait::async_trait]
+pub trait PolicySource<R>: Send + Sync {
+    async fn policies(&self) -> Result<Vec<Vec<R>>, ClusterError>;
 }
 
 /// Produces the `SecretStore` of a CR's `instanceRef` (`None` → the

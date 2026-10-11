@@ -107,6 +107,18 @@ pub fn evaluate<K: PartialEq + Debug>(
     Decision::Denied(why)
 }
 
+/// [`evaluate`] over every policy object's rules: `policies` holds one
+/// rule list per policy, and the mere existence of one switches to
+/// default-deny.
+pub fn evaluate_policies<K: PartialEq + Debug + Clone>(
+    policy_kind: &str,
+    request: &Request<'_, K>,
+    policies: &[Vec<Rule<K>>],
+) -> Decision {
+    let rules: Vec<Rule<K>> = policies.iter().flatten().cloned().collect();
+    evaluate(policy_kind, request, &rules, !policies.is_empty())
+}
+
 fn namespace_matches(pattern: &str, namespace: &str) -> bool {
     match pattern.strip_suffix('*') {
         Some(prefix) => namespace.starts_with(prefix),
@@ -250,6 +262,21 @@ mod tests {
             "no TestNamespacePolicy rule allows Repository in namespace \"ns\" \
              with organizations [\"weebo\"]"
         );
+    }
+
+    #[test]
+    fn policies_are_merged_and_one_empty_policy_denies() {
+        let allow = rule(&["apps"], &[Kind::Repository], Effect::Allow);
+        let request = req("apps", Kind::Repository, &[], &[]);
+        assert_eq!(
+            evaluate_policies(POLICY, &request, &[vec![], vec![allow]]),
+            Decision::Allowed
+        );
+        assert!(matches!(
+            evaluate_policies(POLICY, &request, &[vec![]]),
+            Decision::Denied(_)
+        ));
+        assert_eq!(evaluate_policies(POLICY, &request, &[]), Decision::Allowed);
     }
 
     #[test]

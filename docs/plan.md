@@ -248,23 +248,80 @@ requêtes HTTP.
   workflow CI réutilisable qui commente la PR (comme `profile.yaml`/
   `soak.yaml` de batlehub).
 
-### Itération 3 — généraliser l'application
+### Itération 3 — généraliser l'application (faite, v0.6.0)
 
-Candidats identifiés dans forgejo, à rendre génériques une fois
-authentik aligné (leur forme dépend de l'identifiant distant : `i64` +
-nom chez forgejo, `String` chez authentik) :
+Ce qui était identique ou presque dans les deux opérateurs, rendu neutre
+(un type de CRD, un accesseur de status, un domaine d'annotations, des
+erreurs que l'opérateur traduit) :
 
-- résolution des `*Ref` (`ReferenceReader`, `RefState`, `require`,
-  `recorded_name`) et le `KubeClusterReader` qui l'implémente ;
-- admission : `Governed`, `enforce`, `PolicySource`, le routeur
-  `/validate` du webhook ;
-- résolution de l'instance (`InstanceResolver`, `select` par
-  `instanceRef`/instance par défaut) et le squelette des gateway
-  factories ;
-- squelette de controller (`Ctx`, `error_policy`, `requeue_after`,
-  annotations communes `allow-disruptive-update`/`rotate-secret`/
-  `import-pending`) ;
-- squelette de l'importer (création en pause, status amorcé, reprise).
+- **Annotations communes** (`weebo-kit-api::annotations`) :
+  `Annotations::new("<groupe>")` lit `force-orphan`,
+  `allow-disruptive-update`, `rotate-secret`, `import-pending` sous le
+  domaine de l'opérateur ; mêmes noms, même comportement partout.
+- **Résolution des `*Ref`** (`weebo-kit-application::refs`) :
+  `Referenced<Id>`, `RefState<Id>` (`Ready`/`NotFound`/`NotReady`/
+  `OtherInstance`), `require` → `RefError` neutre (`describe` pour le
+  message), `same_instance` (un `instanceRef` vide = la seule instance).
+  La lecture des CR référencés reste à l'opérateur (ses kinds, son
+  status) ; `ClusterError` et le port `PolicySource<R>` (générique sur la
+  règle telle que la CRD de policy l'écrit) sont dans les ports du kit.
+- **Admission** (`weebo-kit-runtime::admission`) : `router(admission,
+  health, meter, prefix)` sert `/validate` + les sondes autour du trait
+  `Admission` de l'opérateur (`admit(kind, namespace, object)` →
+  `Denial { reason, message }`) : refus 403 avec le code de raison,
+  échec fermé, `DELETE` et `UPDATE` sans changement de `spec` toujours
+  acceptés (un CR dont le namespace a perdu sa policy n'est jamais
+  bloqué en `Terminating`), compteur `<prefix>_webhook_decisions_total`.
+  `typed::<K>()` pour l'objet typé, `handle()` pour les tests.
+  `allow_list::evaluate_policies` fusionne les règles de toutes les
+  policies.
+- **Résolution de l'instance** (`weebo-kit-adapters::instance`) :
+  `InstanceResolver<I>` (reflector `Store` ou API, `list`/`get`) et
+  `select(instances, instance_ref)` → `SelectError` (`NotFound`/
+  `NoInstance`/`Ambiguous`) que chaque opérateur mappe sur ses codes —
+  forgejo `InstanceNotFound` pour 0 instance, authentik
+  `AmbiguousDefaultInstance`, comme avant. Le squelette des gateway
+  factories (client HTTP, cache par CA) reste dans les opérateurs : leurs
+  besoins diffèrent (cache + sémaphore + métriques chez forgejo, aucun
+  cache chez authentik).
+- **Squelette de controller** (`weebo-kit-runtime::controller` et
+  `status`) : `controller(api)` (watch filtrée par prédicats generation/
+  annotations/labels/finalizers/suppression, concurrence
+  `WEEBO_RECONCILE_CONCURRENCY`, 4 par défaut), `drive`, `jittered`,
+  `requeue_after(steady, due_in)` (300 s/30 s ±20 %),
+  `retry_after_error` (corps de l'`error_policy` : Event `Warning` +
+  ~30 s), `finalize` (cleanup sauf `force-orphan`, puis Event du code
+  `released` de l'opérateur), `status::publish` (merge patch des
+  conditions + `observedGeneration` au succès + champs de l'opérateur,
+  retenté sur erreur transitoire, puis Events). `Ctx`, l'enum `Error` et
+  `needs_a_change` restent aux opérateurs.
+- **Importer** (`weebo-kit-adapters::adopt`) : `Adopter { field_manager,
+  annotations }.adopt(api, cr, remote_id, seed, bound_to, force)` — crée
+  le CR en pause (`import-pending`), amorce son status, le relâche ;
+  rejouable (déjà lié → ignoré, en pause → terminé), refuse un CR existant
+  lié à rien sauf `--force`. `Summary`, `to_yaml`.
+
+Migration : forgejo ne change pas de comportement (son code était la
+source) ; ses compteurs de webhook sortent en
+`weebo_forgejo_webhook_decisions_total` (plus de double `_total`).
+Authentik gagne ce que forgejo avait déjà : prédicats et concurrence
+bornée (une réconciliation par création au lieu de deux), gigue,
+`force-orphan` (Event `Released`), la pause `import-pending`, le retry du
+patch de status, le passe-droit `DELETE`/`UPDATE` sans `spec` du
+webhook, et `importer --apply` qui adopte au lieu de demander un
+`kubectl patch --subresource=status` à la main. Mesuré par
+`weebo-kit-perf` (200 `AuthentikGroup`, même run qu'en v0.5.0) :
+réconciliations 400 → 200 par rafale, CPU des charges −70 % (~7 ms par
+objet), RSS au repos 42 → 32 MiB, descripteurs ~100 → 25, requêtes
+apiserver 9 → 6 par création.
+
+Reste propre à chaque opérateur : `RefKind`/`ReferencedCr` et le
+`KubeClusterReader` (listes de CRD), `Governed` et les dimensions de
+l'allow-list (organisations/utilisateurs chez forgejo), la règle des
+admins de site, `Outcome`/`ReconcileOutcome`, les clés `key-owner` de
+forgejo, la résolution par nom côté gateway chez authentik. Authentik ne
+revérifie toujours pas la policy dans ses reconcilers (forgejo si) : à
+faire quand il aura un `PolicySource`.
 
 ### Hors Rust (plus tard)
 
@@ -274,3 +331,20 @@ nom chez forgejo, `String` chez authentik) :
 - CI : workflows réutilisables (`workflow_call`) pour lint/test/audit.
 - Gabarit `cargo-generate` d'un nouvel opérateur : workspace hexagonal
   câblé sur le kit, une CRD `XInstance` + une ressource exemple.
+- Doc : une lib (paquet npm, ex. `@weebo/operator-docs`) pour le format
+  commun des sites Fumadocs/Next des opérateurs, qui portent aujourd'hui
+  chacun leur copie :
+  - le générateur `docs/scripts/gen-crd-docs.mjs` (CRD YAML → pages
+    `crds/*.mdx` + `public/crd-schemas/*.json`), dont les deux copies ont
+    déjà divergé (~200 lignes de diff) ;
+  - les composants `crd-form` (`CrdForm`, `CrdBuilder`, `fields`,
+    `ChoicePicker` : construire un CR depuis son schéma) et le style des
+    diagrammes (`diagram-style.ts`) ;
+  - la mise en page et l'arborescence attendues (`index`, `guides/`,
+    `crds/`, `meta.json`), le thème, et les pages que les conditions du
+    kit rendent communes (codes de raison, Events, métriques, budget
+    `weebo-kit-perf`) ;
+  - les versions de `fumadocs-*`/`next` alignées (aujourd'hui 16.11 et
+    16.16).
+  Chaque opérateur garde son contenu (`content/docs`) et ses diagrammes
+  métier.

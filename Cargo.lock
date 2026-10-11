@@ -4009,8 +4009,11 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "rcgen",
+ "serde",
  "serde_json",
+ "serde_norway",
  "sha2",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -4063,6 +4066,7 @@ name = "weebo-kit-runtime"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "axum-server",
  "futures",
@@ -4073,6 +4077,8 @@ dependencies = [
  "opentelemetry-prometheus",
  "opentelemetry_sdk",
  "prometheus",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-opentelemetry",
