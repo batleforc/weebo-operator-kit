@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.10.0](https://github.com/batleforc/weebo-operator-kit/compare/82d8f66d0a2264320eaa9110cf21f788adb22e9a..v0.10.0) - 2026-10-12
+#### Features
+- ![BREAKING](https://img.shields.io/badge/BREAKING-red) watch scope, local instances and full namespaced mode - ([82d8f66](https://github.com/batleforc/weebo-operator-kit/commit/82d8f66d0a2264320eaa9110cf21f788adb22e9a)) - Max Batleforc, Claude Opus 5.5
+
+- - -
+
 ## [v0.9.0](https://github.com/batleforc/weebo-operator-kit/compare/9718abdf885f89e4742a3f324ae281139eee0ba5..v0.9.0) - 2026-10-11
 #### Features
 - library chart, shared tasks, reusable CI and operator template - ([9718abd](https://github.com/batleforc/weebo-operator-kit/commit/9718abdf885f89e4742a3f324ae281139eee0ba5)) - Max Batleforc
