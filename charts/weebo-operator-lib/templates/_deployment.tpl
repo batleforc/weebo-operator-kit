@@ -77,6 +77,22 @@ spec:
               value: {{ $v.webhook.containerPort | quote }}
             - name: WEEBO_SHUTDOWN_DRAIN_SECONDS
               value: {{ $v.shutdown.drainSeconds | quote }}
+            {{- with include "weebo-operator.watchNamespace" $ctx }}
+            - name: WEEBO_WATCH_NAMESPACE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if not (include "weebo-operator.watchClusterKinds" $ctx) }}
+            - name: WEEBO_WATCH_CLUSTER_KINDS
+              value: "false"
+            {{- end }}
+            {{- with include "weebo-operator.watchLabelSelector" $ctx }}
+            - name: WEEBO_WATCH_LABEL_SELECTOR
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if (($ctx.Values.references | default dict).crossNamespace) }}
+            - name: WEEBO_CROSS_NAMESPACE_REFS
+              value: "true"
+            {{- end }}
             - name: WEEBO_RECONCILE_CONCURRENCY
               value: {{ $v.reconcileConcurrency | quote }}
             - name: LOG_FORMAT

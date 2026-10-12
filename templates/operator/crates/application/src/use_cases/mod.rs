@@ -8,7 +8,9 @@ pub mod reconcile_object;
 use domain::Failure;
 use domain::error::ReasonCode;
 
-use crate::ports::{GatewayError, GatewayFactoryError};
+use crate::ports::{
+    BoundInstance, GatewayError, GatewayFactoryError, InstanceError, instance_reason,
+};
 
 impl From<GatewayError> for Failure {
     fn from(err: GatewayError) -> Self {
@@ -22,11 +24,19 @@ impl From<GatewayFactoryError> for Failure {
     }
 }
 
+/// An instance that couldn't be resolved, as a failure (`Failure` and
+/// `InstanceError` both being the kit's, no `From` between them).
+pub fn instance_failure(err: InstanceError) -> Failure {
+    Failure::new(instance_reason(&err), err.to_string())
+}
+
 /// What a reconcile ended on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outcome {
     /// The remote object this CR now owns, to record in its status.
     pub remote_id: Option<String>,
+    /// The instance the CR was resolved to, to record in its status.
+    pub instance: Option<BoundInstance>,
     /// `Ok(message)` for `Ready: True`.
     pub ready: Result<String, Failure>,
 }
@@ -35,6 +45,7 @@ impl Outcome {
     pub fn synced(remote_id: Option<String>, message: impl Into<String>) -> Self {
         Self {
             remote_id,
+            instance: None,
             ready: Ok(message.into()),
         }
     }
@@ -42,8 +53,15 @@ impl Outcome {
     pub fn failed(failure: impl Into<Failure>) -> Self {
         Self {
             remote_id: None,
+            instance: None,
             ready: Err(failure.into()),
         }
+    }
+
+    /// Records the instance the CR is bound to.
+    pub fn on(mut self, instance: BoundInstance) -> Self {
+        self.instance = Some(instance);
+        self
     }
 
     /// The reason `Ready` ends on — what metrics and Events are keyed by.

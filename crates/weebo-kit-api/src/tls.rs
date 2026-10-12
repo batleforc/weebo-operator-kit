@@ -28,3 +28,34 @@ pub struct TlsOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ca_secret_ref: Option<SecretKeyRef>,
 }
+
+/// [`TlsOptions`] of a namespaced instance: its CA `Secret` lives in the
+/// instance's own namespace.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalTlsOptions {
+    /// Skip certificate verification entirely — insecure, intended only for
+    /// throwaway/self-signed instances. Prefer `caSecretRef` below.
+    #[serde(default)]
+    pub insecure_skip_verify: bool,
+    /// Optional custom CA certificate (a PEM bundle under `key`) to verify
+    /// the instance's TLS with, read from a `Secret` of the instance's own
+    /// namespace. Added on top of the platform trust store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_secret_ref: Option<crate::refs::LocalSecretKeyRef>,
+}
+
+impl LocalTlsOptions {
+    /// The same options, the CA `Secret` resolved in `namespace` (the
+    /// instance's).
+    pub fn in_namespace(&self, namespace: &str) -> TlsOptions {
+        TlsOptions {
+            insecure_skip_verify: self.insecure_skip_verify,
+            ca_secret_ref: self.ca_secret_ref.as_ref().map(|r| SecretKeyRef {
+                name: r.name.clone(),
+                namespace: namespace.to_string(),
+                key: r.key.clone(),
+            }),
+        }
+    }
+}

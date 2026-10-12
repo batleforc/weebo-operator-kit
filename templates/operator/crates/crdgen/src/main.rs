@@ -18,7 +18,11 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     fs::create_dir_all(&args.out)?;
-    for crd in [api::Instance::crd(), api::Object::crd()] {
+    for crd in [
+        api::Instance::crd(),
+        api::LocalInstance::crd(),
+        api::Object::crd(),
+    ] {
         write_crd(&args.out, &crd)?;
     }
     println!("wrote CRDs to {}", args.out.display());

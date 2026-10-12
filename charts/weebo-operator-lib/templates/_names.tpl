@@ -102,3 +102,44 @@ user-provided when cert-manager is disabled.
 {{- define "weebo-operator.alertPrefix" -}}
 {{- .Chart.Name | replace "-" " " | title | nospace -}}
 {{- end -}}
+
+{{/*
+Watch scope (watch.*). Both render "" when unset: a chart whose values
+have no `watch` block watches the whole cluster, as before.
+*/}}
+{{/* The namespace watched, "" for the whole cluster. */}}
+{{- define "weebo-operator.watchNamespace" -}}
+{{- (.Values.watch | default dict).namespace | default "" -}}
+{{- end -}}
+
+{{/* The label selector, "" when every object is watched. */}}
+{{- define "weebo-operator.watchLabelSelector" -}}
+{{- with (.Values.watch | default dict).labelSelector -}}
+{{- if or .matchLabels .matchExpressions -}}{{ toJson . }}{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* "true" unless watch.clusterKinds is false (full namespaced). */}}
+{{- define "weebo-operator.watchClusterKinds" -}}
+{{- if ne (.Values.watch | default dict).clusterKinds false -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Fails the render on a watch scope that can't work: no cluster-scoped kind
+needs a namespace, and the CRDs (cluster-scoped) managed out of band.
+*/}}
+{{- define "weebo-operator.checkWatch" -}}
+{{- if not (include "weebo-operator.watchClusterKinds" .) -}}
+{{- if not (include "weebo-operator.watchNamespace" .) -}}
+{{- fail "watch.clusterKinds=false needs watch.namespace" -}}
+{{- end -}}
+{{- if .Values.crds.install -}}
+{{- fail "watch.clusterKinds=false needs crds.install=false: CRDs are cluster-scoped, a cluster admin installs them" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* "true" unless webhook.enabled is false. */}}
+{{- define "weebo-operator.webhookEnabled" -}}
+{{- if ne .Values.webhook.enabled false -}}true{{- end -}}
+{{- end -}}

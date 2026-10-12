@@ -97,7 +97,7 @@ impl Marks {
             .as_ref()
             .and_then(|a| a.get(self.owner_annotation));
         match (label, recorded) {
-            (Some(by), Some(id)) if by == self.managed_by && *id == owner.id() => Ownership::Owned,
+            (Some(by), Some(id)) if by == self.managed_by && owner.is(id) => Ownership::Owned,
             (Some(by), None) if by == self.managed_by => Ownership::Owned,
             (Some(by), Some(id)) if by == self.managed_by => Ownership::Foreign(id.clone()),
             (None, None) if self.written_by_us(secret) => Ownership::Owned,
@@ -310,6 +310,7 @@ mod tests {
         kind: "Token",
         namespace: Some("ns"),
         name: "app",
+        formerly: None,
     };
 
     #[test]

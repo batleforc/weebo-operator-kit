@@ -22,11 +22,24 @@ metadata:
 The operator's own ClusterRole: its kinds (params.kinds, plurals of
 params.group) watched cluster-wide with their status and finalizers,
 Secrets read and written by name, Events. params.clusterRules appends
-rules of its own.
+rules of its own. With watch.namespace, the namespaced kinds
+(params.namespacedKinds) move to the watch Role below: the ClusterRole
+keeps the cluster-scoped ones, and Secrets and Events (a cluster-scoped
+CR writes its Secrets wherever it targets, its Events go to `default`).
 */}}
 {{- define "weebo-operator.clusterRole" -}}
 {{- $ctx := .ctx -}}
 {{- $p := .params -}}
+{{- if include "weebo-operator.watchClusterKinds" $ctx -}}
+{{- $kinds := $p.kinds -}}
+{{- if include "weebo-operator.watchNamespace" $ctx -}}
+{{- $kinds = list -}}
+{{- range $p.kinds -}}
+{{- if not (has . ($p.namespacedKinds | default list)) -}}
+{{- $kinds = append $kinds . -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -34,26 +47,11 @@ metadata:
   labels:
     {{- include "weebo-operator.labels" $ctx | nindent 4 }}
 rules:
+  {{- if $kinds }}
   # Every controller watches its kind cluster-wide (namespaced kinds
-  # included) and the kinds it references.
-  - apiGroups: [{{ $p.group | quote }}]
-    resources:
-      {{- range $p.kinds }}
-      - {{ . }}
-      {{- end }}
-    verbs: ["get", "list", "watch", "update", "patch"]
-  - apiGroups: [{{ $p.group | quote }}]
-    resources:
-      {{- range $p.kinds }}
-      - {{ . }}/status
-      {{- end }}
-    verbs: ["get", "patch", "update"]
-  - apiGroups: [{{ $p.group | quote }}]
-    resources:
-      {{- range $p.kinds }}
-      - {{ . }}/finalizers
-      {{- end }}
-    verbs: ["update"]
+  # included unless watch.namespace) and the kinds it references.
+  {{- include "weebo-operator.kindRules" (dict "group" $p.group "kinds" $kinds) | nindent 2 }}
+  {{- end }}
   # Emitted credentials and the instances' own Secrets: read by name,
   # created, replaced whole when the operator owns them and deleted with
   # their CR. Never listed or watched.
@@ -64,13 +62,44 @@ rules:
   - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
+  {{- if not (include "weebo-operator.watchNamespace" $ctx) }}
+  # A local instance shared with a namespaceSelector: the labels of the
+  # namespace of the object using it. Read by name, never listed.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+  {{- end }}
   {{- with $p.clusterRules }}
   {{- toYaml . | nindent 2 }}
   {{- end }}
 {{- end -}}
+{{- end -}}
+
+{{/* Read, watch and write `kinds` of `group`, their status and finalizers. */}}
+{{- define "weebo-operator.kindRules" -}}
+- apiGroups: [{{ .group | quote }}]
+  resources:
+    {{- range .kinds }}
+    - {{ . }}
+    {{- end }}
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: [{{ .group | quote }}]
+  resources:
+    {{- range .kinds }}
+    - {{ . }}/status
+    {{- end }}
+  verbs: ["get", "patch", "update"]
+- apiGroups: [{{ .group | quote }}]
+  resources:
+    {{- range .kinds }}
+    - {{ . }}/finalizers
+    {{- end }}
+  verbs: ["update"]
+{{- end -}}
 
 {{- define "weebo-operator.clusterRoleBinding" -}}
 {{- $ctx := .ctx -}}
+{{- if include "weebo-operator.watchClusterKinds" $ctx -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -85,6 +114,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "weebo-operator.serviceAccountName" $ctx }}
     namespace: {{ $ctx.Release.Namespace }}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -120,6 +150,51 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "weebo-operator.serviceAccountName" $ctx }}
     namespace: {{ $ctx.Release.Namespace }}
+{{- end -}}
+
+{{/*
+With watch.namespace: the namespaced kinds (params.namespacedKinds) in
+that namespace only, and their Secrets and Events there.
+*/}}
+{{- define "weebo-operator.watchRole" -}}
+{{- $ctx := .ctx -}}
+{{- $p := .params -}}
+{{- $ns := include "weebo-operator.watchNamespace" $ctx -}}
+{{- if and $ns $p.namespacedKinds -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "weebo-operator.fullname" $ctx }}-watch
+  namespace: {{ $ns }}
+  labels:
+    {{- include "weebo-operator.labels" $ctx | nindent 4 }}
+rules:
+  {{- include "weebo-operator.kindRules" (dict "group" $p.group "kinds" $p.namespacedKinds) | nindent 2 }}
+  # Emitted credentials: read by name, created, replaced, deleted with
+  # their CR. Never listed or watched.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch", "delete"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "weebo-operator.fullname" $ctx }}-watch
+  namespace: {{ $ns }}
+  labels:
+    {{- include "weebo-operator.labels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "weebo-operator.fullname" $ctx }}-watch
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "weebo-operator.serviceAccountName" $ctx }}
+    namespace: {{ $ctx.Release.Namespace }}
+{{- end -}}
 {{- end -}}
 
 {{/*

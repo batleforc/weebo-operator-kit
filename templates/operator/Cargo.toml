@@ -31,6 +31,7 @@ testkit = { path = "crates/testkit" }
 # never push with a path dependency (CI and container builds don't see it).
 weebo-kit-domain = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.9.0" }
 weebo-kit-api = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.9.0" }
+weebo-kit-application = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.9.0" }
 weebo-kit-adapters = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.9.0" }
 weebo-kit-runtime = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.9.0" }
 weebo-kit-testkit = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.9.0" }

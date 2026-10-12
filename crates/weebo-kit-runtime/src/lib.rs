@@ -13,12 +13,14 @@ pub mod events;
 pub mod health;
 pub mod leader;
 pub mod metrics;
+pub mod scope;
 pub mod shutdown;
 pub mod status;
 pub mod telemetry;
 pub mod webhook_server;
 
 pub use health::Health;
+pub use scope::WatchScope;
 pub use shutdown::Shutdown;
 
 /// The docs package quotes these values on every operator's site (its

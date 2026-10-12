@@ -11,4 +11,5 @@ async-trait = { workspace = true }
 kube = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
+weebo-kit-api = { workspace = true }
 weebo-kit-testkit = { workspace = true }

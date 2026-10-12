@@ -53,6 +53,26 @@ impl EnvTestCluster {
         self.client.clone()
     }
 
+    /// A client acting as the ServiceAccount `namespace/name` (admin
+    /// impersonation): it gets exactly what RBAC grants that account —
+    /// the control plane authorizes with RBAC — to prove an operator runs
+    /// on the Roles its chart renders.
+    pub async fn client_as_service_account(&self, namespace: &str, name: &str) -> Client {
+        let mut config = kube::Config::from_custom_kubeconfig(
+            self.kubeconfig(),
+            &kube::config::KubeConfigOptions::default(),
+        )
+        .await
+        .expect("envtest kubeconfig is usable");
+        config.auth_info.impersonate = Some(format!("system:serviceaccount:{namespace}:{name}"));
+        config.auth_info.impersonate_groups = Some(vec![
+            "system:serviceaccounts".into(),
+            format!("system:serviceaccounts:{namespace}"),
+            "system:authenticated".into(),
+        ]);
+        Client::try_from(config).expect("impersonating client")
+    }
+
     /// Admin kubeconfig of the control plane: to run a real binary against
     /// it (`KUBECONFIG`), or to read its URL and CA (Vault's Kubernetes auth).
     pub fn kubeconfig(&self) -> kube::config::Kubeconfig {

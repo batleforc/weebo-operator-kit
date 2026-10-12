@@ -57,12 +57,36 @@ tasks:
         --set rbac.namespacedExample.enabled=true > /dev/null
       # Metrics off: no metrics port, Service or env.
       - "{{.T}} --set metrics.prometheus.enabled=false | (! grep -q WEEBO_METRICS_ADDR)"
+      # Watch scope: one namespace (env, no namespaced kind left in the
+      # ClusterRole's rules beyond the cluster ones), a label selector (env
+      # and the scope.<group> webhook), the webhook configuration off.
+      - "{{.T}} --set watch.namespace=team-a | grep -q 'name: WEEBO_WATCH_NAMESPACE'"
+      - >-
+        {{.T}} --set watch.labelSelector.matchLabels.shard=a
+        | grep -A1 'name: WEEBO_WATCH_LABEL_SELECTOR' | grep -q 'shard'
+      - "{{.T}} --set watch.labelSelector.matchLabels.shard=a | grep -q '  - name: scope\\.'"
+      - >-
+        {{.T}} --set watch.labelSelector.matchLabels.shard=a --set webhook.enabled=false
+        | (! grep -q ValidatingWebhookConfiguration)
+      - "{{.T}} --set references.crossNamespace=true | grep -q 'name: WEEBO_CROSS_NAMESPACE_REFS'"
+      # Full namespaced: nothing cluster-scoped in the render.
+      - >-
+        {{.T}} --set watch.namespace=team-a --set watch.clusterKinds=false --set crds.install=false
+        | grep -q 'name: WEEBO_WATCH_CLUSTER_KINDS'
+      - >-
+        test -z "$({{.T}} --set watch.namespace=team-a --set watch.clusterKinds=false --set crds.install=false
+        --set 'watch.labelSelector.matchLabels.shard=a'
+        | grep -E '^kind: (ClusterRole|ClusterRoleBinding|ValidatingWebhookConfiguration|CustomResourceDefinition)$')"
       # Refused: schema enum, missing TLS Secret without cert-manager,
       # egress without the API server, ServiceMonitor without metrics.
       - "! {{.T}} --set webhook.failurePolicy=Nope > /dev/null 2>&1"
       - "! {{.T}} --set webhook.certManager.enabled=false > /dev/null 2>&1"
       - "! {{.T}} --set networkPolicy.enabled=true --set networkPolicy.egress.enabled=true > /dev/null 2>&1"
       - "! {{.T}} --set serviceMonitor.enabled=true --set metrics.prometheus.enabled=false > /dev/null 2>&1"
+      - "! {{.T}} --set watch.namespace=Team_A > /dev/null 2>&1"
+      - "! {{.T}} --set watch.clusterKinds=false --set crds.install=false > /dev/null 2>&1"
+      - "! {{.T}} --set watch.clusterKinds=false --set watch.namespace=team-a > /dev/null 2>&1"
+      - "! {{.T}} --set 'watch.labelSelector.matchExpressions[0].key=k' --set 'watch.labelSelector.matchExpressions[0].operator=Bogus' > /dev/null 2>&1"
       # Every CRD ships as a template with the keep policy, none without
       # crds.install.
       - >-

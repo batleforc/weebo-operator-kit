@@ -19,6 +19,8 @@ tracing = { workspace = true }
 weebo-kit-runtime = { workspace = true }
 
 [dev-dependencies]
+adapters-outbound = { workspace = true }
+weebo-kit-adapters = { workspace = true }
 testkit = { workspace = true }
 weebo-kit-api = { workspace = true }
 tokio = { workspace = true }

@@ -111,15 +111,16 @@ impl RoutingSecretStore {
         Ok(vault.default_path(ns, &target.name))
     }
 
-    /// `Ok(true)` when `path` is free or `owner`'s (values written before
-    /// owners were recorded count as the writer's).
+    /// `Ok(true)` when `path` is free or `owner`'s — under its id or the
+    /// one it had before (values written before owners were recorded count
+    /// as the writer's).
     async fn vault_owned(
         vault: &VaultSecretStore,
         path: &str,
         owner: &SecretOwner<'_>,
     ) -> Result<Result<(), String>, SecretStoreError> {
         Ok(match vault.owner_of(path).await? {
-            Some(other) if other != owner.id() => Err(other),
+            Some(other) if !owner.is(&other) => Err(other),
             _ => Ok(()),
         })
     }

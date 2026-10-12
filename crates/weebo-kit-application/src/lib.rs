@@ -3,8 +3,10 @@
 //! Kubernetes client — adapters live in `weebo-kit-adapters`.
 
 pub mod emit;
+pub mod instances;
 pub mod ports;
 pub mod refs;
+pub mod sharing;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

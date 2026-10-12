@@ -8,8 +8,9 @@ Resources a release does not enable render nothing; the others are
 separated by `---`.
 */}}
 {{- define "weebo-operator.all" -}}
+{{- include "weebo-operator.checkWatch" .ctx -}}
 {{- $docs := list -}}
-{{- range $t := list "serviceAccount" "clusterRole" "clusterRoleBinding" "leaderElectionRole" "namespacedExampleRole" "service" "issuer" "certificate" "validatingWebhookConfiguration" "deployment" "podDisruptionBudget" "metricsService" "serviceMonitor" "prometheusRule" "networkPolicy" "argocdHealthConfigMap" -}}
+{{- range $t := list "serviceAccount" "clusterRole" "clusterRoleBinding" "watchRole" "leaderElectionRole" "namespacedExampleRole" "service" "issuer" "certificate" "validatingWebhookConfiguration" "deployment" "podDisruptionBudget" "metricsService" "serviceMonitor" "prometheusRule" "networkPolicy" "argocdHealthConfigMap" -}}
 {{- $doc := include (printf "weebo-operator.%s" $t) $ | trim -}}
 {{- if $doc -}}
 {{- $docs = append $docs $doc -}}
@@ -39,6 +40,29 @@ The Issuer/ClusterIssuer "{{ $v.certManager.issuerRef.name }}" ({{ $v.certManage
 
 Webhook TLS: the Secret "{{ $v.webhook.tls.secretName }}" must exist in
 {{ .Release.Namespace }} and stay signed by the CA in webhook.caBundle.
+{{- end }}
+{{- with include "weebo-operator.watchNamespace" . }}
+
+Watch scope: the namespaced kinds of namespace "{{ . }}" only (a Role
+there); the cluster-scoped kinds stay watched cluster-wide.
+{{- end }}
+{{- if include "weebo-operator.watchLabelSelector" . }}
+
+Watch scope: only the objects matching watch.labelSelector. Removing the
+label from a managed object is refused (scope.<group> webhook) unless it
+carries the force-orphan annotation.
+{{- end }}
+{{- if not (include "weebo-operator.watchClusterKinds" .) }}
+
+Full namespaced (watch.clusterKinds=false): no cluster-scoped kind is
+watched, no ClusterRole nor ValidatingWebhookConfiguration is installed.
+Objects use the LocalInstances of their namespace; the CRDs come from a
+cluster admin.
+{{- end }}
+{{- if not (include "weebo-operator.webhookEnabled" .) }}
+
+webhook.enabled=false: no ValidatingWebhookConfiguration, the reconcilers
+alone enforce the rules.
 {{- end }}
 {{- if not $v.crds.install }}
 

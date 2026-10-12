@@ -54,7 +54,7 @@ mod tests {
         Object::new(
             name,
             ObjectSpec {
-                instance_ref: "main".into(),
+                instance_ref: Some(api::object::InstanceRef::named("main")),
                 name: None,
                 description: Some("example".into()),
             },

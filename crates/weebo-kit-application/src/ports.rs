@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use weebo_kit_api::{SecretStoreBackend, SecretTarget};
+use weebo_kit_api::{BoundInstance, SecretStoreBackend, SecretTarget};
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("secret store: {0}")]
@@ -29,6 +29,10 @@ pub struct SecretOwner<'a> {
     /// namespace ([`crate::emit::check_target`]).
     pub namespace: Option<&'a str>,
     pub name: &'a str,
+    /// The id this CR wrote its values under before (a CR moved between
+    /// scopes: `Kind/name` → `Kind/<namespace>/name`). A value recorded for
+    /// it is this CR's, and is rewritten under [`Self::id`].
+    pub formerly: Option<&'a str>,
 }
 
 impl<'a> SecretOwner<'a> {
@@ -37,6 +41,7 @@ impl<'a> SecretOwner<'a> {
             kind,
             namespace: Some(namespace),
             name,
+            formerly: None,
         }
     }
 
@@ -45,7 +50,20 @@ impl<'a> SecretOwner<'a> {
             kind,
             namespace: None,
             name,
+            formerly: None,
         }
+    }
+
+    /// The id it wrote its values under before, if any (see
+    /// [`Self::formerly`]).
+    pub fn formerly(mut self, id: Option<&'a str>) -> Self {
+        self.formerly = id;
+        self
+    }
+
+    /// Whether a value recorded for `recorded` is this owner's.
+    pub fn is(&self, recorded: &str) -> bool {
+        recorded == self.id() || self.formerly == Some(recorded)
     }
 
     /// `<kind>/<namespace>/<name>`, or `<kind>/<name>` when cluster-scoped.
@@ -97,13 +115,15 @@ pub trait PolicySource<R>: Send + Sync {
     async fn policies(&self) -> Result<Vec<Vec<R>>, ClusterError>;
 }
 
-/// Produces the `SecretStore` of a CR's `instanceRef` (`None` → the
-/// cluster's only instance): Kubernetes always, Vault when the instance
-/// configures it.
+/// Produces the `SecretStore` of the instance a CR is bound to (resolved
+/// first, `crate::instances`): Kubernetes always, Vault when the instance
+/// configures it. A local instance's Vault paths stay under
+/// `<pathPrefix>/<its namespace>/`: the operator's Vault identity is
+/// shared by every namespace.
 #[async_trait::async_trait]
 pub trait SecretStoreFactory: Send + Sync {
     async fn store_for(
         &self,
-        instance_ref: Option<&str>,
+        instance: &BoundInstance,
     ) -> Result<Arc<dyn SecretStore>, SecretStoreError>;
 }

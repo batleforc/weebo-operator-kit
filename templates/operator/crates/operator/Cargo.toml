@@ -18,7 +18,9 @@ futures = { workspace = true }
 kube = { workspace = true }
 opentelemetry = { workspace = true }
 rustls = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+weebo-kit-adapters = { workspace = true }
 weebo-kit-runtime = { workspace = true }

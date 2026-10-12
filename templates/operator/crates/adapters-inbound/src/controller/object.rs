@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use api::Object;
-use application::use_cases::Outcome;
+use application::ports::BoundInstance;
 use application::use_cases::reconcile_object::{delete_object, reconcile_object};
+use application::use_cases::{Outcome, instance_failure};
 use domain::Failure;
 use kube::api::Api;
 use kube::runtime::controller::Action;
@@ -20,7 +21,7 @@ const KIND: &str = "{{product}}Object";
 
 pub async fn run(client: Client, ctx: Arc<Ctx>) {
     let health = ctx.health.clone();
-    let results = super::controller(Api::<Object>::all(client))
+    let results = super::controller(ctx.scope.api::<Object>(client), &ctx.scope)
         .graceful_shutdown_on(ctx.shutdown.wait())
         .run(reconcile, error_policy, ctx);
     super::drive(KIND, health, results).await;
@@ -48,9 +49,14 @@ async fn apply(api: &Api<Object>, object: &Object, ctx: &Ctx) -> Result<Action, 
     // creation.
     let current = api.get(&object.name_any()).await?;
     let started = Instant::now();
-    let outcome = match ctx.gateways.gateway_for(&current.spec.instance_ref).await {
-        Ok(gateway) => reconcile_object(&current, gateway.as_ref()).await,
-        Err(e) => Outcome::failed(e),
+    // A refused resolution leaves `status.instance` as it was.
+    let outcome = match resolve(&current, ctx).await {
+        Err(e) => Outcome::failed(instance_failure(e)),
+        Ok(bound) => match ctx.gateways.gateway_for(&bound).await {
+            Ok(gateway) => reconcile_object(&current, gateway.as_ref()).await,
+            Err(e) => Outcome::failed(e),
+        }
+        .on(bound),
     };
     super::record_reconcile(KIND, started, &outcome);
     super::publish(api, &ctx.recorder, &current, &outcome).await?;
@@ -69,9 +75,16 @@ async fn cleanup(api: &Api<Object>, object: &Object, ctx: &Ctx) -> Result<(), Er
         // instance gone.
         return Ok(());
     };
+    // The instance it was bound to, not whatever its ref designates now.
+    let bound = match object.bound_instance() {
+        Some(bound) => bound.clone(),
+        None => resolve(object, ctx)
+            .await
+            .map_err(|e| Error::Cleanup(instance_failure(e)))?,
+    };
     let gateway = ctx
         .gateways
-        .gateway_for(&object.spec.instance_ref)
+        .gateway_for(&bound)
         .await
         .map_err(|e| Error::Cleanup(Failure::from(e)))?;
     let deleted = delete_object(object, Some(remote_id), gateway.as_ref())
@@ -90,4 +103,19 @@ async fn cleanup(api: &Api<Object>, object: &Object, ctx: &Ctx) -> Result<(), Er
         .await;
     }
     Ok(())
+}
+
+/// The instance `object` lives on: its `instanceRef` resolved (the kit's
+/// rules), and kept to what its status recorded.
+async fn resolve(
+    object: &Object,
+    ctx: &Ctx,
+) -> Result<BoundInstance, application::ports::InstanceError> {
+    ctx.instances
+        .resolve(
+            object.namespace().as_deref(),
+            object.spec.instance_ref.as_ref(),
+            object.bound_instance(),
+        )
+        .await
 }

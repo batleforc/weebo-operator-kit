@@ -19,8 +19,8 @@ use kube::runtime::{Controller, WatchStreamExt, watcher};
 use weebo_kit_api::Annotations;
 use weebo_kit_domain::Reason;
 
-use crate::Health;
 use crate::events;
+use crate::{Health, WatchScope};
 
 /// Default of `WEEBO_RECONCILE_CONCURRENCY`: reconciles running at once per
 /// controller. Bounded so a startup sweep or a policy change (re-checking
@@ -57,7 +57,11 @@ fn deletion<K: Resource>(obj: &K) -> Option<u64> {
 /// would otherwise re-trigger it (and, through watches on referenced
 /// kinds, its dependents) in a loop. Watch errors back off exponentially;
 /// [`concurrency`] reconciles at once.
-pub fn controller<K>(api: Api<K>) -> Controller<K>
+///
+/// `api` comes from `scope.api::<K>()`; `scope` adds its label selector to
+/// the watch. The `watches` on referenced kinds go through the same scope
+/// (`scope.api()`, `scope.watcher_config()`).
+pub fn controller<K>(api: Api<K>, scope: &WatchScope) -> Controller<K>
 where
     K: Resource<DynamicType = ()>
         + Clone
@@ -68,7 +72,7 @@ where
         + 'static,
 {
     let (reader, writer) = reflector::store();
-    let trigger = watcher(api, watcher::Config::default())
+    let trigger = watcher(api, scope.watcher_config())
         .default_backoff()
         .reflect(writer)
         .applied_objects()

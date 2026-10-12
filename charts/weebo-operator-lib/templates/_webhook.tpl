@@ -72,14 +72,29 @@ spec:
 
 {{/*
 `validate.<params.group>` on CREATE/UPDATE of params.admitted (the kinds
-the namespace allow-list admits), at params.versions. Nothing rendered
-when params.admitted is empty.
+the namespace allow-list admits), at params.versions. With a
+watch.labelSelector, `scope.<params.group>` on UPDATE of every kind
+(params.kinds): the kit's ScopeGuard (`/scope`) refuses taking a managed
+object out of the selector. Their namespaceSelector/objectSelector
+default to watch.namespace/watch.labelSelector. Nothing rendered when
+there is neither, with webhook.enabled false (the reconcilers alone
+enforce the rules) or watch.clusterKinds false (a cluster-scoped object).
 */}}
 {{- define "weebo-operator.validatingWebhookConfiguration" -}}
 {{- $ctx := .ctx -}}
 {{- $p := .params -}}
 {{- $wh := $ctx.Values.webhook -}}
-{{- if $p.admitted -}}
+{{- $watchNs := include "weebo-operator.watchNamespace" $ctx -}}
+{{- $selector := include "weebo-operator.watchLabelSelector" $ctx -}}
+{{- if and (include "weebo-operator.webhookEnabled" $ctx) (include "weebo-operator.watchClusterKinds" $ctx) (or $p.admitted $selector) -}}
+{{- $namespaceSelector := $wh.namespaceSelector -}}
+{{- if and (not $namespaceSelector) $watchNs -}}
+{{- $namespaceSelector = dict "matchLabels" (dict "kubernetes.io/metadata.name" $watchNs) -}}
+{{- end -}}
+{{- $objectSelector := $wh.objectSelector -}}
+{{- if and (not $objectSelector) $selector -}}
+{{- $objectSelector = $selector | fromJson -}}
+{{- end -}}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
@@ -97,29 +112,9 @@ metadata:
     {{- end }}
   {{- end }}
 webhooks:
+  {{- if $p.admitted }}
   - name: validate.{{ $p.group }}
-    admissionReviewVersions: ["v1"]
-    sideEffects: None
-    failurePolicy: {{ $wh.failurePolicy }}
-    timeoutSeconds: {{ $wh.timeoutSeconds }}
-    matchPolicy: Equivalent
-    {{- with $wh.namespaceSelector }}
-    namespaceSelector:
-      {{- toYaml . | nindent 6 }}
-    {{- end }}
-    {{- with $wh.objectSelector }}
-    objectSelector:
-      {{- toYaml . | nindent 6 }}
-    {{- end }}
-    clientConfig:
-      {{- if not $wh.certManager.enabled }}
-      caBundle: {{ required "webhook.caBundle (base64 PEM of the CA that signed webhook.tls.secretName) is required when webhook.certManager.enabled is false" $wh.caBundle }}
-      {{- end }}
-      service:
-        name: {{ include "weebo-operator.fullname" $ctx }}
-        namespace: {{ $ctx.Release.Namespace }}
-        path: /validate
-        port: {{ $wh.servicePort }}
+    {{- include "weebo-operator.webhookCommon" (dict "ctx" $ctx "path" "/validate" "namespaceSelector" $namespaceSelector "objectSelector" $objectSelector) | nindent 4 }}
     rules:
       # CREATE/UPDATE only, never DELETE: revoking a namespace's access must
       # never block the finalizer cleanup of what it already created. The
@@ -132,5 +127,48 @@ webhooks:
           {{- range $p.admitted }}
           - {{ . }}
           {{- end }}
+  {{- end }}
+  {{- if $selector }}
+  # An object is sent when its old or its new labels match the selector:
+  # the one leaving it is.
+  - name: scope.{{ $p.group }}
+    {{- include "weebo-operator.webhookCommon" (dict "ctx" $ctx "path" "/scope" "namespaceSelector" $namespaceSelector "objectSelector" $objectSelector) | nindent 4 }}
+    rules:
+      - apiGroups: [{{ $p.group | quote }}]
+        apiVersions: {{ $p.versions | default (list "v1alpha1") | toJson }}
+        operations: ["UPDATE"]
+        resources:
+          {{- range $p.kinds }}
+          - {{ . }}
+          {{- end }}
+  {{- end }}
 {{- end -}}
+{{- end -}}
+
+{{/* What both webhooks share, `path` aside. */}}
+{{- define "weebo-operator.webhookCommon" -}}
+{{- $ctx := .ctx -}}
+{{- $wh := $ctx.Values.webhook -}}
+admissionReviewVersions: ["v1"]
+sideEffects: None
+failurePolicy: {{ $wh.failurePolicy }}
+timeoutSeconds: {{ $wh.timeoutSeconds }}
+matchPolicy: Equivalent
+{{- with .namespaceSelector }}
+namespaceSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .objectSelector }}
+objectSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+clientConfig:
+  {{- if not $wh.certManager.enabled }}
+  caBundle: {{ required "webhook.caBundle (base64 PEM of the CA that signed webhook.tls.secretName) is required when webhook.certManager.enabled is false" $wh.caBundle }}
+  {{- end }}
+  service:
+    name: {{ include "weebo-operator.fullname" $ctx }}
+    namespace: {{ $ctx.Release.Namespace }}
+    path: {{ .path }}
+    port: {{ $wh.servicePort }}
 {{- end -}}

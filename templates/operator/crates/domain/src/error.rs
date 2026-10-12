@@ -9,8 +9,21 @@ weebo_kit_domain::reason_codes! {
     pub enum ReasonCode {
         /// `Ready: True` — the one success reason every reconciler uses.
         Reconciled,
-        /// `spec.instanceRef` names no `{{product}}Instance`.
+        /// `spec.instanceRef` names no `{{product}}Instance` nor
+        /// `{{product}}LocalInstance` the operator sees (or, unset, there is
+        /// none to default to).
         InstanceNotFound,
+        /// `spec.instanceRef` is unset and several instances could serve
+        /// the object.
+        InstanceAmbiguous,
+        /// The instance named is out of reach: a `{{product}}LocalInstance`
+        /// of another namespace that doesn't share itself with this one, or
+        /// outside the namespace the operator is limited to.
+        InstanceNotAllowed,
+        /// `spec.instanceRef` by name now designates another instance than
+        /// the one recorded in `status.instance`: not followed until
+        /// `spec.instanceRef.kind` says which.
+        InstanceBindingChanged,
         /// The instance's `tokenSecretRef` Secret, or its key, is missing
         /// or not UTF-8.
         TokenSecretMissing,
@@ -33,6 +46,10 @@ weebo_kit_domain::reason_codes! {
         /// The finalizer finished — cleanup done, or the CR force-orphaned
         /// (Event only).
         Released,
+        /// An update would take a CR still carrying the finalizer out of
+        /// the operator's label selector (`watch.labelSelector`): refused
+        /// at admission.
+        LeavesWatchScope,
     }
 }
 

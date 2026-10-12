@@ -8,21 +8,23 @@ use std::time::Duration;
 
 use adapters_inbound::controller::{self, Ctx, Shutdown};
 use api::Object;
-use api::object::ObjectSpec;
+use api::object::{InstanceRef, ObjectSpec};
 use k8s_openapi::api::core::v1::Event;
 use kube::Client;
 use kube::api::{Api, DeleteParams, ListParams, PostParams};
 use kube::runtime::events::{Recorder, Reporter};
 use testkit::{FakeGateway, StaticGatewayFactory};
-use weebo_kit_runtime::Health;
+use weebo_kit_runtime::{Health, WatchScope};
 
 const TIMEOUT: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(200);
 
 fn ctx(client: Client, gateway: Arc<FakeGateway>) -> Arc<Ctx> {
+    let instances = Arc::new(StaticGatewayFactory::new(gateway).without("missing"));
     Arc::new(Ctx {
         client: client.clone(),
-        gateways: Arc::new(StaticGatewayFactory::new(gateway).without("missing")),
+        gateways: instances.clone(),
+        instances,
         recorder: Recorder::new(
             client,
             Reporter {
@@ -32,6 +34,7 @@ fn ctx(client: Client, gateway: Arc<FakeGateway>) -> Arc<Ctx> {
         ),
         shutdown: Shutdown::never(),
         health: Arc::new(Health::default()),
+        scope: WatchScope::cluster(),
     })
 }
 
@@ -39,7 +42,7 @@ fn object(name: &str, instance: &str) -> Object {
     Object::new(
         name,
         ObjectSpec {
-            instance_ref: instance.into(),
+            instance_ref: Some(InstanceRef::named(instance)),
             name: None,
             description: Some("from envtest".into()),
         },

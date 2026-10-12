@@ -541,3 +541,680 @@ sur `checks.yml`, puis supprimer leurs copies (`.tasks/helm.yaml`,
 `deploy/scripts/sync-chart-crds.sh`, templates du chart). Le paquet
 `weebo-operator-lib` de ghcr doit être rendu public une fois, à la
 première publication.
+
+### Proposition — périmètre de watch et mode namespacé (décidée, cassante — étapes 1 à 3 faites dans l'arbre, non publiées ; reste forgejo full namespacé)
+
+État en v0.9.0 : un opérateur = une installation pour tout le cluster.
+Chaque controller surveille son kind avec `Api::all` (namespacés compris),
+`InstanceResolver` liste les instances avec `Api::all`, le chart ne rend
+qu'un `ClusterRole` (kinds, Secrets dans tout le cluster, Events). Le
+cloisonnement entre équipes passe par la NamespacePolicy et le webhook,
+pas par le périmètre de l'opérateur. Seuls le Lease (`POD_NAMESPACE`,
+`Role`) et l'écriture de Secrets par un CR namespacé (son propre
+namespace, `check_target`) sont déjà limités à un namespace.
+
+Objectif : trois niveaux, cumulables, choisis à l'installation.
+
+| Niveau                | Ce que l'opérateur voit                                  | Droits nécessaires                                                   |
+|-----------------------|----------------------------------------------------------|----------------------------------------------------------------------|
+| 1. Sélecteur de labels | seulement les CR qui portent les labels voulus           | inchangés (RBAC ne filtre pas par label)                             |
+| 2. Un namespace       | kinds namespacés : un namespace ; kinds cluster : tout   | `Role` dans le namespace + `ClusterRole` réduit aux kinds cluster    |
+| 3. Full namespacé     | un namespace, aucun kind cluster                         | `Role`/`RoleBinding` seulement (namespace surveillé + celui du Lease) |
+
+#### Le périmètre dans le kit : `WatchScope`
+
+- `weebo-kit-runtime::scope::WatchScope { namespace: Option<String>,
+  labels: Option<String>, cluster_kinds: bool }`, lu au démarrage depuis
+  `WEEBO_WATCH_NAMESPACE`, `WEEBO_WATCH_LABEL_SELECTOR` (syntaxe des
+  sélecteurs Kubernetes, validée au démarrage) et
+  `WEEBO_WATCH_CLUSTER_KINDS` (`true` par défaut). Rien de défini = le
+  comportement actuel.
+- `scope.api::<K>(client)` choisit l'`Api` d'après `K::Scope`
+  (`NamespaceResourceScope` → `Api::namespaced`, `ClusterResourceScope` →
+  `Api::all`) ; `scope.watcher_config()` porte le sélecteur de labels.
+  Kind cluster demandé avec `cluster_kinds: false` → erreur au démarrage
+  (jamais une boucle de 403 à l'exécution).
+- `controller(api)` devient `controller(api, &scope)`, et
+  `InstanceResolver`, les `watches` secondaires et les lectures des
+  `ClusterReader` des opérateurs passent par le même scope. **Cassant**
+  pour les opérateurs (signature) : ils remplacent leurs `Api::all`.
+- Dès la v1 : tout le cluster (rien de défini) ou un seul namespace
+  (D3). Plusieurs namespaces plus tard : `kube` ne
+  surveille qu'un namespace ou tous, et fusionner plusieurs watchers dans
+  un même reflector casse son `Init`/`InitDone` (le dernier namespace
+  initialisé remplace le store) ; il faudra un `Controller` par namespace,
+  `Ctx` partagé, concurrence par controller.
+
+#### 1. Sélecteur de labels
+
+- Filtrage côté apiserver (`watcher::Config::labels`) : moins de mémoire
+  et d'événements, utile aussi pour le budget de `weebo-kit-perf`.
+- **Un seul périmètre pour tout ce que l'opérateur voit** : le sélecteur
+  s'applique à tous ses kinds (instance comprise). Un objet hors
+  sélection est invisible : une référence vers lui donne `NotFound`
+  (l'instance : `InstanceNotFound`). Les lectures par nom (`get`) ne
+  filtrent pas par label côté serveur : le kit revérifie le sélecteur
+  sur l'objet lu.
+- **Pas une frontière de sécurité** : RBAC ne filtre pas par label, le
+  `ClusterRole`/`Role` donne accès à tous les objets du kind. Le
+  sélecteur sert à répartir le travail (deux releases pour deux serveurs
+  distants, un shard par équipe), pas à cloisonner.
+- Retirer le label d'un CR le fait sortir du périmètre : le watcher le
+  voit comme supprimé, son finalizer reste, l'objet distant n'est plus
+  géré, et sa suppression reste bloquée en `Terminating`. Garde-fou : le
+  webhook (quand il est actif) refuse un `UPDATE` qui fait sortir du
+  sélecteur un objet portant le finalizer de l'opérateur, sauf avec
+  `force-orphan`. Passer un objet d'un shard à l'autre : changer le
+  label en une seule écriture (même finalizer, même `remoteId` en
+  status, l'autre release le reprend).
+- Le chart dérive `webhook.objectSelector` du même sélecteur, sauf
+  valeur explicite.
+- Deux releases dont les périmètres se recouvrent réconcilient les mêmes
+  CR (même finalizer, même field manager : rien ne le détecte). Règle
+  documentée : périmètres disjoints, et au plus une release sans
+  sélecteur ni namespace.
+
+#### 2. Un namespace
+
+- Les kinds namespacés sont surveillés dans `WEEBO_WATCH_NAMESPACE`
+  seulement ; les kinds cluster (instance, NamespacePolicy, kinds
+  cluster de l'opérateur) restent surveillés partout.
+- RBAC rendu par le chart : `Role` + `RoleBinding` dans le namespace
+  surveillé pour les kinds namespacés (+ `status`, `finalizers`), les
+  Secrets et les Events ; `ClusterRole` réduit aux kinds cluster. Les
+  Secrets restent dans le `ClusterRole` tant qu'un kind cluster émet des
+  Secrets dans un namespace de son choix (`SecretTarget.namespace`).
+- Events d'un objet cluster : le `Recorder` de `kube` les publie dans
+  `default` → droit `events` dans `default` (aujourd'hui couvert par le
+  `ClusterRole`).
+- Lease : déjà dans `POD_NAMESPACE`, nom dérivé de la release : deux
+  releases dans deux namespaces ne se gênent pas.
+- Les CR namespacés d'un opérateur limité à un namespace ne se lient
+  qu'à une `LocalInstance` de ce namespace (D2) : la NamespacePolicy n'a
+  plus rien à gouverner (règle 4 ci-dessous). L'`Instance` cluster sert
+  aux seuls kinds cluster.
+
+#### 3. Full namespacé — prérequis
+
+But : une release installable par un admin de namespace, sans aucun
+objet ni droit cluster. Prérequis, dans l'ordre :
+
+1. **CRD installées à part.** Une CRD est un objet cluster : un admin du
+   cluster les installe (`crds.install: false` dans la release, bundle
+   `crds.yaml` de la release GitHub). Plusieurs releases partagent les
+   mêmes CRD : elles doivent tourner sur des versions compatibles avec
+   le schéma installé ; monter une CRD reste une opération d'admin.
+2. **Aucun kind cluster démarré.** `WEEBO_WATCH_CLUSTER_KINDS=false` :
+   chaque opérateur déclare le scope de ses kinds (déduit de `K::Scope`),
+   ne démarre que les controllers namespacés, le chart ne rend que leur
+   RBAC. Un kind cluster nécessaire au démarrage → erreur explicite.
+3. **Une instance namespacée.** Le kind instance actuel est cluster ; il
+   faut un second kind, namespacé : `<Product>LocalInstance` (D1),
+   `<Product>Instance` reste le kind cluster, inchangé :
+   - même spec que l'instance cluster, sauf ses références de Secrets :
+     `LocalSecretKeyRef` (son namespace) au lieu de `SecretKeyRef` ;
+   - utilisable par les CR de son namespace ; depuis un autre namespace
+     ou par un CR cluster seulement si elle l'accepte (D5) ;
+   - Vault : la release partage l'identité Vault de l'opérateur. Une
+     instance namespacée ne choisit ni mount ni rôle d'auth au-delà de
+     ce que la config de la release autorise, et ses chemins sont forcés
+     sous `<pathPrefix>/<namespace>/` — sinon un locataire lit les
+     chemins des autres avec l'identité de l'opérateur ;
+   - kit : `InstanceResolver<I, L>` (cluster + locale) et résolution
+     d'un CR namespacé selon le périmètre (D2) ; `refs::same_instance`
+     compare `(kind, namespace, name)` et non plus un nom (**cassant**).
+     Pas de nouveau cas d'ambiguïté : l'ordre de résolution tranche.
+4. **NamespacePolicy optionnelle.** Règle : un CR lié à une instance
+   cluster reste soumis à la policy ; un CR lié à une instance
+   namespacée ne l'est pas (le token de son instance, fourni par le
+   namespace, borne ce qu'il peut faire chez le distant ; les dimensions
+   d'allow-list comme les organisations de forgejo ne s'appliquent
+   plus). Kit : `PolicySource` désactivable (`policies::Unrestricted`),
+   choisi par instance et pas globalement, pour qu'un mode de niveau 2
+   ne perde jamais la policy par erreur. Sans kind cluster, le
+   controller de policy n'est pas démarré et sa CRD n'a pas besoin
+   d'être installée.
+5. **Webhook optionnel.** La `ValidatingWebhookConfiguration` est un
+   objet cluster : `webhook.enabled` (nouveau, `true` par défaut) ;
+   `false` → pas de `ValidatingWebhookConfiguration` rendue (le
+   Service et le certificat restent : le serveur HTTPS porte aussi les
+   sondes, et ce sont des objets namespacés), les
+   refus passent par les reconcilers seuls (forgejo et authentik
+   revérifient déjà la policy dans leurs reconcilers) : on perd le
+   refus immédiat au `kubectl apply`, pas la règle. Alternative : un
+   admin du cluster installe la configuration une fois, avec un
+   `namespaceSelector` sur ce namespace.
+6. **Références namespacées seulement.** Un kind namespacé ne peut
+   référencer qu'un kind namespacé (ou un nom distant brut) : sinon il
+   lui faut lire un kind cluster. À traiter dans chaque opérateur :
+
+   | Opérateur | Kinds namespacés                                                          | Références vers un kind cluster                                                     | À prévoir                                                                 |
+   |-----------|---------------------------------------------------------------------------|-------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
+   | forgejo   | Repository, Webhook, DeployKey, OAuth2Application, AccessToken            | Organization, User, Team (owner, teams, token, OAuth2), UserKey cluster             | variantes namespacées de User/Organization/Team, ou propriétaire par nom distant |
+   | authentik | Application, AccessPolicy                                                 | aucune vers un CR cluster hors instance (`outpostRef`, `groupRef` : noms distants)   | instance namespacée seulement                                             |
+
+7. **Chart sans objet cluster.** Pas de `ClusterRole(Binding)`, pas de
+   `ValidatingWebhookConfiguration`, pas de ConfigMap de santé Argo CD
+   (namespace d'Argo) ; restent Deployment, ServiceAccount, Roles,
+   Service, Issuer/Certificate, PDB, ServiceMonitor, PrometheusRule,
+   NetworkPolicy. `helm template` d'un mode full namespacé vérifié par
+   `helm:lint` : aucun objet sans namespace dans le rendu.
+8. **Preuve par les tests.** Un test envtest lance le binaire avec un
+   ServiceAccount lié seulement aux `Role` rendus (impersonation dans le
+   client de test) : un appel cluster → 403 → le test échoue. À
+   vérifier : le mode d'autorisation de l'apiserver d'envtest (RBAC
+   doit être actif, sinon le lancer avec `--authorization-mode=RBAC`).
+   Dans le gabarit (`template:check`) puis dans chaque opérateur.
+
+L'importer reste hors périmètre : il crée des CR cluster ; une variante
+namespacée viendra avec les kinds namespacés de chaque opérateur.
+
+#### Values du chart
+
+```yaml
+watch:
+  namespace: ""        # "" = tout le cluster ; nom = ce namespace (souvent celui de la release)
+  labelSelector: {}    # un LabelSelector (matchLabels / matchExpressions), ex. {matchLabels: {weebo.io/shard: a}}
+  clusterKinds: true   # false = full namespacé (prérequis ci-dessus)
+webhook:
+  enabled: true        # false = refus par les reconcilers seuls
+```
+
+`labelSelector` est un objet `LabelSelector` (validé par le schéma des
+values) plutôt qu'une chaîne : le chart le passe tel quel en
+`objectSelector` des webhooks et en JSON à l'opérateur
+(`WEEBO_WATCH_LABEL_SELECTOR`), sans conversion en syntaxe `a=b,c in
+(…)` dans un template Helm. `clusterKinds: false` exige `watch.namespace` et `crds.install: false`
+(`fail` au rendu sinon). Mêmes noms de ressources qu'aujourd'hui quand
+rien n'est défini : un opérateur qui ne touche pas `watch` rend le même
+chart.
+
+#### Décisions (prises le 2026-10-12)
+
+- **D1 — nom de l'instance namespacée** : `<Product>Instance` reste le
+  kind cluster (non cassant), `<Product>LocalInstance` est la variante
+  namespacée.
+- **D2 — résolution de l'`instanceRef` sans `kind`** (référence par nom
+  seul, cas des CR existants), selon le périmètre de la release :
+  - **opérateur limité à un namespace** (`watch.namespace` défini) : la
+    `LocalInstance` de ce nom dans le namespace du CR, seulement ; vide
+    → la seule `LocalInstance` du namespace. L'`Instance` cluster n'est
+    jamais candidate, même au niveau 2 ;
+  - **opérateur sur tout le cluster** : l'`Instance` cluster de ce nom
+    d'abord, puis la `LocalInstance` de ce nom dans le namespace du CR ;
+    vide → la seule `Instance`, sinon la seule `LocalInstance` du
+    namespace. Même nom des deux côtés : l'`Instance` l'emporte.
+
+  Conséquence à traiter : une `Instance` créée après coup avec le nom
+  d'une `LocalInstance` déjà utilisée capterait ses CR (autre serveur
+  distant). Garde-fou : le status du CR enregistre l'instance résolue
+  (`kind` + nom) à la liaison ; si la résolution change ensuite, le CR
+  passe `Ready: False` avec un Event, l'opérateur ne suit pas le
+  changement (même logique que `OtherInstance`). Préciser le `kind` (D5)
+  supprime ce cas. Un CR cluster sans `kind` ne se lie qu'à une
+  `Instance`.
+- **D5 — `instanceRef` typée** : la référence peut préciser le kind visé
+  et, pour une `LocalInstance`, son namespace :
+
+  ```yaml
+  instanceRef:
+    name: main
+    kind: LocalInstance   # Instance | LocalInstance ; absent → résolution D2
+    namespace: team-a     # LocalInstance seulement ; absent → celui du CR
+  ```
+
+  - type neutre dans `weebo-kit-api` : `InstanceRef { name, kind:
+    Option<InstanceKind>, namespace: Option<String> }`,
+    `InstanceKind::{Instance, LocalInstance}` (valeurs courtes, pas le
+    kind complet `<Product>LocalInstance`, pour rester sans nom de
+    produit) ; doc comments sur « l'instance ». Le status enregistre la
+    référence résolue complète (`kind`, `namespace`, `name`) et
+    `same_instance` compare ce triplet ;
+  - validations (CEL dans le schéma quand c'est possible, sinon webhook
+    et reconciler, raison neutre que l'opérateur traduit) :
+    `namespace` interdit avec `kind: Instance` ; obligatoire pour un CR
+    cluster qui vise une `LocalInstance` (il n'a pas de namespace par
+    défaut) ;
+  - **référence vers un autre namespace = emprunt des credentials d'un
+    autre locataire** (le token de la `LocalInstance` est le sien). Elle
+    n'est acceptée que si la `LocalInstance` y consent :
+    `spec.sharedWith { namespaces: [...], namespaceSelector,
+    clusterScoped: bool }`, vide par défaut (son namespace seulement),
+    sur le modèle du `ReferenceGrant` de Gateway API. Refus →
+    `Ready: False`, aucun appel au distant. Ce consentement tient lieu
+    de NamespacePolicy pour ces CR (règle 4) ;
+  - opérateur limité à un namespace : `kind: Instance` ou un
+    `namespace` différent du sien → `Ready: False` (il ne voit ni l'un
+    ni l'autre, et n'en a pas les droits) ; le webhook le refuse dès
+    l'admission. Viser un autre namespace demande une release sur tout
+    le cluster (lecture des `LocalInstance` et de leurs Secrets
+    ailleurs) ;
+  - **schéma : `instanceRef` devient un objet** (décidé). Aujourd'hui
+    c'est une chaîne (optionnelle chez forgejo, requise chez authentik) ;
+    un schéma structurel ne peut pas accepter « chaîne ou objet », donc
+    les CR stockés ne se relisent plus (désérialisation de l'opérateur
+    en échec, mise à jour refusée) tant qu'ils ne sont pas réécrits ;
+  - **migration hors ligne, sans webhook de conversion.** Un webhook de
+    conversion est déclaré dans la CRD et pointe vers un seul Service :
+    incompatible avec plusieurs releases namespacées qui partagent les
+    CRD, et un objet cluster de plus. Le changement se fait dans
+    `v1alpha1` (alpha : le schéma peut casser), dans cet ordre :
+    1. arrêter l'opérateur (`replicas: 0`) — les objets distants ne
+       sont pas touchés, seules les réconciliations s'arrêtent ;
+    2. appliquer les nouvelles CRD ;
+    3. réécrire chaque CR : `spec.instanceRef: "main"` →
+       `spec.instanceRef: { name: main }` (sans `kind` : la résolution
+       D2 garde le comportement d'avant). Outil générique du kit
+       (`weebo-kit-adapters::migrate`, sur `DynamicObject`, liste de
+       kinds en paramètre, rejouable, `--dry-run`), exposé par la
+       sous-commande `importer migrate-instance-ref` de chaque
+       opérateur ;
+    4. redémarrer l'opérateur.
+
+    Les manifests GitOps qui portent ces CR doivent être réécrits dans la
+    même release, sinon Argo CD réapplique la chaîne (refusée par le
+    nouveau schéma). La note de release de chaque opérateur porte la
+    procédure ; c'est une release cassante.
+- **D3 — périmètre de la v1** : tout le cluster et un seul namespace
+  dès la première release ; plusieurs namespaces plus tard (un
+  `Controller` par namespace).
+- **D4 — garde-fou du label retiré** : oui, dans le webhook du kit
+  (refus d'un `UPDATE` qui fait sortir du sélecteur un objet portant le
+  finalizer, sauf `force-orphan`).
+
+#### Ordre de réalisation
+
+1. Kit : `WatchScope` (tout le cluster ou un namespace, + labels),
+   `controller(api, &scope)`, `InstanceResolver` sur le scope, garde-fou
+   du label dans l'admission (D4), chart (`watch.*`, RBAC par mode,
+   `webhook.enabled`), gabarit, test envtest RBAC. Release mineure
+   (cassante).
+2. Kit + gabarit : `LocalInstance` (D1), résolution par périmètre et
+   instance enregistrée au status (D2), référence typée et
+   `sharedWith` (D5), outil de migration de `instanceRef`,
+   `same_instance` typé,
+   policy désactivable par instance, mode `clusterKinds: false`.
+   Release mineure.
+3. Opérateurs : authentik d'abord (aucune référence cluster hors
+   instance), puis forgejo avec ses kinds namespacés (User/Organization/
+   Team), chacun dans sa propre release ; la première qui adopte l'objet
+   `instanceRef` porte la migration hors ligne et la réécriture des
+   manifests GitOps.
+
+#### État (2026-10-12)
+
+**Étape 1 — faite dans l'arbre, ni commitée ni publiée** (`task lint`,
+`task test:all` dont `template:check`, `task docs:check` verts) :
+
+- `weebo-kit-runtime::scope` : `WatchScope` (`cluster()`,
+  `namespace(ns)`, `with_labels(LabelSelector)`, `from_env()` sur
+  `WEEBO_WATCH_NAMESPACE`/`WEEBO_WATCH_LABEL_SELECTOR` — JSON, invalide
+  → échec au démarrage), `api::<K>()` choisi par le trait `KindScope`
+  sur `K::Scope` (namespacé → `Api::namespaced` si un namespace est
+  surveillé, cluster → `Api::all`), `watcher_config()`, `list_params()`,
+  `selects()`/`selects_labels()` pour revérifier un `get`.
+- `controller(api, &scope)` : **cassant** (signature).
+- `weebo-kit-runtime::admission::{ScopeGuard, scope_router}` (D4) :
+  `POST /scope` refuse un `UPDATE` qui fait sortir du sélecteur un objet
+  portant le finalizer, sauf `force-orphan` ; la raison est un code de
+  l'opérateur (gabarit : `LeavesWatchScope`). Indépendant de
+  `Admission` : un opérateur sans `/validate` sert quand même `/scope`.
+- `InstanceResolver::with_selector(Option<Selector>)` (non cassant) :
+  liste filtrée côté serveur, `get` revérifié. Pas de `WatchScope` dans
+  `weebo-kit-adapters` (il ne dépend pas du runtime) : le binaire passe
+  `scope.selector()`.
+- `weebo-kit-testkit` : `EnvTestCluster::client_as_service_account(ns,
+  name)` (impersonation ; l'apiserver d'envtest autorise bien en RBAC,
+  vérifié dans controller-runtime v0.24.1).
+- Chart : `watch.namespace`/`watch.labelSelector` → env ;
+  `watchRole` (`<fullname>-watch`, kinds namespacés + Secrets + Events
+  dans le namespace surveillé) et `ClusterRole` réduit aux kinds cluster
+  (Secrets et Events y restent) ; webhook `scope.<group>` (UPDATE de
+  tous les kinds, `/scope`) avec un sélecteur ; `namespaceSelector`/
+  `objectSelector` des webhooks par défaut sur le scope ;
+  `webhook.enabled`. NOTES et README. Smoke renders dans
+  `tasks/helm.yaml` (donc aussi chez chaque opérateur au prochain
+  `kit:sync`).
+- Gabarit : `Ctx.scope`, controllers et reflector d'instances sur le
+  scope, `webhook::router(health, scope)` sert `/scope`, code
+  `LeavesWatchScope`, values + schéma. Test envtest `watch_scope.rs` :
+  controller limité à `team-a` + `shard=a`, compte de service avec le
+  RBAC du mode namespace seulement — l'objet du scope est réconcilié,
+  ceux d'un autre shard ou d'un autre namespace ne sont pas touchés,
+  aucune erreur de watch. Vérifié qu'il échoue avec `WatchScope::cluster()`
+  (403 sur la liste cluster-wide).
+- Doc (`@weebo/operator-docs`) : les deux variables dans « Runtime
+  settings ».
+
+Écarts et limites connus :
+
+- Le test envtest recopie les règles RBAC du chart (`kindRules`) au
+  lieu de rendre le chart : à garder alignés à la main.
+- Le garde-fou ne voit que ce que l'apiserver lui envoie : sans webhook
+  (`webhook.enabled: false`) ou s'il est indisponible avec
+  `failurePolicy: Ignore`, retirer le label reste possible.
+- Les opérateurs forgejo et authentik ne sont pas migrés (étape 3) :
+  leurs `Api::all` dans les `watches` secondaires et leurs
+  `ClusterReader` ne connaissent pas encore le scope ; la release du
+  kit casse leur build (`controller(api, &scope)`).
+- Pas de bump de version ni de tag : release mineure à faire (cassante).
+
+**Étape 2 — faite dans l'arbre, ni commitée ni publiée** (même release
+que l'étape 1 ; `task lint`, `task test:all` dont `template:check`,
+`task docs:check` verts) :
+
+- `weebo-kit-api::instance` : `InstanceRef { name, kind?, namespace? }`
+  (D5, objet ; règle CEL « `namespace` seulement avec `LocalInstance` »
+  dans le schéma), `InstanceKind::{Instance, LocalInstance}`,
+  `BoundInstance { kind, namespace?, name }` (enregistrée au status,
+  `governed_by_policy()` vrai seulement pour une `Instance`),
+  `SharedWith { namespaces, namespaceSelector, clusterScoped }`, trait
+  `SharesItself` (implémenté par la `LocalInstance` de l'opérateur).
+- `weebo-kit-application::instances` : `resolve()` pure (D2 selon le
+  périmètre, D5, consentement `sharedWith` avec les labels du namespace
+  pour un `namespaceSelector` — opérateur inconnu = refus),
+  `check_binding()` (le garde-fou d'instance résolue : un `instanceRef`
+  sans `kind` dont le nom résout maintenant vers une autre instance →
+  `BindingChanged`, rien n'est suivi ; préciser `kind` ou changer de nom
+  relie), trait `InstanceDirectory`, erreurs neutres `ResolveError` /
+  `InstanceError`.
+- `refs` : `Referenced.instance: Option<BoundInstance>`, `RefState::of(
+  found, &ours)`, `same_instance(&BoundInstance, &BoundInstance)`
+  (synchrone, compare le triplet), `RefError::describe(kind, name)` —
+  **cassant**. Un CR référencé pas encore lié est `NotReady`, plus
+  `OtherInstance`.
+- `SecretStoreFactory::store_for(&BoundInstance)` — **cassant** :
+  l'instance est résolue avant.
+- `weebo-kit-adapters::instances::Instances<I, L>` : l'annuaire des deux
+  kinds (stores ou API, sélecteur, namespace surveillé, sans `I` quand
+  `cluster_kinds` est faux), `get(&BoundInstance)` pour les gateway
+  factories ; ne lit un `Namespace` (droit `get namespaces`) que pour un
+  partage par sélecteur. `InstanceResolver`/`select`/`SelectError`
+  restent pour les opérateurs pas encore migrés.
+- `weebo-kit-adapters::migrate` : `migrate_instance_refs(client, kinds,
+  field_manager, dry_run)` (merge patch `"main"` → `{name: main}`,
+  rejouable) ; gabarit : `<binaire> migrate-instance-ref [--dry-run]`.
+  Test envtest : CRD remise à l'ancien schéma, CR écrit avec la chaîne,
+  nouvelle CRD, migration, relu typé.
+- `WatchScope::without_cluster_kinds()`, `WEEBO_WATCH_CLUSTER_KINDS`,
+  `cluster_kinds()`, `ensure::<K>()` (un kind cluster sans kinds
+  cluster → erreur au démarrage).
+- Chart : `watch.clusterKinds` (env ; `fail` sans `watch.namespace` ou
+  avec `crds.install`) ; sans kinds cluster ni `ClusterRole(Binding)`
+  ni `ValidatingWebhookConfiguration` (smoke render : aucun objet
+  cluster dans le rendu) ; `get namespaces` dans le `ClusterRole` d'un
+  opérateur sur tout le cluster (partage par sélecteur) ; NOTES.
+- Gabarit : `<Product>LocalInstance` (namespacé, `LocalSecretKeyRef`,
+  `sharedWith`) et son controller ; `ObjectSpec.instanceRef:
+  Option<InstanceRef>` ; `status.instance` ; résolution dans le
+  controller d'objet (cleanup sur l'instance enregistrée) ; gateway
+  factory sur `Instances` ; codes `InstanceAmbiguous`,
+  `InstanceNotAllowed`, `InstanceBindingChanged` ; binaire : réflecteurs
+  des deux kinds, controller d'`Instance` seulement avec kinds cluster.
+  Tests envtest : niveau 2 (objet lié à la `LocalInstance`, jamais à
+  l'`Instance` homonyme ; `kind: Instance` → `InstanceNotAllowed`) et
+  full namespacé (un `Role` seulement, aucune lecture cluster possible,
+  `LocalInstance` et objet `Ready`).
+- Doc : `WEEBO_WATCH_CLUSTER_KINDS` dans « Runtime settings ».
+
+Pas fait à l'étape 2, à reprendre dans les opérateurs (étape 3) :
+
+- **Confinement Vault d'une `LocalInstance`** (chemins forcés sous
+  `<pathPrefix>/<namespace>/`, pas de choix de mount/rôle au-delà de la
+  release) : le gabarit n'a pas de secret store, rien à brancher dans le
+  kit tant qu'aucun opérateur ne construit son `VaultConfig` depuis une
+  `LocalInstance`. Exigence écrite sur `SecretStoreFactory`.
+- **Policy par instance** : le kit fournit `governed_by_policy()` ; ce
+  sont les reconcilers et webhooks de forgejo/authentik qui doivent
+  sauter la policy pour un CR lié à une `LocalInstance`.
+- **Refus dès l'admission** de `kind: Instance` / d'un autre namespace
+  par un opérateur limité à un namespace, et d'un `sharedWith` non
+  accordé : seulement dans les reconcilers (`Ready: False`) — le
+  gabarit n'a pas de `/validate`.
+- Description du champ `instanceRef.kind` : le schéma généré reprend la
+  doc de l'enum (« The kind of instance a reference designates. ») au
+  lieu de celle du champ.
+
+**Étape 3 — en cours (non commitée)** :
+
+Kit, ajouts pour les opérateurs (non cassants) : `LocalTlsOptions`
+(CA dans le namespace de l'instance, `in_namespace(ns)` → `TlsOptions`)
+et `LocalSecretKeyRef::in_namespace(ns)`.
+
+Les opérateurs sont branchés sur le kit **en local** (dépendances
+`path = "../weebo-operator-kit/crates/…"`, library chart en
+`file://../../../../weebo-operator-kit/charts/weebo-operator-lib`) : à
+remplacer par `task kit:sync TAG=vX.Y.Z` une fois le kit publié, jamais
+poussé tel quel.
+
+*weebo-authentik — fait dans l'arbre* (`task lint`, `task test:all`
+verts) :
+
+- `controller(api, &scope)` partout, `Ctx.scope` / `Ctx.instances`,
+  watch des `AuthentikNamespacePolicy` seulement avec kinds cluster ;
+- `AuthentikLocalInstance` (namespacée : `url`, `tokenSecretRef` et
+  `tls` dans son namespace, `sharedWith`) et son controller ; **pas de
+  Vault** pour une instance locale : ses applications écrivent des
+  `Secret` Kubernetes seulement (une cible Vault échoue avec un message
+  clair) — c'est la forme retenue du confinement Vault ;
+- `AuthentikApplication.spec.instanceRef` objet (requis), `status.instance`
+  (application, et access policy via son application) ; résolution par
+  `AuthentikInstances = Instances<AuthentikInstance,
+  AuthentikLocalInstance>` ; le cleanup utilise l'instance enregistrée ;
+- policy sautée pour un CR lié à une `AuthentikLocalInstance`, dans les
+  reconcilers et le webhook (qui résout l'instance ; irrésoluble → la
+  policy s'applique) ; `/scope` (garde-fou D4) ;
+- codes `InstanceNotAllowed`, `InstanceBindingChanged`,
+  `LeavesWatchScope` ;
+- binaire : scope, réflecteurs des deux kinds, controllers cluster
+  seulement avec kinds cluster, `weebo-authentik-operator
+  migrate-instance-ref [--dry-run]` (sur le binaire de l'opérateur : la
+  CLI de l'importer n'a pas de sous-commandes) ; importer : `instanceRef:
+  {name: …}` ;
+- chart : `watch.*`, `webhook.enabled`, params (`authentiklocalinstances`
+  dans `kinds`/`namespacedKinds`, pas dans `admitted`) ; rendu full
+  namespacé sans objet cluster vérifié ;
+- docs : CRD `AuthentikLocalInstance`, exemples `instanceRef` en objet,
+  section « A namespace's own instance » (partage, liaison, migration) ;
+- test envtest `instance_resolution.rs` : application liée à la
+  `AuthentikLocalInstance` → policy sautée + `status.instance` ; liée à
+  l'`AuthentikInstance` → `NamespaceNotAllowed`.
+
+Authentik peut tourner en full namespacé : ses kinds namespacés ne
+référencent aucun kind cluster (hors instance).
+
+*weebo-forgejo — fait dans l'arbre* (`task lint`, `task test:all` :
+372 tests, 0 échec, 39 ignorés = tests contre un vrai Forgejo ;
+`task recu` ; rendu full namespacé sans objet cluster) :
+
+- même migration qu'authentik : scope partout (watches des kinds
+  cluster User/Organization/Team/NamespacePolicy seulement avec kinds
+  cluster), `ForgejoLocalInstance` (Kubernetes seulement, pas de Vault ;
+  finalizer « en usage » comme `ForgejoInstance`), `instanceRef` objet
+  sur les 9 kinds qui en ont un, `status.instance`, résolution par
+  `Instances`, cleanup sur l'instance enregistrée, codes
+  `InstanceNotAllowed`/`InstanceBindingChanged`/`LeavesWatchScope`,
+  `migrate-instance-ref` sur les 9 kinds, importer, chart, docs ;
+- refs : comparaison des instances enregistrées (`default_instance`
+  supprimé) ; la recherche des CR encore liés à une instance (son
+  finalizer) lit `status.instance`, avec repli sur `instanceRef` pour un
+  CR pas encore réconcilié ;
+- policy : un CR lié à une `ForgejoLocalInstance` ne garde que la
+  vérification de ses `secretTargets` (reconcilers et `/validate`) ;
+- tests envtest `instance_resolution.rs` (policy sautée, liaison
+  enregistrée, `InstanceBindingChanged` quand on repointe un CR lié) et
+  `instance_ref_migration.rs` (User et Repository).
+
+**Écart : règle CEL d'immuabilité de `instanceRef` retirée.** Les CRD de
+forgejo portaient une règle de transition « `spec.instanceRef` est
+immuable » : l'apiserver l'évalue sur l'ancienne valeur stockée (une
+chaîne) et refuse le patch de migration. La règle est retirée ; la même
+garantie est tenue par les reconcilers (une instance enregistrée qui ne
+correspond plus → `InstanceBindingChanged`, rien n'est touché) : l'édition
+est acceptée par l'apiserver, le CR passe `Ready: False`. **À retenir pour
+tout opérateur** : une règle de transition sur `instanceRef` bloque
+`migrate_instance_refs` ; la retirer dans la release qui migre (elle
+pourrait revenir après, une fois tous les CR réécrits).
+
+**Reste pour un forgejo full namespacé** — décision produit à prendre :
+ces kinds namespacés référencent des kinds cluster :
+`ForgejoRepository` (`organizationRef`, `userRef`, `teamRefs`),
+`ForgejoWebhook` (`organizationRef`), `ForgejoAccessToken` (`userRef`,
+requis), `ForgejoOAuth2Application` (`ownerRef`, optionnel).
+`ForgejoDeployKey` ne référence qu'un dépôt (namespacé). En mode
+« un namespace » avec kinds cluster (niveau 2), forgejo fonctionne ; en
+full namespacé, ces références ne peuvent pas se résoudre.
+
+### Proposition — forgejo entièrement namespacé (option B, décidée le 2026-10-12 ; D6–D10 validés)
+
+Choix : `ForgejoUser`, `ForgejoOrganization`, `ForgejoTeam` et
+`ForgejoUserKey` deviennent namespacés — plus de version cluster. Une
+référence vise un CR du même namespace, un CR d'un autre namespace si
+c'est activé et accordé, ou un objet Forgejo par son nom (`remoteName`).
+`ForgejoInstance` (cluster), `ForgejoLocalInstance` et
+`ForgejoNamespacePolicy` (cluster) restent. Release **cassante** de
+forgejo (migration hors ligne, ci-dessous).
+
+#### Références
+
+```yaml
+organizationRef:
+  name: platform            # un ForgejoOrganization ; du namespace du CR par défaut
+  namespace: shared-ids     # autre namespace : activé + accordé (D7)
+# ou
+organizationRef:
+  remoteName: platform      # un objet Forgejo existant, non géré par un CR
+```
+
+- `name` et `remoteName` exclusifs (règle CEL) ; `namespace` seulement
+  avec `name`.
+- La cible doit être liée à la même instance (comparaison des
+  `status.instance`, déjà en place).
+- `remoteName` : l'opérateur vérifie seulement que l'objet existe sur
+  l'instance ; il ne le crée, ne le modifie ni ne le supprime jamais.
+- Kit (fait) : `weebo-kit-application::sharing::shares_with(shared,
+  cr_namespace, labels)`, le consentement générique (la logique de
+  `instances::check_shared`, qui l'utilise désormais) ;
+  `WatchScope::cross_namespace_refs()` (`WEEBO_CROSS_NAMESPACE_REFS`,
+  chart `references.crossNamespace`, toujours faux avec un namespace
+  surveillé). Le type de ref reste propre à forgejo (`remoteName` : le
+  kit ne parle pas d'objet distant par nom), pas de `CrRef` dans le kit
+  tant qu'un seul opérateur en a l'usage.
+
+#### Garde-fous (doublons, double référence)
+
+- Création : Forgejo refuse déjà un nom pris (`ForgejoObjectAlreadyExists`)
+  et l'opérateur n'adopte jamais par nom — deux namespaces qui
+  déclarent le même compte sur le même serveur : le second échoue.
+- **Revendication unique** (D8) : un objet distant (URL du serveur, kind,
+  nom Forgejo) ne peut être possédé que par un seul CR, quelle que soit
+  son instance (deux instances — cluster et locale — vers le même
+  serveur sont légitimes : un namespace avec son propre token). Avant
+  toute création ou adoption (importer), l'opérateur cherche un autre CR
+  qui le revendique (`status.forgejoId`/`forgejoName` + URL de son
+  instance) → `Ready: False` `RemoteObjectClaimed`, rien n'est appelé.
+- `remoteName` vers un objet revendiqué par un CR : accepté (lecture
+  seule) ; c'est la façon de le référencer sans le partager.
+
+#### NamespacePolicy
+
+Elle gouverne toujours les CR liés à une `ForgejoInstance` (cluster) :
+- `allowedKinds` inclut désormais `ForgejoUser`, `ForgejoOrganization`,
+  `ForgejoTeam`, `ForgejoUserKey` (un namespace qui crée des comptes sur
+  l'instance partagée doit y être autorisé) ;
+- `allowedOrganizations` / `allowedUsers` portent sur les **noms
+  Forgejo** résolus (et plus sur les noms de CR, devenus ambigus entre
+  namespaces) : c'est ce qui empêche un namespace de viser `admin` par
+  `remoteName` pour se fabriquer un token (D9).
+
+#### Cross-namespace (D7)
+
+- Activation au niveau de la release : `references.crossNamespace`
+  (chart) → `WEEBO_CROSS_NAMESPACE_REFS` ; désactivé par défaut. Sans
+  activation, une ref avec `namespace` → `Ready: False`
+  `ReferenceNotAllowed`.
+- Accord de la cible : `spec.sharedWith` (le type du kit) sur
+  `ForgejoUser`/`ForgejoOrganization`/`ForgejoTeam` ; vide = son
+  namespace seulement.
+- Un opérateur limité à un namespace ne voit pas les autres : la ref
+  cross-namespace y est toujours refusée.
+
+#### Migration (cluster → namespacé)
+
+La portée d'une CRD ne change pas en place : il faut supprimer
+l'ancienne, ce qui supprime ses CR. Ordre impératif (outil
+`migrate-to-namespaced`, `--dry-run` d'abord) :
+
+1. opérateur arrêté (aucun finalizer ne tournera : rien n'est supprimé
+   côté Forgejo) ;
+2. export de chaque CR cluster (spec + `forgejoId`/`forgejoName`) vers
+   un namespace cible : fichier de correspondance (`ForgejoUser/alice:
+   team-a`), défaut un namespace donné (`--default-namespace`) ;
+3. retrait des finalizers puis suppression des CR, puis des CRD
+   cluster ;
+4. nouvelles CRD ; recréation des CR dans leur namespace, en pause
+   (`import-pending`), status amorcé (l'`Adopter` du kit), relâchés ;
+5. réécriture des refs des CR namespacés existants (`ForgejoRepository`,
+   tokens, webhooks…) : `namespace` ajouté quand la cible a changé de
+   namespace, et `sharedWith` amorcé sur la cible pour ces namespaces ;
+   si des refs cross-namespace en résultent, l'outil exige
+   `references.crossNamespace` ;
+6. opérateur démarré.
+
+Les manifests GitOps doivent être réécrits dans la même release (l'outil
+écrit les YAML). Les objets Forgejo ne sont jamais touchés.
+
+#### Décisions (validées le 2026-10-12, telles que recommandées)
+
+- **D6** — `ForgejoUserKey` suit `ForgejoUser` (namespacé, même namespace
+  que son user ou cross-namespace accordé). Recommandé : oui.
+- **D7** — cross-namespace = activation release **et** accord de la
+  cible (`sharedWith`). Recommandé : les deux.
+- **D8** — revendication unique d'un objet distant par CR, toutes
+  instances confondues (par URL de serveur). Recommandé : oui.
+- **D9** — dimensions de la policy sur les noms Forgejo. Recommandé :
+  oui (sinon `remoteName` contourne la policy).
+- **D10** — migration par l'outil ci-dessus (namespace cible par
+  correspondance, défaut configurable). Recommandé : oui.
+
+#### État (2026-10-12) — fait dans weebo-forgejo, ni commité ni publié
+
+`task lint`, `task test:all` (394 réussis, 0 échec, 39 ignorés = tests
+contre un vrai Forgejo), `task recu`, `task lint:helm`, rendu full
+namespacé sans objet cluster.
+
+- D6 : les 4 kinds namespacés ; `sharedWith` sur User/Organization/Team ;
+  chart (`kinds`, `namespacedKinds`, `admitted`, `references.crossNamespace`).
+- Refs : `IdentityRef { name?, namespace?, remoteName? }` (CEL : un seul
+  de `name`/`remoteName`, `namespace` seulement avec `name`) ; refus
+  `ReferenceNotAllowed` sans activation ou sans accord ; `remoteName` ne
+  vérifie que l'existence (un `remoteName` d'équipe n'est pas vérifié :
+  Forgejo valide).
+- D8 : revendication (URL du serveur, kind, nom Forgejo ; équipes en
+  `org/équipe`) avant création d'un user/organisation/équipe et à
+  l'adoption de l'importer → `RemoteObjectClaimed`. Limites : users en
+  mode Observe exclus ; en full namespacé l'opérateur ne voit que les
+  revendications de son namespace ; l'importer saute le contrôle quand
+  aucune instance n'est encore résoluble.
+- D9 : `allowedKinds` couvre les 4 kinds ; `allowedUsers` /
+  `allowedOrganizations` sur les noms Forgejo.
+- D10 : `weebo-forgejo migrate-to-namespaced` (`--dry-run`, `--yes`,
+  `--out`, `--mapping`, `--default-namespace`,
+  `--allow-cross-namespace`), plan écrit dans `out/plan.json` et
+  reprise possible ; réécrit les refs et l'annotation propriétaire des
+  `Secret` Kubernetes. Le binaire de l'opérateur dépend désormais du
+  crate importer (la logique y vit).
+- Importer : CR écrits dans `--namespace`.
+- Tests envtest : `identity_refs.rs`, `full_namespaced.rs` (un seul
+  `Role`), `importer/tests/migrate_namespaced.rs`.
+
+Reste ouvert :
+- ~~Propriétaire des valeurs Vault non renommé~~ réglé : le kit accepte
+  un ancien identifiant de propriétaire (`SecretOwner::formerly`, lu dans
+  l'annotation `<domaine>/previous-owner` — `Annotations::previous_owner`)
+  et réécrit la valeur sous le nouveau ; la migration pose l'annotation
+  sur chaque `ForgejoUser`/`ForgejoUserKey` déplacé.
+- `secretTargets` d'un user vers un autre namespace : la migration ne
+  fait qu'avertir.
+- Cassant pour les installations : ajouter les 4 kinds aux
+  `allowedKinds` des policies existantes, et passer par la migration.

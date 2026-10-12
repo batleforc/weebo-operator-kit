@@ -1,11 +1,13 @@
 //! The operator's instance CRs (`XInstance`, cluster-scoped): read from a
 //! live reflector `Store` when the binary wires one in (no per-reconcile
 //! apiserver call), from the API otherwise (tests), and the one a CR's
-//! `instanceRef` designates.
+//! `instanceRef` designates. With a label selector (the operator's watch
+//! scope), an instance outside it doesn't exist for the operator.
 
 use std::fmt::Debug;
 
-use kube::api::Api;
+use kube::api::{Api, ListParams};
+use kube::core::{Selector, SelectorExt};
 use kube::runtime::reflector::Store;
 use kube::{Client, Resource, ResourceExt};
 use serde::de::DeserializeOwned;
@@ -13,6 +15,7 @@ use serde::de::DeserializeOwned;
 pub struct InstanceResolver<I: Resource<DynamicType = ()> + 'static> {
     client: Client,
     store: Option<Store<I>>,
+    selector: Option<Selector>,
 }
 
 impl<I> InstanceResolver<I>
@@ -20,7 +23,27 @@ where
     I: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Send + Sync + 'static,
 {
     pub fn new(client: Client, store: Option<Store<I>>) -> Self {
-        Self { client, store }
+        Self {
+            client,
+            store,
+            selector: None,
+        }
+    }
+
+    /// Only the instances `selector` matches (the operator's
+    /// `WatchScope::selector`); the store should come from a watch with
+    /// the same selector.
+    pub fn with_selector(mut self, selector: Option<Selector>) -> Self {
+        self.selector = selector;
+        self
+    }
+
+    fn selects(&self, instance: &I) -> bool {
+        let Some(selector) = &self.selector else {
+            return true;
+        };
+        let empty = Default::default();
+        selector.matches(instance.meta().labels.as_ref().unwrap_or(&empty))
     }
 
     /// The live store, unless its writer is gone (shutdown): then the API.
@@ -33,10 +56,19 @@ where
     /// Every instance in the cluster.
     pub async fn list(&self) -> Result<Vec<I>, String> {
         if let Some(store) = self.ready_store().await {
-            return Ok(store.state().iter().map(|i| (**i).clone()).collect());
+            return Ok(store
+                .state()
+                .iter()
+                .filter(|i| self.selects(i))
+                .map(|i| (**i).clone())
+                .collect());
         }
+        let params = match &self.selector {
+            Some(selector) => ListParams::default().labels_from(selector),
+            None => ListParams::default(),
+        };
         Api::<I>::all(self.client.clone())
-            .list(&Default::default())
+            .list(&params)
             .await
             .map(|l| l.items)
             .map_err(|e| format!("listing {}: {e}", I::kind(&())))
@@ -45,11 +77,14 @@ where
     /// The instance `name`. `Ok(None)`: it doesn't exist.
     pub async fn get(&self, name: &str) -> Result<Option<I>, String> {
         if let Some(store) = self.ready_store().await {
-            return Ok(store.find(|i| i.name_any() == name).map(|i| (*i).clone()));
+            return Ok(store
+                .find(|i| i.name_any() == name && self.selects(i))
+                .map(|i| (*i).clone()));
         }
         Api::<I>::all(self.client.clone())
             .get_opt(name)
             .await
+            .map(|i| i.filter(|i| self.selects(i)))
             .map_err(|e| format!("reading {} {name:?}: {e}", I::kind(&())))
     }
 }

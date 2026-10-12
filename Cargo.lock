@@ -4038,6 +4038,7 @@ name = "weebo-kit-application"
 version = "0.9.0"
 dependencies = [
  "async-trait",
+ "k8s-openapi",
  "thiserror 2.0.21",
  "tokio",
  "weebo-kit-api",

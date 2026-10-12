@@ -16,6 +16,10 @@ pub const ROTATE_SECRET: &str = "rotate-secret";
 /// Present: the importer is still seeding the CR's status; the controller
 /// leaves it alone (a deletion is still processed).
 pub const IMPORT_PENDING: &str = "import-pending";
+/// The owner id the CR's emitted secrets were recorded under before it was
+/// moved (set by a migration): they are still its own, and are rewritten
+/// under its current id.
+pub const PREVIOUS_OWNER: &str = "previous-owner";
 
 /// The annotations of one operator, under `domain`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +58,10 @@ impl Annotations {
 
     pub fn rotate_nonce(&self, meta: &ObjectMeta) -> Option<String> {
         self.get(meta, ROTATE_SECRET).map(str::to_string)
+    }
+
+    pub fn previous_owner<'a>(&self, meta: &'a ObjectMeta) -> Option<&'a str> {
+        self.get(meta, PREVIOUS_OWNER)
     }
 
     /// Paused by the importer — never while the CR is being deleted.

@@ -28,8 +28,9 @@ spec:
           spec:
             description: |-
               Connection to one {{product}} server. Cluster-scoped: an org-wide piece
-              of infrastructure, not owned by a namespace. `Ready` tells whether the
-              server answers with the token below.
+              of infrastructure, not owned by a namespace (a namespace's own server
+              is a `{{product}}LocalInstance`). `Ready` tells whether the server
+              answers with the token below.
             properties:
               tokenSecretRef:
                 description: |-
@@ -88,6 +89,29 @@ spec:
                   - type
                   type: object
                 type: array
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under the same name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
               observedGeneration:
                 description: The `metadata.generation` the last successful reconcile applied.
                 format: int64

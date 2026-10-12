@@ -9,6 +9,8 @@ repository.workspace = true
 
 [dependencies]
 weebo-kit-api = { workspace = true }
+# Field types only (`LabelSelector`), as in weebo-kit-api: no client.
+k8s-openapi = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 

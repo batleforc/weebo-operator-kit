@@ -82,7 +82,7 @@ impl SecretStore for FakeSecretStore {
         let key = Self::key(target, owner);
         let mut secrets = self.secrets.lock().unwrap();
         if let Some((other, _)) = secrets.get(&key)
-            && *other != owner.id()
+            && !owner.is(other)
         {
             return Err(SecretStoreError(format!("{key} belongs to {other}")));
         }
@@ -100,7 +100,7 @@ impl SecretStore for FakeSecretStore {
             .lock()
             .unwrap()
             .get(&Self::key(target, owner))
-            .is_some_and(|(o, _)| *o == owner.id()))
+            .is_some_and(|(o, _)| owner.is(o)))
     }
 
     async fn delete(
@@ -110,7 +110,7 @@ impl SecretStore for FakeSecretStore {
     ) -> Result<(), SecretStoreError> {
         let key = Self::key(target, owner);
         let mut secrets = self.secrets.lock().unwrap();
-        if secrets.get(&key).is_some_and(|(o, _)| *o == owner.id()) {
+        if secrets.get(&key).is_some_and(|(o, _)| owner.is(o)) {
             secrets.remove(&key);
         }
         Ok(())

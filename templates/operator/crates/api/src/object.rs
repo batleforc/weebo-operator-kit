@@ -1,6 +1,7 @@
 use kube::{CustomResource, ResourceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+pub use weebo_kit_api::InstanceRef;
 
 use crate::status::Status;
 
@@ -20,14 +21,17 @@ pub use self::{{product}}ObjectSpec as ObjectSpec;
     plural = "{{product | downcase}}objects",
     namespaced,
     status = "Status",
-    printcolumn = r#"{"name":"Instance","type":"string","jsonPath":".spec.instanceRef"}"#,
+    printcolumn = r#"{"name":"Instance","type":"string","jsonPath":".status.instance.name"}"#,
     printcolumn = r#"{"name":"Ready","type":"string","jsonPath":".status.conditions[?(@.type=='Ready')].status"}"#,
     printcolumn = r#"{"name":"Reason","type":"string","jsonPath":".status.conditions[?(@.type=='Ready')].reason"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct {{product}}ObjectSpec {
-    /// `metadata.name` of the `{{product}}Instance` the object lives on.
-    pub instance_ref: String,
+    /// The `{{product}}Instance` or `{{product}}LocalInstance` the object
+    /// lives on. Unset: the only `{{product}}Instance`, else the only
+    /// `{{product}}LocalInstance` of this namespace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_ref: Option<InstanceRef>,
     /// Name of the remote object. Defaults to the CR's `metadata.name`.
     /// Changing it creates a new remote object and leaves the old one
     /// behind.
@@ -54,7 +58,7 @@ mod tests {
         let mut object = Object::new(
             "docs",
             ObjectSpec {
-                instance_ref: "main".into(),
+                instance_ref: Some(InstanceRef::named("main")),
                 name: None,
                 description: None,
             },
@@ -67,10 +71,12 @@ mod tests {
     #[test]
     fn optional_fields_stay_out_of_the_manifest() {
         let spec: ObjectSpec =
-            serde_json::from_value(serde_json::json!({"instanceRef": "main"})).unwrap();
+            serde_json::from_value(serde_json::json!({"instanceRef": {"name": "main"}})).unwrap();
         assert_eq!(
             serde_json::to_value(&spec).unwrap(),
-            serde_json::json!({"instanceRef": "main"})
+            serde_json::json!({"instanceRef": {"name": "main"}})
         );
+        let spec: ObjectSpec = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(serde_json::to_value(&spec).unwrap(), serde_json::json!({}));
     }
 }

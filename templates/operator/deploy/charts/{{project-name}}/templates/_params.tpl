@@ -9,9 +9,12 @@ versions: [v1alpha1]
 # Every kind the operator watches (ClusterRole).
 kinds:
   - {{product | downcase}}instances
+  - {{product | downcase}}localinstances
   - {{product | downcase}}objects
-# Namespaced kinds a team may manage (rbac.namespacedExample).
+# The namespaced kinds: what a team may manage (rbac.namespacedExample),
+# and the watch Role's (watch.namespace).
 namespacedKinds:
+  - {{product | downcase}}localinstances
   - {{product | downcase}}objects
 # Kinds the admission webhook checks: none until the operator serves
 # `/validate` (a namespace allow-list).

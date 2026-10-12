@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use api::Status;
 use api::status::Condition;
-use application::ports::GatewayFactory;
+use application::ports::{BoundInstance, GatewayFactory, InstanceDirectory};
 use application::use_cases::Outcome;
 use domain::Failure;
 use domain::error::ReasonCode;
@@ -18,10 +18,10 @@ use kube::runtime::events::Recorder;
 use kube::{Client, Resource};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use weebo_kit_runtime::Health;
 use weebo_kit_runtime::events;
 use weebo_kit_runtime::metrics::ReconcileMetrics;
 use weebo_kit_runtime::status::StatusUpdate;
+use weebo_kit_runtime::{Health, WatchScope};
 
 /// Resolves once the process is asked to stop: every controller then stops
 /// taking new work, lets its in-flight reconciles finish, and its `run`
@@ -34,6 +34,7 @@ pub use weebo_kit_runtime::Shutdown;
 pub use weebo_kit_runtime::controller::{controller, drive};
 
 pub mod instance;
+pub mod local_instance;
 pub mod object;
 
 /// Field manager of the status patches, meter and Event reporter name.
@@ -47,12 +48,18 @@ pub const METRIC_PREFIX: &str = "{{crate_name}}";
 pub struct Ctx {
     pub client: Client,
     pub gateways: Arc<dyn GatewayFactory>,
+    /// Which instance a CR lives on (the kit's `Instances`, on the watch
+    /// scope).
+    pub instances: Arc<dyn InstanceDirectory>,
     /// One recorder for the whole process: the kit folds repeated Events
     /// into a series only within a recorder.
     pub recorder: Recorder,
     pub shutdown: Shutdown,
     /// Liveness: controllers report their watch errors here.
     pub health: Arc<Health>,
+    /// What the controllers watch (`WEEBO_WATCH_NAMESPACE`,
+    /// `WEEBO_WATCH_LABEL_SELECTOR`): every watch goes through it.
+    pub scope: WatchScope,
 }
 
 /// What stopped a reconcile before (or instead of) its status.
@@ -126,9 +133,20 @@ pub trait HasStatus {
     fn remote_id(&self) -> Option<&str> {
         self.status()?.remote_id.as_deref()
     }
+
+    /// The instance recorded at the last resolution.
+    fn bound_instance(&self) -> Option<&BoundInstance> {
+        self.status()?.instance.as_ref()
+    }
 }
 
 impl HasStatus for api::Instance {
+    fn status(&self) -> Option<&Status> {
+        self.status.as_ref()
+    }
+}
+
+impl HasStatus for api::LocalInstance {
     fn status(&self) -> Option<&Status> {
         self.status.as_ref()
     }
@@ -162,6 +180,10 @@ where
     let mut fields = serde_json::Map::new();
     if let Some(id) = &outcome.remote_id {
         fields.insert("remoteId".into(), id.clone().into());
+    }
+    if let Some(instance) = &outcome.instance {
+        let instance = serde_json::to_value(instance).expect("a BoundInstance serializes");
+        fields.insert("instance".into(), instance);
     }
     weebo_kit_runtime::status::publish(
         api,

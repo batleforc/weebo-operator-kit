@@ -1,6 +1,8 @@
 //! The validating admission webhook's `/validate` endpoint: decoding the
 //! review, the decisions counter, the denial shape (403 + reason code),
 //! failing closed — around the operator's own decision ([`Admission`]).
+//! And `/scope` ([`ScopeGuard`]): no object the operator manages leaves
+//! its label selector by accident.
 
 use std::sync::Arc;
 
@@ -12,9 +14,10 @@ use kube::core::admission::{AdmissionRequest, AdmissionResponse, AdmissionReview
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use serde::de::DeserializeOwned;
+use weebo_kit_api::Annotations;
 use weebo_kit_domain::Reason;
 
-use crate::Health;
+use crate::{Health, WatchScope};
 
 /// Why a request is refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,6 +168,77 @@ fn respond<R: Reason>(
     }
 }
 
+/// Refuses an `UPDATE` that takes an object out of the operator's label
+/// selector while it still carries the operator's finalizer: the operator
+/// would stop seeing it, its remote object would no longer be managed and
+/// its deletion would hang in `Terminating`. The way out is the
+/// `force-orphan` annotation (in the same update or before), or moving it
+/// to another release's selector in one write and removing the
+/// finalizer by hand. Served at `POST /scope` by [`scope_router`], for
+/// every kind of the operator (the chart's `scope.<group>` webhook).
+pub struct ScopeGuard<R> {
+    pub scope: WatchScope,
+    /// The operator's finalizer.
+    pub finalizer: &'static str,
+    /// Where `force-orphan` is read.
+    pub annotations: Annotations,
+    /// The operator's reason code for the refusal.
+    pub reason: R,
+}
+
+impl<R: Reason> ScopeGuard<R> {
+    /// The decision on one request. Anything but such an `UPDATE` passes.
+    pub fn check(&self, req: &AdmissionRequest<DynamicObject>) -> Result<(), Denial<R>> {
+        if req.operation != Operation::Update || self.scope.selector().is_none() {
+            return Ok(());
+        }
+        let (Some(object), Some(old)) = (req.object.as_ref(), req.old_object.as_ref()) else {
+            return Ok(());
+        };
+        let leaves = self.scope.selects_labels(old.metadata.labels.as_ref())
+            && !self.scope.selects_labels(object.metadata.labels.as_ref());
+        let managed = object
+            .metadata
+            .finalizers
+            .as_ref()
+            .is_some_and(|f| f.iter().any(|f| f == self.finalizer));
+        if !leaves || !managed || self.annotations.force_orphan(&object.metadata) {
+            return Ok(());
+        }
+        Err(Denial::new(
+            self.reason,
+            format!(
+                "this change takes the object out of the operator's label selector while it \
+                 still carries the {} finalizer: it would no longer be managed and its \
+                 deletion would hang; set the {} annotation first, or remove the \
+                 finalizer once another release manages it",
+                self.finalizer,
+                self.annotations
+                    .key(weebo_kit_api::annotations::FORCE_ORPHAN),
+            ),
+        ))
+    }
+}
+
+/// `POST /scope` deciding through `guard`. Merged into the operator's
+/// webhook router; without a label selector every request passes.
+pub fn scope_router<R: Reason + Send + Sync + 'static>(guard: Arc<ScopeGuard<R>>) -> Router {
+    Router::new()
+        .route("/scope", post(scope::<R>))
+        .with_state(guard)
+}
+
+async fn scope<R: Reason + Send + Sync + 'static>(
+    State(guard): State<Arc<ScopeGuard<R>>>,
+    Json(review): Json<AdmissionReview<DynamicObject>>,
+) -> Json<AdmissionReview<DynamicObject>> {
+    let Ok(req): Result<AdmissionRequest<DynamicObject>, _> = review.try_into() else {
+        return Json(AdmissionResponse::invalid("AdmissionReview without a request").into_review());
+    };
+    let decision = guard.check(&req);
+    Json(respond(&req, decision))
+}
+
 #[cfg(test)]
 mod tests {
     use weebo_kit_domain::Severity;
@@ -265,6 +339,93 @@ mod tests {
         assert_eq!(decide(&OnlyTeamA, &finalizer_removal).await, Ok(()));
         let spec_change = request("UPDATE", "team-b", 2, Some(1));
         assert!(decide(&OnlyTeamA, &spec_change).await.is_err());
+    }
+
+    fn labelled(
+        operation: &str,
+        labels: serde_json::Value,
+        old_labels: serde_json::Value,
+        annotations: serde_json::Value,
+    ) -> AdmissionRequest<DynamicObject> {
+        let object = |labels: &serde_json::Value| {
+            serde_json::json!({"apiVersion": "x.weebo.io/v1", "kind": "Thing",
+                "metadata": {"name": "t", "namespace": "a", "labels": labels,
+                    "annotations": annotations, "finalizers": ["x.weebo.io/finalizer"]},
+                "spec": {"v": 1}})
+        };
+        let review: AdmissionReview<DynamicObject> = serde_json::from_value(serde_json::json!({
+            "apiVersion": "admission.k8s.io/v1", "kind": "AdmissionReview",
+            "request": {
+                "uid": "11111111-1111-1111-1111-111111111111",
+                "namespace": "a",
+                "kind": {"group": "x.weebo.io", "version": "v1", "kind": "Thing"},
+                "resource": {"group": "x.weebo.io", "version": "v1", "resource": "things"},
+                "operation": operation,
+                "userInfo": {},
+                "object": object(&labels),
+                "oldObject": object(&old_labels),
+            }
+        }))
+        .unwrap();
+        review.try_into().unwrap()
+    }
+
+    fn guard(selector: &str) -> ScopeGuard<Code> {
+        let scope = WatchScope::cluster()
+            .with_labels(serde_json::from_str(selector).unwrap())
+            .unwrap();
+        ScopeGuard {
+            scope,
+            finalizer: "x.weebo.io/finalizer",
+            annotations: Annotations::new("x.weebo.io"),
+            reason: Code::NotAllowed,
+        }
+    }
+
+    #[test]
+    fn leaving_the_selector_with_the_finalizer_is_refused() {
+        use serde_json::json;
+        let guard = guard(r#"{"matchLabels": {"shard": "a"}}"#);
+        let leaves = labelled(
+            "UPDATE",
+            json!({"shard": "b"}),
+            json!({"shard": "a"}),
+            json!({}),
+        );
+        let denial = guard.check(&leaves).unwrap_err();
+        assert_eq!(denial.reason, Code::NotAllowed);
+        assert!(denial.message.contains("x.weebo.io/force-orphan"));
+
+        let orphaned = labelled(
+            "UPDATE",
+            json!({"shard": "b"}),
+            json!({"shard": "a"}),
+            json!({"x.weebo.io/force-orphan": "true"}),
+        );
+        assert_eq!(guard.check(&orphaned), Ok(()));
+        let enters = labelled(
+            "UPDATE",
+            json!({"shard": "a"}),
+            json!({"shard": "b"}),
+            json!({}),
+        );
+        assert_eq!(guard.check(&enters), Ok(()));
+        let stays = labelled(
+            "UPDATE",
+            json!({"shard": "a", "x": "y"}),
+            json!({"shard": "a"}),
+            json!({}),
+        );
+        assert_eq!(guard.check(&stays), Ok(()));
+    }
+
+    #[test]
+    fn without_a_selector_the_guard_lets_everything_through() {
+        use serde_json::json;
+        let mut guard = guard("{}");
+        guard.scope = WatchScope::cluster();
+        let leaves = labelled("UPDATE", json!({}), json!({"shard": "a"}), json!({}));
+        assert_eq!(guard.check(&leaves), Ok(()));
     }
 
     #[test]

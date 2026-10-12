@@ -131,6 +131,7 @@ mod tests {
         kind: "Token",
         namespace: Some("ns"),
         name: "app",
+        formerly: None,
     };
 
     #[tokio::test]
@@ -154,6 +155,18 @@ mod tests {
         assert_eq!(store.get("ns/a"), None);
         store.fail_writes(true);
         assert!(write_all(&all, &OWNER, &data, &store).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_value_recorded_under_the_former_id_is_taken_back() {
+        let store = FakeSecretStore::default();
+        let data = BTreeMap::from([("k".to_string(), "v".to_string())]);
+        store.insert_foreign("ns/a", "Token/app", data.clone());
+        assert!(!store.exists(&target("a"), &OWNER).await.unwrap());
+        let moved = OWNER.formerly(Some("Token/app"));
+        assert!(store.exists(&target("a"), &moved).await.unwrap());
+        store.write(&target("a"), &moved, &data).await.unwrap();
+        assert_eq!(store.owner_of("ns/a").as_deref(), Some("Token/ns/app"));
     }
 
     #[tokio::test]

@@ -4,9 +4,10 @@
 //!
 //! The kinds' Rust types carry their kind's name (`{{product}}Instance`,
 //! the CRD's title); the workspace uses them through short re-exports,
-//! [`Instance`] and [`Object`].
+//! [`Instance`], [`LocalInstance`] and [`Object`].
 
 pub mod instance;
+pub mod local_instance;
 pub mod object;
 pub mod status;
 
@@ -19,5 +20,6 @@ pub const GROUP: &str = "{{product | downcase}}.weebo.io";
 pub const ANNOTATIONS: weebo_kit_api::Annotations = weebo_kit_api::Annotations::new(GROUP);
 
 pub use instance::Instance;
+pub use local_instance::LocalInstance;
 pub use object::Object;
 pub use status::Status;

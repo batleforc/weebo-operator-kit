@@ -11,7 +11,7 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.instanceRef
+    - jsonPath: .status.instance.name
       name: Instance
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
@@ -37,8 +37,35 @@ spec:
                 nullable: true
                 type: string
               instanceRef:
-                description: '`metadata.name` of the `{{product}}Instance` the object lives on.'
-                type: string
+                description: |-
+                  The `{{product}}Instance` or `{{product}}LocalInstance` the object
+                  lives on. Unset: the only `{{product}}Instance`, else the only
+                  `{{product}}LocalInstance` of this namespace.
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
               name:
                 description: |-
                   Name of the remote object. Defaults to the CR's `metadata.name`.
@@ -46,8 +73,6 @@ spec:
                   behind.
                 nullable: true
                 type: string
-            required:
-            - instanceRef
             type: object
           status:
             nullable: true
@@ -83,6 +108,29 @@ spec:
                   - type
                   type: object
                 type: array
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under the same name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
               observedGeneration:
                 description: The `metadata.generation` the last successful reconcile applied.
                 format: int64

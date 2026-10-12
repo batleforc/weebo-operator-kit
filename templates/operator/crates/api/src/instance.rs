@@ -11,8 +11,9 @@ pub use self::{{product}}Instance as Instance;
 pub use self::{{product}}InstanceSpec as InstanceSpec;
 
 /// Connection to one {{product}} server. Cluster-scoped: an org-wide piece
-/// of infrastructure, not owned by a namespace. `Ready` tells whether the
-/// server answers with the token below.
+/// of infrastructure, not owned by a namespace (a namespace's own server
+/// is a `{{product}}LocalInstance`). `Ready` tells whether the server
+/// answers with the token below.
 #[derive(CustomResource, Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[kube(
     group = "{{product | downcase}}.weebo.io",

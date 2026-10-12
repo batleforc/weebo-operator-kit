@@ -34,7 +34,8 @@ versions: [v1alpha1]           # admitted versions (webhook rules)
 kinds:                         # every kind the operator watches (ClusterRole)
   - exampleinstances
   - exampleobjects
-namespacedKinds:               # what a team may manage (rbac.namespacedExample)
+namespacedKinds:               # the namespaced kinds: what a team may manage
+                               # (rbac.namespacedExample), the watch Role (watch.namespace)
   - exampleobjects
 admitted:                      # kinds sent to /validate; empty: no webhook configuration
   - exampleobjects
@@ -62,7 +63,7 @@ and `helm.sh/resource-policy: keep`: the kit's `helm:crds` task
 The values contract is the one of `templates/operator`'s chart
 (`deploy/charts/<operator>/values.yaml` and its `values.schema.json`):
 `replicaCount`, `image`, `serviceAccount`, `crds`, `reconcileConcurrency`,
-`logFormat`, `leaderElection`, `webhook`, `certManager`, `metrics`,
+`logFormat`, `watch`, `leaderElection`, `webhook`, `certManager`, `metrics`,
 `serviceMonitor`, `prometheusRule`, `probes`, `shutdown`,
 `podDisruptionBudget`, `rbac.namespacedExample`, `resources`, scheduling,
 security contexts, `networkPolicy` and `extraEnv`. An operator adds its
@@ -74,6 +75,16 @@ Kept as they were in weebo-forgejo's chart: resource names
 `-argocd-health`, `-author`), the Lease name (`<chart>-operator-leader`),
 the webhook name (`validate.<group>`).
 
+## Watch scope
+
+`watch.namespace` and `watch.labelSelector` (a `LabelSelector`) reach the
+operator as `WEEBO_WATCH_NAMESPACE` and `WEEBO_WATCH_LABEL_SELECTOR` (the
+kit's `WatchScope`). With a namespace, the namespaced kinds leave the
+ClusterRole for a Role in that namespace. With a selector, the
+`scope.<group>` webhook sends every UPDATE to the operator's `/scope` (the
+kit's `ScopeGuard`). The webhooks' `namespaceSelector`/`objectSelector`
+default to the scope. Nothing set: the whole cluster, as before.
+
 ## Templates
 
 | Template                                   | Renders                                                      |
@@ -81,12 +92,13 @@ the webhook name (`validate.<group>`).
 | `weebo-operator.all`                       | everything below, `---`-separated, skipping what is disabled  |
 | `weebo-operator.deployment`                | the operator Deployment (probes, drain, `params.env`)         |
 | `weebo-operator.serviceAccount`            | `serviceAccount.create`                                       |
-| `weebo-operator.clusterRole` / `…Binding`  | `params.kinds` (+ status, finalizers), Secrets, Events        |
+| `weebo-operator.clusterRole` / `…Binding`  | `params.kinds` (+ status, finalizers), Secrets, Events; with `watch.namespace`, the cluster-scoped kinds only |
+| `weebo-operator.watchRole`                 | `watch.namespace`: `params.namespacedKinds`, Secrets, Events in that namespace (`-watch`) |
 | `weebo-operator.leaderElectionRole`        | Lease Role + RoleBinding in the release namespace             |
 | `weebo-operator.namespacedExampleRole`     | `rbac.namespacedExample` on `params.namespacedKinds`          |
 | `weebo-operator.service`                   | the webhook Service                                           |
 | `weebo-operator.issuer` / `.certificate`   | cert-manager, when `webhook.certManager.enabled`              |
-| `weebo-operator.validatingWebhookConfiguration` | `validate.<group>` on `params.admitted`                  |
+| `weebo-operator.validatingWebhookConfiguration` | `validate.<group>` on `params.admitted`; `scope.<group>` (`/scope`, UPDATE of `params.kinds`) with `watch.labelSelector`; nothing with `webhook.enabled: false` |
 | `weebo-operator.podDisruptionBudget`       | when enabled and `replicaCount > 1`                           |
 | `weebo-operator.metricsService`            | `metrics.prometheus.enabled`                                  |
 | `weebo-operator.serviceMonitor`            | `serviceMonitor.enabled`                                      |

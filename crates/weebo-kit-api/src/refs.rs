@@ -21,6 +21,17 @@ pub struct LocalSecretKeyRef {
     pub key: String,
 }
 
+impl LocalSecretKeyRef {
+    /// The same key, in `namespace` (the referencing CR's).
+    pub fn in_namespace(&self, namespace: &str) -> SecretKeyRef {
+        SecretKeyRef {
+            name: self.name.clone(),
+            namespace: namespace.to_string(),
+            key: self.key.clone(),
+        }
+    }
+}
+
 /// Reference to another CR of this operator, by `metadata.name`. Always a
 /// CR, never a raw remote name: a cluster-scoped target is looked up
 /// cluster-wide, a namespaced one in the referencing CR's own namespace only.

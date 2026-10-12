@@ -1,10 +1,15 @@
 //! Port traits: what the use-cases need from the outside world. One
-//! [`RemoteGateway`] per `{{product}}Instance`, produced on demand by the
-//! [`GatewayFactory`].
+//! [`RemoteGateway`] per instance (`{{product}}Instance` or
+//! `{{product}}LocalInstance`), produced on demand by the
+//! [`GatewayFactory`]; which instance a CR lives on is the kit's
+//! [`InstanceDirectory`].
 
 use std::sync::Arc;
 
 use domain::error::ReasonCode;
+pub use weebo_kit_application::instances::{
+    BoundInstance, InstanceDirectory, InstanceError, ResolveError,
+};
 
 /// A failed call to {{product}}.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -58,8 +63,9 @@ pub trait RemoteGateway: Send + Sync {
 /// Why no gateway could be built for an instance.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GatewayFactoryError {
-    #[error("{{product}}Instance {0:?} not found")]
-    InstanceNotFound(String),
+    /// The instance is gone since it was resolved.
+    #[error("{0} not found")]
+    InstanceNotFound(BoundInstance),
     /// The token `Secret` or its key is missing / not UTF-8.
     #[error("token secret: {0}")]
     TokenSecret(String),
@@ -67,7 +73,7 @@ pub enum GatewayFactoryError {
     #[error("Kubernetes API error: {0}")]
     Kubernetes(String),
     /// The instance's spec can't produce a client.
-    #[error("invalid {{product}}Instance: {0}")]
+    #[error("invalid instance: {0}")]
     InvalidSpec(String),
 }
 
@@ -82,12 +88,30 @@ impl GatewayFactoryError {
     }
 }
 
-/// Resolves a `{{product}}Instance` name to a gateway. Implementations
-/// re-read the token `Secret` on every call: rotating it needs no restart.
+/// The gateway of a resolved instance. Implementations re-read the token
+/// `Secret` on every call: rotating it needs no restart.
 #[async_trait::async_trait]
 pub trait GatewayFactory: Send + Sync {
     async fn gateway_for(
         &self,
-        instance: &str,
+        instance: &BoundInstance,
     ) -> Result<Arc<dyn RemoteGateway>, GatewayFactoryError>;
+}
+
+/// The reason code of an instance that couldn't be resolved.
+pub fn instance_reason(err: &InstanceError) -> ReasonCode {
+    match err {
+        InstanceError::Kubernetes(_) => ReasonCode::KubernetesApiError,
+        InstanceError::Resolve(e) => match e {
+            ResolveError::NotFound { .. } | ResolveError::NoInstance => {
+                ReasonCode::InstanceNotFound
+            }
+            ResolveError::Ambiguous { .. } => ReasonCode::InstanceAmbiguous,
+            ResolveError::InvalidRef(_) => ReasonCode::InvalidSpec,
+            ResolveError::OutsideScope(_) | ResolveError::NotShared { .. } => {
+                ReasonCode::InstanceNotAllowed
+            }
+            ResolveError::BindingChanged { .. } => ReasonCode::InstanceBindingChanged,
+        },
+    }
 }
