@@ -79,13 +79,19 @@ Metric names are matched with regexes: the operator exports through
 OpenTelemetry, and the OTel -> Prometheus translation may append `_total`
 to counters, a unit suffix (`_seconds`) to histograms and `_ratio` to
 unit-less gauges, depending on the exporter version. Every series is
-scoped to this release's scrape job.
+scoped to this release's scrape job, `<fullname>-metrics`: the job a
+ServiceMonitor on the metrics Service gets (serviceMonitor.enabled, or one
+of the cluster's own on that Service). Without the metrics, the absent()
+alerts would fire forever: refused.
 */}}
 {{- define "weebo-operator.prometheusRule" -}}
 {{- $ctx := .ctx -}}
 {{- $p := .params -}}
 {{- $pr := $ctx.Values.prometheusRule -}}
 {{- if $pr.enabled -}}
+{{- if not (include "weebo-operator.metricsEnabled" $ctx) }}
+{{- fail "prometheusRule.enabled needs metrics.prometheus.enabled" }}
+{{- end -}}
 {{- $m := include "weebo-operator.metricPrefix" $ctx -}}
 {{- $a := include "weebo-operator.alertPrefix" $ctx -}}
 {{- $sel := printf "namespace=%q, job=%q" $ctx.Release.Namespace (printf "%s-metrics" (include "weebo-operator.fullname" $ctx)) -}}

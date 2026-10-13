@@ -114,6 +114,9 @@ tasks:
     # Run from the kit (its mise.toml has every tool), on the rendered
     # workspace.
     cmds:
+      # The template's copy of templates/kit.yaml is what a new operator
+      # starts with: the same file.
+      - diff templates/kit.yaml templates/operator/.tasks/kit.yaml
       - mise exec -- cargo fmt --all --check {{.MANIFEST}}
       - mise exec -- cargo clippy {{.MANIFEST}} --workspace --all-targets -- -D warnings
       - mise exec -- cargo test {{.MANIFEST}} --workspace --no-fail-fast

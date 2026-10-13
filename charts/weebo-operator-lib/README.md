@@ -46,6 +46,9 @@ egress:                        # NetworkPolicy egress to the remote system
   - comment: Example instances.
     rules: {{ toJson .Values.networkPolicy.egress.example }}
 clusterRules: []               # extra ClusterRole rules
+clusterSecrets: true           # false: with watch.namespace, no Secret access
+                               # beyond that namespace (no cluster-scoped kind
+                               # reads or writes Secrets); default true
 alerts: []                     # extra PrometheusRule rules, after the kit's
 {{- end -}}
 ```
@@ -102,7 +105,7 @@ default to the scope. Nothing set: the whole cluster, as before.
 | `weebo-operator.podDisruptionBudget`       | when enabled and `replicaCount > 1`                           |
 | `weebo-operator.metricsService`            | `metrics.prometheus.enabled`                                  |
 | `weebo-operator.serviceMonitor`            | `serviceMonitor.enabled`                                      |
-| `weebo-operator.prometheusRule`            | the kit's alerts (`<Chart>OperatorDown`, `NoLeader`, `MultipleLeaders`, `ReconcileErrors`, `ReconcileSlow`) + `params.alerts` |
+| `weebo-operator.prometheusRule`            | the kit's alerts (`<Chart>OperatorDown`, `NoLeader`, `MultipleLeaders`, `ReconcileErrors`, `ReconcileSlow`) + `params.alerts`; needs `metrics.prometheus.enabled`, scoped to the `<fullname>-metrics` scrape job (a ServiceMonitor on the metrics Service) |
 | `weebo-operator.networkPolicy`             | `networkPolicy.enabled`, egress with `params.egress`          |
 | `weebo-operator.argocdHealthConfigMap`     | the Ready-condition health check (Lua)                        |
 

@@ -55,34 +55,47 @@ tasks:
         --set shutdown.preStopSleepSeconds=5 --set priorityClassName=high
         --set crds.install=false --set replicaCount=1
         --set rbac.namespacedExample.enabled=true > /dev/null
+      # Negative checks render into a variable first: Task's shell has no
+      # pipefail, so `render | (! grep …)` would pass on a failed render
+      # (and its `! a | b` does not negate the pipeline: `if … then exit 1`).
       # Metrics off: no metrics port, Service or env.
-      - "{{.T}} --set metrics.prometheus.enabled=false | (! grep -q WEEBO_METRICS_ADDR)"
-      # Watch scope: one namespace (env, no namespaced kind left in the
-      # ClusterRole's rules beyond the cluster ones), a label selector (env
-      # and the scope.<group> webhook), the webhook configuration off.
+      - >-
+        out="$({{.T}} --set metrics.prometheus.enabled=false)"
+        && if printf '%s\n' "$out" | grep -q WEEBO_METRICS_ADDR; then exit 1; fi
+      # A variable the chart sets, set again by extraEnv: once, extraEnv's.
+      - >-
+        out="$({{.T}} --set 'extraEnv[0].name=LOG_FORMAT' --set 'extraEnv[0].value=text')"
+        && test "$(printf '%s\n' "$out" | grep -c 'name: LOG_FORMAT')" = 1
+        && printf '%s\n' "$out" | grep -A1 'name: LOG_FORMAT' | grep -q 'value: text'
+      # Watch scope: one namespace (env), a label selector (env and the
+      # scope.<group> webhook), the webhook configuration off.
       - "{{.T}} --set watch.namespace=team-a | grep -q 'name: WEEBO_WATCH_NAMESPACE'"
       - >-
         {{.T}} --set watch.labelSelector.matchLabels.shard=a
         | grep -A1 'name: WEEBO_WATCH_LABEL_SELECTOR' | grep -q 'shard'
       - "{{.T}} --set watch.labelSelector.matchLabels.shard=a | grep -q '  - name: scope\\.'"
       - >-
-        {{.T}} --set watch.labelSelector.matchLabels.shard=a --set webhook.enabled=false
-        | (! grep -q ValidatingWebhookConfiguration)
+        out="$({{.T}} --set watch.labelSelector.matchLabels.shard=a --set webhook.enabled=false)"
+        && if printf '%s\n' "$out" | grep -q ValidatingWebhookConfiguration; then exit 1; fi
       - "{{.T}} --set references.crossNamespace=true | grep -q 'name: WEEBO_CROSS_NAMESPACE_REFS'"
       # Full namespaced: nothing cluster-scoped in the render.
       - >-
         {{.T}} --set watch.namespace=team-a --set watch.clusterKinds=false --set crds.install=false
         | grep -q 'name: WEEBO_WATCH_CLUSTER_KINDS'
       - >-
-        test -z "$({{.T}} --set watch.namespace=team-a --set watch.clusterKinds=false --set crds.install=false
-        --set 'watch.labelSelector.matchLabels.shard=a'
-        | grep -E '^kind: (ClusterRole|ClusterRoleBinding|ValidatingWebhookConfiguration|CustomResourceDefinition)$')"
+        out="$({{.T}} --set watch.namespace=team-a --set watch.clusterKinds=false --set crds.install=false
+        --set 'watch.labelSelector.matchLabels.shard=a')"
+        && if printf '%s\n' "$out"
+        | grep -qE '^kind: (ClusterRole|ClusterRoleBinding|ValidatingWebhookConfiguration|CustomResourceDefinition)$';
+        then exit 1; fi
       # Refused: schema enum, missing TLS Secret without cert-manager,
-      # egress without the API server, ServiceMonitor without metrics.
+      # egress without the API server, ServiceMonitor or PrometheusRule
+      # without metrics.
       - "! {{.T}} --set webhook.failurePolicy=Nope > /dev/null 2>&1"
       - "! {{.T}} --set webhook.certManager.enabled=false > /dev/null 2>&1"
       - "! {{.T}} --set networkPolicy.enabled=true --set networkPolicy.egress.enabled=true > /dev/null 2>&1"
       - "! {{.T}} --set serviceMonitor.enabled=true --set metrics.prometheus.enabled=false > /dev/null 2>&1"
+      - "! {{.T}} --set prometheusRule.enabled=true --set metrics.prometheus.enabled=false > /dev/null 2>&1"
       - "! {{.T}} --set watch.namespace=Team_A > /dev/null 2>&1"
       - "! {{.T}} --set watch.clusterKinds=false --set crds.install=false > /dev/null 2>&1"
       - "! {{.T}} --set watch.clusterKinds=false --set watch.namespace=team-a > /dev/null 2>&1"
@@ -90,9 +103,12 @@ tasks:
       # Every CRD ships as a template with the keep policy, none without
       # crds.install.
       - >-
-        test "$({{.T}} | grep -c 'helm.sh/resource-policy: keep')"
+        out="$({{.T}})"
+        && test "$(printf '%s\n' "$out" | grep -c 'helm.sh/resource-policy: keep')"
         = "$(find {{.CRD_DIR}} -name '*.yaml' | wc -l)"
-      - test -z "$({{.T}} --set crds.install=false | grep CustomResourceDefinition)"
+      - >-
+        out="$({{.T}} --set crds.install=false)"
+        && if printf '%s\n' "$out" | grep -q CustomResourceDefinition; then exit 1; fi
 
   crds:
     desc: "Wrap the generated CRDs (CRD_DIR) into the chart's templates/crds/: rendered under crds.install, kept by helm uninstall"

@@ -26,6 +26,9 @@ rules of its own. With watch.namespace, the namespaced kinds
 (params.namespacedKinds) move to the watch Role below: the ClusterRole
 keeps the cluster-scoped ones, and Secrets and Events (a cluster-scoped
 CR writes its Secrets wherever it targets, its Events go to `default`).
+An operator whose cluster-scoped kinds read or write no Secret sets
+params.clusterSecrets: false: with watch.namespace, Secrets are then only
+granted in that namespace (the watch Role).
 */}}
 {{- define "weebo-operator.clusterRole" -}}
 {{- $ctx := .ctx -}}
@@ -52,12 +55,14 @@ rules:
   # included unless watch.namespace) and the kinds it references.
   {{- include "weebo-operator.kindRules" (dict "group" $p.group "kinds" $kinds) | nindent 2 }}
   {{- end }}
+  {{- if or (not (include "weebo-operator.watchNamespace" $ctx)) (ne (toString $p.clusterSecrets) "false") }}
   # Emitted credentials and the instances' own Secrets: read by name,
   # created, replaced whole when the operator owns them and deleted with
   # their CR. Never listed or watched.
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "create", "update", "patch", "delete"]
+  {{- end }}
   # Kubernetes Events on every Ready transition and every failure.
   - apiGroups: ["events.k8s.io"]
     resources: ["events"]

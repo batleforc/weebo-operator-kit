@@ -30,7 +30,7 @@ kinds, env, egress), `values.yaml` follows the kit's values contract.
 ## First steps
 
 ```bash
-task init     # toolchain (mise), cog.toml from the kit, git hooks
+task init     # toolchain (mise) and mise.lock — commit it, cog.toml from the kit, git hooks
 task doctor   # envtest prerequisites
 task recu     # CRDs (crdgen) and their copies in the chart
 task test:all # unit, contract and envtest tests — creates Cargo.lock: commit it

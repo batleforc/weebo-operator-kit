@@ -65,48 +65,7 @@ spec:
               protocol: TCP
             {{- end }}
           env:
-            # Scopes the leader-election Lease; HOSTNAME (the pod name) is
-            # the holder identity.
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: LEASE_NAME
-              value: {{ include "weebo-operator.leaseName" $ctx | quote }}
-            - name: WEBHOOK_PORT
-              value: {{ $v.webhook.containerPort | quote }}
-            - name: WEEBO_SHUTDOWN_DRAIN_SECONDS
-              value: {{ $v.shutdown.drainSeconds | quote }}
-            {{- with include "weebo-operator.watchNamespace" $ctx }}
-            - name: WEEBO_WATCH_NAMESPACE
-              value: {{ . | quote }}
-            {{- end }}
-            {{- if not (include "weebo-operator.watchClusterKinds" $ctx) }}
-            - name: WEEBO_WATCH_CLUSTER_KINDS
-              value: "false"
-            {{- end }}
-            {{- with include "weebo-operator.watchLabelSelector" $ctx }}
-            - name: WEEBO_WATCH_LABEL_SELECTOR
-              value: {{ . | quote }}
-            {{- end }}
-            {{- if (($ctx.Values.references | default dict).crossNamespace) }}
-            - name: WEEBO_CROSS_NAMESPACE_REFS
-              value: "true"
-            {{- end }}
-            - name: WEEBO_RECONCILE_CONCURRENCY
-              value: {{ $v.reconcileConcurrency | quote }}
-            - name: LOG_FORMAT
-              value: {{ $v.logFormat | quote }}
-            {{- if include "weebo-operator.metricsEnabled" $ctx }}
-            - name: WEEBO_METRICS_ADDR
-              value: {{ printf "0.0.0.0:%v" $v.metrics.prometheus.port | quote }}
-            {{- end }}
-            {{- with $p.env }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
-            {{- with $v.extraEnv }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
+            {{- include "weebo-operator.env" (dict "ctx" $ctx "params" $p) | nindent 12 }}
           volumeMounts:
             # Default WEBHOOK_TLS_CERT_FILE/KEY_FILE location.
             - name: webhook-tls
@@ -158,7 +117,8 @@ spec:
           secret:
             secretName: {{ include "weebo-operator.webhookTlsSecretName" $ctx }}
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 64Mi
       {{- with $v.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -206,6 +166,8 @@ metadata:
     {{- include "weebo-operator.labels" $ctx | nindent 4 }}
 spec:
   minAvailable: {{ $ctx.Values.podDisruptionBudget.minAvailable }}
+  # Replicas that are not Ready (crash loop) never block a node drain.
+  unhealthyPodEvictionPolicy: AlwaysAllow
   selector:
     matchLabels:
       {{- include "weebo-operator.selectorLabels" $ctx | nindent 6 }}
@@ -290,4 +252,71 @@ spec:
     {{- end }}
   {{- end }}
 {{- end -}}
+{{- end -}}
+
+{{/*
+The container's environment: the kit's variables, then params.env, then
+extraEnv. A name set again later wins and appears once (a duplicate key is
+refused by server-side apply).
+*/}}
+{{- define "weebo-operator.env" -}}
+{{- $ctx := .ctx -}}
+{{- $p := .params -}}
+{{- $v := $ctx.Values -}}
+{{- $base := include "weebo-operator.kitEnv" $ctx | fromYamlArray -}}
+{{- $all := concat $base ($p.env | default list) ($v.extraEnv | default list) -}}
+{{- $out := list -}}
+{{- range $i, $e := $all -}}
+{{- $later := false -}}
+{{- range $j, $f := $all -}}
+{{- if and (gt $j $i) (eq (toString $f.name) (toString $e.name)) -}}
+{{- $later = true -}}
+{{- end -}}
+{{- end -}}
+{{- if not $later -}}
+{{- $out = append $out $e -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
+{{- define "weebo-operator.kitEnv" -}}
+{{- $ctx := . -}}
+{{- $v := $ctx.Values -}}
+# Scopes the leader-election Lease; HOSTNAME (the pod name) is
+# the holder identity.
+- name: POD_NAMESPACE
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.namespace
+- name: LEASE_NAME
+  value: {{ include "weebo-operator.leaseName" $ctx | quote }}
+- name: WEBHOOK_PORT
+  value: {{ $v.webhook.containerPort | quote }}
+- name: WEEBO_SHUTDOWN_DRAIN_SECONDS
+  value: {{ $v.shutdown.drainSeconds | quote }}
+{{- with include "weebo-operator.watchNamespace" $ctx }}
+- name: WEEBO_WATCH_NAMESPACE
+  value: {{ . | quote }}
+{{- end }}
+{{- if not (include "weebo-operator.watchClusterKinds" $ctx) }}
+- name: WEEBO_WATCH_CLUSTER_KINDS
+  value: "false"
+{{- end }}
+{{- with include "weebo-operator.watchLabelSelector" $ctx }}
+- name: WEEBO_WATCH_LABEL_SELECTOR
+  value: {{ . | quote }}
+{{- end }}
+{{- if (($ctx.Values.references | default dict).crossNamespace) }}
+- name: WEEBO_CROSS_NAMESPACE_REFS
+  value: "true"
+{{- end }}
+- name: WEEBO_RECONCILE_CONCURRENCY
+  value: {{ $v.reconcileConcurrency | quote }}
+- name: LOG_FORMAT
+  value: {{ $v.logFormat | quote }}
+{{- if include "weebo-operator.metricsEnabled" $ctx }}
+- name: WEEBO_METRICS_ADDR
+  value: {{ printf "0.0.0.0:%v" $v.metrics.prometheus.port | quote }}
+{{- end }}
 {{- end -}}

@@ -34,9 +34,12 @@ env:
 
 tasks:
   init:
-    desc: "Install the toolchain (mise), render cog.toml from the kit and install the git hooks"
+    desc: "Install the toolchain (mise), lock its versions (mise.lock, the first time), render cog.toml from the kit and install the git hooks"
     cmds:
       - task mise:install
+      # mise.toml asks for `latest`: the lock is what makes CI and every
+      # checkout install the same tools (audit ones included).
+      - test -f mise.lock || task mise:lock:gen
       - task: kit:cog
 
   doctor:

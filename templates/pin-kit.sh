@@ -6,7 +6,9 @@
 #     the sha256 Task verifies);
 #   - .github/workflows/: the kit's reusable workflows (`@vX.Y.Z`);
 #   - deploy/charts/*/Chart.yaml: the weebo-operator-lib dependency version
-#     (Chart.lock follows with `helm dependency update`).
+#     (Chart.lock follows with `helm dependency update`);
+#   - docs/package.json: the @weebo/operator-docs release tarball
+#     (package-lock.json follows with `npm install --package-lock-only`).
 #
 # Usage: pin-kit.sh <repo dir> <vX.Y.Z> [kit checkout]
 # The checksums come from the kit checkout's tasks/ when given (it must be
@@ -40,6 +42,11 @@ for f in "$dir"/deploy/charts/*/Chart.yaml; do
     ' "$f" > "$f.tmp"
     mv "$f.tmp" "$f"
 done
+
+pkg="$dir/docs/package.json"
+if [ -f "$pkg" ]; then
+    sed -i -E "s|(\"@weebo/operator-docs\": \"https://github.com/$repo/releases/download/)[^/]+/weebo-operator-docs-[^\"]+\.tgz\"|\1$tag/weebo-operator-docs-$version.tgz\"|" "$pkg"
+fi
 
 tf="$dir/Taskfile.yaml"
 if [ -f "$tf" ]; then
