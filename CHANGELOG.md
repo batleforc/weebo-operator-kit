@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.14.1](https://github.com/batleforc/weebo-operator-kit/compare/11301d55a15f14da6334f7525a41e279de7ff76a..v0.14.1) - 2026-10-13
+#### Bug Fixes
+- (**runtime**) lease takeover measured on the candidate's monotonic clock - ([11301d5](https://github.com/batleforc/weebo-operator-kit/commit/11301d55a15f14da6334f7525a41e279de7ff76a)) - Max Batleforc, Claude Opus 5.5
+
+- - -
+
 ## [v0.14.0](https://github.com/batleforc/weebo-operator-kit/compare/ada19bee672aec918f8770a54dc85ab416c8f9ec..v0.14.0) - 2026-10-13
 #### Bug Fixes
 - ![BREAKING](https://img.shields.io/badge/BREAKING-red) (**kit**) review fixes of 2026-10-13 in the crates - ([ada19be](https://github.com/batleforc/weebo-operator-kit/commit/ada19bee672aec918f8770a54dc85ab416c8f9ec)) - Max Batleforc, Claude Opus 5.5
