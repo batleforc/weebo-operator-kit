@@ -1,0 +1,405 @@
+name: Publish
+
+# Reusable: publishes an operator's release tag `vX.Y.Z` — the same CD for
+# every weebo operator:
+#
+#   1. gate: the chart's version and appVersion and the Cargo workspace
+#      version match the tag;
+#   2. one image per variant (`variants`: a Containerfile and a tag suffix),
+#      multi-arch, with SLSA provenance (mode=max) and an SBOM attached,
+#      scanned by Grype before and after the push (any High/Critical
+#      finding blocks it: there is no unfixed-only mode), smoke-run, then
+#      keyless-signed with cosign (GitHub OIDC). An optional variant
+#      (`"required": false`) that fails is left out; a required one stops
+#      the release;
+#   3. the Helm chart (OCI), signed the same way;
+#   4. the GitHub Release: changelog notes (cog), the CRD bundle (signed)
+#      and the chart archive.
+#
+#   on:
+#     push: { tags: ["v*"] }
+#   permissions: {}
+#   jobs:
+#     publish:
+#       uses: batleforc/weebo-operator-kit/.github/workflows/publish.yml@vX.Y.Z
+#       permissions: { contents: write, packages: write, id-token: write }
+#       with:
+#         tag: ${{ github.ref_name }}
+#         image: ghcr.io/batleforc/weebo-example-operator
+#         chart: weebo-example
+#         variants: >-
+#           [{"file": "Containerfile", "suffix": "", "required": true},
+#            {"file": "Containerfile.hardened", "suffix": "-hardened", "required": false}]
+#         smoke-entrypoint: /usr/local/bin/operator
+#         smoke-args: --version
+#
+# An e2e gate stays in the operator's workflow, as a job this call needs.
+# Grype (not Trivy) scans the images: it reads the RPM database of Red Hat
+# Hummingbird images, which Trivy reports as an unsupported OS and scans
+# nothing of. Accepted findings go in the caller's `.grype.yaml`, each
+# justified.
+#
+# Expected from the caller's repository: `.github/actions/setup-mise`,
+# `deploy/charts/<chart>` (on the kit's library chart), `deploy/crd/`, a
+# cog.toml (release notes).
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag (vX.Y.Z) to publish"
+        type: string
+        required: true
+      image:
+        description: "Image repository, e.g. ghcr.io/batleforc/weebo-example-operator"
+        type: string
+        required: true
+      chart:
+        description: "Chart directory under deploy/charts/ (also its name)"
+        type: string
+        required: true
+      chart-repo:
+        description: "OCI repository of the chart"
+        type: string
+        default: ghcr.io/batleforc/charts
+      variants:
+        description: "JSON list of image variants: file (Containerfile), suffix (tag suffix, \"\" for the main one), required (a failure stops the release)"
+        type: string
+        default: '[{"file": "Containerfile", "suffix": "", "required": true}]'
+      platforms:
+        description: "Platforms of the pushed images (arm64 builds under QEMU)"
+        type: string
+        default: linux/amd64,linux/arm64
+      smoke-entrypoint:
+        description: "Binary run to prove the image starts (empty: no smoke run)"
+        type: string
+        default: ""
+      smoke-args:
+        description: "Arguments of the smoke run; it must exit 0 without a cluster"
+        type: string
+        default: --version
+      grype-version:
+        description: "Grype release scanning the images"
+        type: string
+        default: "0.120.1"
+
+permissions: {}
+
+env:
+  IMAGE: ${{ inputs.image }}
+  CHART: ${{ inputs.chart }}
+  CHART_REPO: ${{ inputs.chart-repo }}
+  TAG: ${{ inputs.tag }}
+  GRYPE: grype@${{ inputs.grype-version }}
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Chart version and appVersion, Cargo version match the tag
+        run: |
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::$TAG is not a vX.Y.Z tag" >&2; exit 1 ;;
+          esac
+          want="${TAG#v}"
+          chart="deploy/charts/$CHART/Chart.yaml"
+          version="$(awk '/^version:/ {print $2}' "$chart")"
+          app="$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2}' "$chart")"
+          cargo="$(awk '/^\[workspace\.package\]/{p=1; next} /^\[/{p=0} p && /^version = / {gsub(/"/, "", $3); print $3}' Cargo.toml)"
+          for pair in "Chart.yaml version:$version" "Chart.yaml appVersion:$app" "Cargo.toml workspace version:$cargo"; do
+            if [ "${pair##*:}" != "$want" ]; then
+              echo "::error::${pair%:*} is '${pair##*:}', the tag says $want (bump with cog)" >&2
+              exit 1
+            fi
+          done
+
+  image:
+    needs: version-check
+    runs-on: ubuntu-latest
+    # arm64 is compiled under QEMU emulation: slow, but one runner type.
+    timeout-minutes: 240
+    # An optional variant may fail (a scan finding, a base not available):
+    # the release goes on without it.
+    continue-on-error: ${{ matrix.required == false }}
+    permissions:
+      contents: read
+      packages: write
+      # Keyless cosign signatures and the provenance attestation.
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.variants) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      - run: mise install "$GRYPE"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Compute tags and labels (the floating tag only for the highest version tag)
+        id: meta
+        env:
+          # Through env, never interpolated into the script: a tag name may
+          # contain shell metacharacters.
+          SUFFIX: ${{ matrix.suffix }}
+        run: |
+          highest=$(git ls-remote --tags --refs origin 'refs/tags/v[0-9]*.[0-9]*.[0-9]*' \
+            | sed 's#.*refs/tags/##' | sort -V | tail -n1)
+          tags="${IMAGE}:${TAG}${SUFFIX}"
+          if [ "$highest" = "$TAG" ]; then
+            # `latest` for the main variant, the suffix without its dash
+            # (`hardened`) for the others.
+            floating="latest"
+            [ -n "$SUFFIX" ] && floating="${SUFFIX#-}"
+            tags="$(printf '%s\n%s:%s' "$tags" "$IMAGE" "$floating")"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "$tags"
+            echo "EOF"
+            echo "labels<<EOF"
+            echo "org.opencontainers.image.version=${TAG#v}"
+            echo "org.opencontainers.image.revision=$(git rev-parse HEAD)"
+            # The commit time, not the build time: rebuilding a tag yields
+            # the same label.
+            echo "org.opencontainers.image.created=$(git log -1 --format=%cI)"
+            echo "org.opencontainers.image.ref.name=${TAG}${SUFFIX}"
+            echo "EOF"
+            echo "scan=${CHART}-operator:scan${SUFFIX}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Gate 1, before anything is pushed: the amd64 image, loaded into the
+      # local daemon, is scanned and smoke-run. Its layers are cached for
+      # the multi-arch build below.
+      - name: Build the amd64 image for the pre-push scan
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          provenance: false
+          tags: ${{ steps.meta.outputs.scan }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.file }}
+          cache-from: type=gha,scope=${{ matrix.file }}
+
+      # What ships, not the build files (`task audit`): every High or
+      # Critical finding fails, fixed or not; accepted ones are the
+      # caller's .grype.yaml.
+      - name: Scan the image
+        env:
+          SCAN: ${{ steps.meta.outputs.scan }}
+        run: mise exec "$GRYPE" -- grype "docker:$SCAN" --fail-on high
+
+      # Proves the image actually runs (the glibc ABI of its base).
+      - name: Smoke-run the image
+        if: ${{ inputs.smoke-entrypoint != '' }}
+        env:
+          SCAN: ${{ steps.meta.outputs.scan }}
+          ENTRYPOINT: ${{ inputs.smoke-entrypoint }}
+          ARGS: ${{ inputs.smoke-args }}
+        run: |
+          # ARGS is split on purpose: one argument per word.
+          # shellcheck disable=SC2086
+          docker run --rm --entrypoint "$ENTRYPOINT" "$SCAN" $ARGS
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the multi-arch image
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: ${{ inputs.platforms }}
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.file }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.file }}
+
+      # Gate 2, on what was pushed (by digest): every platform scans clean
+      # and runs (arm64 through QEMU). A failure here leaves the image
+      # unsigned.
+      - name: Scan and smoke-run the pushed digest, per platform
+        env:
+          REF: ${{ inputs.image }}@${{ steps.push.outputs.digest }}
+          PLATFORMS: ${{ inputs.platforms }}
+          ENTRYPOINT: ${{ inputs.smoke-entrypoint }}
+          ARGS: ${{ inputs.smoke-args }}
+        run: |
+          for platform in ${PLATFORMS//,/ }; do
+            echo "::group::$platform"
+            mise exec "$GRYPE" -- grype "registry:$REF" --platform "$platform" --fail-on high
+            if [ -n "$ENTRYPOINT" ]; then
+              # shellcheck disable=SC2086
+              docker run --rm --platform "$platform" --entrypoint "$ENTRYPOINT" "$REF" $ARGS
+            fi
+            echo "::endgroup::"
+          done
+
+      # Keyless: the certificate binds the signature to this workflow run.
+      # --recursive also signs each platform manifest of the index.
+      - name: Sign the image with cosign
+        env:
+          REF: ${{ inputs.image }}@${{ steps.push.outputs.digest }}
+        run: cosign sign --yes --recursive "$REF"
+
+      - name: Summary
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### ${IMAGE} (${{ matrix.file }})"
+            echo
+            echo "Digest: \`${DIGEST}\`"
+            echo
+            printf '%s\n' "$TAGS" | while read -r tag; do
+              if [ -n "$tag" ]; then echo "- \`$tag\`"; fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  chart:
+    # Never publish a chart whose required images failed (an optional
+    # variant's failure is absorbed by continue-on-error).
+    needs: image
+    if: ${{ !cancelled() && needs.image.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      - run: mise install helm
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: helm registry login
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | mise exec -- helm registry login ghcr.io -u "$ACTOR" --password-stdin
+      - name: Package and push the chart
+        id: push
+        run: |
+          mkdir -p dist
+          # The kit's library chart, as Chart.lock pins it.
+          mise exec -- helm dependency build --skip-refresh "deploy/charts/$CHART"
+          mise exec -- helm package "deploy/charts/$CHART" --destination dist
+          out="$(mise exec -- helm push dist/"$CHART"-*.tgz "oci://${CHART_REPO}" 2>&1)"
+          echo "$out"
+          digest="$(printf '%s\n' "$out" | awk '/^Digest:/ {print $2}')"
+          [ -n "$digest" ] || { echo "::error::no digest in helm push output" >&2; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Sign the chart with cosign
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          REF: ${{ inputs.chart-repo }}/${{ inputs.chart }}@${{ steps.push.outputs.digest }}
+        run: |
+          echo "$TOKEN" | cosign login ghcr.io -u "$ACTOR" --password-stdin
+          cosign sign --yes "$REF"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: chart
+          path: dist/${{ inputs.chart }}-*.tgz
+          if-no-files-found: error
+
+  github-release:
+    needs: chart
+    if: ${{ !cancelled() && needs.chart.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      # gh release create/upload.
+      contents: write
+      # cosign sign-blob of the CRD bundle.
+      id-token: write
+      # Which variants were published (a private package needs the login).
+      packages: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          # cog changelog walks the history between tags.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      - run: mise install cocogitto
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: chart
+          path: dist
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release notes, CRD bundle
+        env:
+          VARIANTS: ${{ inputs.variants }}
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          # The images actually published: an optional variant may have
+          # been left out.
+          images=""
+          for suffix in $(printf '%s' "$VARIANTS" | jq -r '.[].suffix // ""' | sed 's/^$/@main/'); do
+            [ "$suffix" = "@main" ] && suffix=""
+            if docker buildx imagetools inspect "${IMAGE}:${TAG}${suffix}" >/dev/null 2>&1; then
+              images="${images:+$images, }\`${IMAGE}:${TAG}${suffix}\`"
+            fi
+          done
+          {
+            mise exec -- cog changelog --at "$TAG"
+            echo
+            echo "## Install"
+            echo
+            echo '```bash'
+            echo "helm install ${CHART} oci://${CHART_REPO}/${CHART} --version ${TAG#v} \\"
+            echo "  --namespace ${CHART} --create-namespace"
+            echo '```'
+            echo
+            echo "Images: ${images} (${PLATFORMS//,/, })."
+            echo "Signatures, SBOM and provenance: cosign (keyless, this workflow), see the docs."
+          } > dist/notes.md
+          # Every CRD in one file, for `kubectl apply --server-side -f` and
+          # for installs with crds.install=false.
+          for f in deploy/crd/*.yaml; do echo "---"; cat "$f"; done > "dist/${CHART}-crds.yaml"
+          cosign sign-blob --yes --bundle "dist/${CHART}-crds.yaml.sigstore.json" "dist/${CHART}-crds.yaml"
+      - name: Create (or update) the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assets=(dist/"$CHART"-*.tgz "dist/${CHART}-crds.yaml" "dist/${CHART}-crds.yaml.sigstore.json")
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # A re-publish of an existing tag: refresh notes and assets.
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file dist/notes.md
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$TAG" --notes-file dist/notes.md "${assets[@]}"
+          fi

@@ -1218,3 +1218,35 @@ Reste ouvert :
   fait qu'avertir.
 - Cassant pour les installations : ajouter les 4 kinds aux
   `allowedKinds` des policies existantes, et passer par la migration.
+
+### CD commune — `publish.yml` réutilisable (2026-10-13)
+
+Constat : authentik publiait son image sans la scanner (même
+`libssl3` High CVE-2026-84782 que forgejo, dont le scan Trivy bloquait
+v0.2.0) ; le scan Trivy du variant Red Hat Hummingbird de forgejo était
+aveugle (`ID=hummingbird` : OS non supporté, rien n'est lu).
+
+- `.github/workflows/publish.yml` (`workflow_call`), tiré de celui de
+  forgejo : contrôle de version (Chart/appVersion/Cargo = tag), une image
+  par variant (`variants` : Containerfile, suffixe, `required`),
+  multi-arch, SBOM + provenance, **scan Grype** avant et après le push
+  (`--fail-on high` : toute High/Critical bloque, corrigeable ou non —
+  décidé ; exceptions dans le `.grype.yaml` de l'opérateur), smoke-run
+  (`smoke-entrypoint`/`smoke-args`), signature cosign ; chart OCI signé ;
+  release GitHub (notes cog, bundle CRD signé). Un variant optionnel en
+  échec est laissé de côté (le chart et la release partent), un variant
+  requis arrête tout. La porte e2e reste dans l'opérateur (un job dont
+  l'appel dépend).
+- Images de base : **Debian 13** (`distroless/cc-debian13` + builder
+  `rust:1-slim-trixie`) — 0 High/Critical (Grype et Trivy), là où
+  `cc-debian12` portait encore des `libssl3`/`libc6` High/Critical.
+- Variant **Hummingbird** (`registry.access.redhat.com/hi/core-runtime`,
+  builder `hi/rust`) : `Containerfile.hardened`, optionnel. À ce jour
+  Grype y trouve 2 High sans correctif (`libgcc`/`libstdc++`,
+  CVE-2026-95619) : il n'est pas publié tant que Red Hat ne livre pas le
+  correctif.
+- Gabarit : `Containerfile` Debian 13, `Containerfile.hardened`,
+  `.github/workflows/publish.yml` (chart et image déduits du nom du
+  dépôt), `--version` du binaire pour le smoke-run, lint des deux
+  Containerfiles.
+

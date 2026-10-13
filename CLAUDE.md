@@ -32,8 +32,8 @@ read it before any non-trivial change.
   them (tests in `weebo-kit-runtime`/`weebo-kit-perf` fail otherwise). See
   its README.
 
-- `charts/weebo-operator-lib`, `tasks/*.yaml`, `.github/workflows/checks.yml`
-  and `templates/operator` are consumed by tag (OCI chart, raw URLs pinned
+- `charts/weebo-operator-lib`, `tasks/*.yaml`, `.github/workflows/checks.yml`,
+  `.github/workflows/publish.yml` and `templates/operator` are consumed by tag (OCI chart, raw URLs pinned
   by sha256, `uses: …@vX.Y.Z`, `cargo generate --tag`): same naming rule,
   and a change that breaks an operator is a breaking release. The chart
   keeps weebo-forgejo's resource names and values contract. The template
