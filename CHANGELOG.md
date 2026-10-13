@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.12.0](https://github.com/batleforc/weebo-operator-kit/compare/882550805fe82b12b313c1def1a8e9c8795f8a68..v0.12.0) - 2026-10-13
+#### Features
+- (**template**) Hummingbird main image, static sibling, accepted Grype findings - ([8825508](https://github.com/batleforc/weebo-operator-kit/commit/882550805fe82b12b313c1def1a8e9c8795f8a68)) - Max Batleforc, Claude Opus 5.5
+
+- - -
+
 ## [v0.11.0](https://github.com/batleforc/weebo-operator-kit/compare/682334ff81c4394c2545966fa08fd2b3430be99a..v0.11.0) - 2026-10-13
 #### Features
 - reusable publish workflow, Debian 13 and Hummingbird images - ([682334f](https://github.com/batleforc/weebo-operator-kit/commit/682334ff81c4394c2545966fa08fd2b3430be99a)) - Max Batleforc, Claude Opus 5.5
