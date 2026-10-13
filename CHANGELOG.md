@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.14.2](https://github.com/batleforc/weebo-operator-kit/compare/23c723dc53982954cd2283333a182fe3b6a26ee3..v0.14.2) - 2026-10-13
+#### Bug Fixes
+- (**template**) read a local instance's token through the opt-in check - ([23c723d](https://github.com/batleforc/weebo-operator-kit/commit/23c723dc53982954cd2283333a182fe3b6a26ee3)) - Max Batleforc, Claude Opus 5.5
+
+- - -
+
 ## [v0.14.1](https://github.com/batleforc/weebo-operator-kit/compare/11301d55a15f14da6334f7525a41e279de7ff76a..v0.14.1) - 2026-10-13
 #### Bug Fixes
 - (**runtime**) lease takeover measured on the candidate's monotonic clock - ([11301d5](https://github.com/batleforc/weebo-operator-kit/commit/11301d55a15f14da6334f7525a41e279de7ff76a)) - Max Batleforc, Claude Opus 5.5
