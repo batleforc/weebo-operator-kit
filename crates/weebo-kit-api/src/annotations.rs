@@ -1,5 +1,5 @@
 //! The annotations every operator reads on its CRs, under its own domain
-//! (`forgejo.weebo.io/force-orphan`, `authentik.weebo.io/force-orphan`…):
+//! (`example.weebo.io/force-orphan`, `other.weebo.io/force-orphan`…):
 //! the same behaviour behind the same name in every operator.
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
@@ -20,6 +20,12 @@ pub const IMPORT_PENDING: &str = "import-pending";
 /// moved (set by a migration): they are still its own, and are rewritten
 /// under its current id.
 pub const PREVIOUS_OWNER: &str = "previous-owner";
+/// A **label** of a `Secret`, not an annotation of a CR: `"true"` lets a
+/// local instance of the Secret's namespace use it as its API token. The
+/// operator reads Secrets with its own rights, so without this consent
+/// anyone allowed to create a local instance could make it send any
+/// Secret of the namespace to a URL of their choosing.
+pub const INSTANCE_TOKEN: &str = "instance-token";
 
 /// The annotations of one operator, under `domain`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +68,15 @@ impl Annotations {
 
     pub fn previous_owner<'a>(&self, meta: &'a ObjectMeta) -> Option<&'a str> {
         self.get(meta, PREVIOUS_OWNER)
+    }
+
+    /// `meta` (a `Secret`'s) carries `<domain>/instance-token: "true"`
+    /// among its labels: a local instance may use it as its token.
+    pub fn instance_token_allowed(&self, meta: &ObjectMeta) -> bool {
+        meta.labels
+            .as_ref()
+            .and_then(|l| l.get(&self.key(INSTANCE_TOKEN)))
+            .is_some_and(|v| v == "true")
     }
 
     /// Paused by the importer — never while the CR is being deleted.
@@ -112,5 +127,20 @@ mod tests {
         assert!(A.import_pending(&paused));
         paused.deletion_timestamp = Some(Time(Timestamp::from_second(1).unwrap()));
         assert!(!A.import_pending(&paused), "a deletion is always processed");
+    }
+
+    #[test]
+    fn instance_token_consent_is_a_label() {
+        let labelled = |v: &str| ObjectMeta {
+            labels: Some(BTreeMap::from([(
+                "example.weebo.io/instance-token".to_string(),
+                v.to_string(),
+            )])),
+            ..Default::default()
+        };
+        assert!(A.instance_token_allowed(&labelled("true")));
+        assert!(!A.instance_token_allowed(&labelled("false")));
+        // An annotation is not consent.
+        assert!(!A.instance_token_allowed(&meta(&[(INSTANCE_TOKEN, "true")])));
     }
 }

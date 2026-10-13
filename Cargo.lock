@@ -4009,6 +4009,8 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "rcgen",
+ "rustls",
+ "schemars",
  "serde",
  "serde_json",
  "serde_norway",
@@ -4078,6 +4080,7 @@ dependencies = [
  "opentelemetry-prometheus",
  "opentelemetry_sdk",
  "prometheus",
+ "rustls",
  "serde",
  "serde_json",
  "tokio",
@@ -4086,6 +4089,7 @@ dependencies = [
  "tracing-subscriber",
  "weebo-kit-api",
  "weebo-kit-domain",
+ "wiremock",
 ]
 
 [[package]]

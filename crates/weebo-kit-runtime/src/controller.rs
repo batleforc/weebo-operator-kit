@@ -31,6 +31,9 @@ pub const DEFAULT_CONCURRENCY: u16 = 4;
 pub const STEADY_REQUEUE_SECS: u64 = 300;
 /// Retry after a failure (often a dependency not ready yet), seconds.
 pub const RETRY_REQUEUE_SECS: u64 = 30;
+/// The soonest a reconcile is requeued, seconds: a due time already past
+/// (`due_in: Some(0)`) never spins the controller.
+pub const MIN_REQUEUE_SECS: u64 = 1;
 
 /// `WEEBO_RECONCILE_CONCURRENCY`, or [`DEFAULT_CONCURRENCY`].
 pub fn concurrency() -> u16 {
@@ -91,6 +94,10 @@ where
 /// Drains a controller's result stream until shutdown, reporting watch
 /// failures to `health` (a watch erroring in a loop fails `/livez`).
 /// Reconcile failures are logged; they show on the CR (status, Events).
+/// A reconcile succeeding says nothing of the watch (it runs from the
+/// requeue timers even while the watch is broken): the watch's failure
+/// streak only ends after [`crate::health::FAILURE_STREAK_GAP`] without a
+/// new error.
 pub async fn drive<K, E, S>(kind: &'static str, health: Arc<Health>, results: S)
 where
     K: Resource,
@@ -100,7 +107,7 @@ where
     results
         .for_each(|res| {
             match res {
-                Ok(_) => health.ok(kind),
+                Ok(_) => {}
                 Err(runtime_controller::Error::QueueError(err)) => {
                     tracing::warn!(kind, error = %err, "watch error");
                     health.failed(kind, err.to_string());
@@ -137,7 +144,7 @@ pub fn requeue_after(steady: bool, due_in: Option<u64>) -> Action {
         RETRY_REQUEUE_SECS
     };
     match due_in {
-        Some(due) if due < base => Action::requeue(Duration::from_secs(due)),
+        Some(due) if due < base => Action::requeue(Duration::from_secs(due.max(MIN_REQUEUE_SECS))),
         _ => Action::requeue(jittered(base)),
     }
 }
@@ -216,6 +223,8 @@ mod tests {
     fn requeue_follows_the_outcome_and_a_due_time() {
         let secs = |a: Action| format!("{a:?}");
         assert!(secs(requeue_after(false, Some(5))).contains("5s"));
+        // A due time already past: the floor, not a hot loop.
+        assert!(secs(requeue_after(true, Some(0))).contains("1s"));
         // A due time later than the cadence doesn't delay it.
         let steady = requeue_after(true, Some(10_000));
         assert!(!format!("{steady:?}").contains("10000"));

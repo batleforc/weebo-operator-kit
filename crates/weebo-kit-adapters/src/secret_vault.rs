@@ -1,7 +1,9 @@
 //! KV v2 store authenticated through Vault's Kubernetes auth (the
 //! operator's own ServiceAccount JWT — no static Vault token). The login
 //! is cached for 80% of its lease by [`VaultLogins`], and a KV call
-//! rejected as unauthorized re-logs-in once in place.
+//! rejected because the token is no longer valid re-logs-in once in place
+//! (with the ServiceAccount token read again: a projected one rotates). A
+//! call the policy denies to a valid token never re-logs-in.
 
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
@@ -13,7 +15,7 @@ use tokio::sync::{Mutex, RwLock};
 use vaultrs::api::kv2::requests::SetSecretMetadataRequest;
 use vaultrs::client::{Client as _, VaultClient, VaultClientSettingsBuilder};
 use vaultrs::error::ClientError;
-use vaultrs::{auth::kubernetes, kv2};
+use vaultrs::{auth::kubernetes, kv2, token};
 use weebo_kit_api::SecretKeyRef;
 use weebo_kit_application::ports::SecretStoreError;
 
@@ -63,6 +65,10 @@ pub struct VaultSecretStore {
     kubernetes_auth_mount: String,
     kubernetes_auth_role: String,
     jwt: String,
+    /// Read again on every re-login when set: a projected ServiceAccount
+    /// token is rotated by the kubelet, the one read at login may be
+    /// expired by then.
+    jwt_path: Option<std::path::PathBuf>,
     cache_ttl: Option<Duration>,
 }
 
@@ -116,8 +122,16 @@ impl VaultSecretStore {
             kubernetes_auth_mount: spec.kubernetes_auth_mount.clone(),
             kubernetes_auth_role: spec.kubernetes_auth_role.clone(),
             jwt: jwt.trim().to_string(),
+            jwt_path: None,
             cache_ttl: cache_ttl_from_lease(auth.lease_duration, auth.renewable),
         })
+    }
+
+    /// Re-logins read the ServiceAccount token from `path` again (falling
+    /// back on the one given to [`Self::new`] when it can't be read).
+    pub fn with_jwt_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.jwt_path = Some(path.into());
+        self
     }
 
     /// How long the factory may reuse this store; `None` = don't cache.
@@ -134,19 +148,60 @@ impl VaultSecretStore {
     /// The login runs under a read guard (it doesn't use the token); the
     /// write lock is only held for the swap, never across a network call.
     async fn relogin(&self) -> Result<(), SecretStoreError> {
+        let fresh = self
+            .jwt_path
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok());
+        let jwt = fresh.as_deref().map_or(self.jwt.as_str(), str::trim);
         let auth = {
             let client = self.client.read().await;
             kubernetes::login(
                 &*client,
                 &self.kubernetes_auth_mount,
                 &self.kubernetes_auth_role,
-                &self.jwt,
+                jwt,
             )
             .await
             .map_err(|e| SecretStoreError(format!("Vault re-login: {e}")))?
         };
         self.client.write().await.set_token(&auth.client_token);
         Ok(())
+    }
+
+    /// Whether `err` comes from a token that is no longer valid. Vault
+    /// answers 403 both to an expired or revoked token and to a valid one
+    /// its policy denies: a 403 is only a stale token when `lookup-self`
+    /// (granted by Vault's default policy) fails too — a policy denial
+    /// never mints a new token.
+    async fn token_is_stale(&self, err: &ClientError) -> bool {
+        match err {
+            ClientError::APIError { code: 401, .. } => true,
+            ClientError::APIError { code: 403, .. } => {
+                let client = self.client.read().await;
+                token::lookup_self(&*client)
+                    .await
+                    .is_err_and(|e| is_auth_error(&e))
+            }
+            _ => false,
+        }
+    }
+
+    /// `op`, run again once after a re-login when its token was stale.
+    async fn with_relogin<T, F, Fut>(
+        &self,
+        op: F,
+    ) -> Result<Result<T, ClientError>, SecretStoreError>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = Result<T, ClientError>>,
+    {
+        match op().await {
+            Err(e) if self.token_is_stale(&e).await => {
+                self.relogin().await?;
+                Ok(op().await)
+            }
+            other => Ok(other),
+        }
     }
 
     /// The KV v2 custom-metadata key naming the emitting CR.
@@ -161,18 +216,12 @@ impl VaultSecretStore {
     /// The owner id recorded on `path` (`Ok(None)`: nothing stored, or
     /// stored before owners were recorded).
     pub async fn owner_of(&self, path: &str) -> Result<Option<String>, SecretStoreError> {
-        let first = {
-            let client = self.client.read().await;
-            kv2::read_metadata(&*client, &self.mount, path).await
-        };
-        let result = match first {
-            Err(e) if is_auth_error(&e) => {
-                self.relogin().await?;
+        let result = self
+            .with_relogin(|| async {
                 let client = self.client.read().await;
                 kv2::read_metadata(&*client, &self.mount, path).await
-            }
-            other => other,
-        };
+            })
+            .await?;
         match result {
             Ok(meta) => Ok(meta
                 .custom_metadata
@@ -201,13 +250,7 @@ impl VaultSecretStore {
             let client = self.client.read().await;
             kv2::set_metadata(&*client, &self.mount, path, Some(&mut opts)).await
         };
-        let result = match set().await {
-            Err(e) if is_auth_error(&e) => {
-                self.relogin().await?;
-                set().await
-            }
-            other => other,
-        };
+        let result = self.with_relogin(set).await?;
         match result {
             Ok(()) => Ok(()),
             Err(ClientError::APIError { code: 403, .. }) => {
@@ -231,23 +274,14 @@ impl VaultSecretStore {
         if self.read_path(path).await.ok().flatten().as_ref() == Some(data) {
             return Ok(());
         }
-        // Each guard is scoped to its block: `relogin` takes the write lock.
-        let first = {
+        // Each guard is scoped to its call: `relogin` takes the write lock.
+        self.with_relogin(|| async {
             let client = self.client.read().await;
             kv2::set(&*client, &self.mount, path, data).await
-        };
-        match first {
-            Ok(_) => Ok(()),
-            Err(e) if is_auth_error(&e) => {
-                self.relogin().await?;
-                let client = self.client.read().await;
-                kv2::set(&*client, &self.mount, path, data)
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| SecretStoreError(format!("Vault write {path}: {e}")))
-            }
-            Err(e) => Err(SecretStoreError(format!("Vault write {path}: {e}"))),
-        }
+        })
+        .await?
+        .map(|_| ())
+        .map_err(|e| SecretStoreError(format!("Vault write {path}: {e}")))
     }
 
     /// `Ok(None)` when nothing is stored at `path`.
@@ -255,18 +289,12 @@ impl VaultSecretStore {
         &self,
         path: &str,
     ) -> Result<Option<BTreeMap<String, String>>, SecretStoreError> {
-        let first = {
-            let client = self.client.read().await;
-            kv2::read::<BTreeMap<String, String>>(&*client, &self.mount, path).await
-        };
-        let result = match first {
-            Err(e) if is_auth_error(&e) => {
-                self.relogin().await?;
+        let result = self
+            .with_relogin(|| async {
                 let client = self.client.read().await;
                 kv2::read::<BTreeMap<String, String>>(&*client, &self.mount, path).await
-            }
-            other => other,
-        };
+            })
+            .await?;
         match result {
             Ok(data) => Ok(Some(data)),
             Err(ClientError::APIError { code: 404, .. }) => Ok(None),
@@ -275,17 +303,22 @@ impl VaultSecretStore {
     }
 
     /// Deletes every version and the metadata — not a recoverable soft
-    /// delete. Idempotent.
+    /// delete — given `delete` on `<mount>/metadata/*`. Without it, best
+    /// effort: the current version is soft-deleted (`delete` on
+    /// `<mount>/data/*`), the older ones stay in the history (warned).
+    /// Idempotent.
     pub async fn delete_path(&self, path: &str) -> Result<(), SecretStoreError> {
-        let first = {
-            let client = self.client.read().await;
-            kv2::delete_metadata(&*client, &self.mount, path).await
-        };
-        let result = match first {
-            Err(e) if is_auth_error(&e) => {
-                self.relogin().await?;
+        let result = self
+            .with_relogin(|| async {
                 let client = self.client.read().await;
                 kv2::delete_metadata(&*client, &self.mount, path).await
+            })
+            .await?;
+        let result = match result {
+            Err(ClientError::APIError { code: 403, .. }) => {
+                tracing::warn!(%path, "no delete access to the KV metadata: only the current version is deleted, older ones stay");
+                let client = self.client.read().await;
+                kv2::delete_latest(&*client, &self.mount, path).await
             }
             other => other,
         };
@@ -396,7 +429,7 @@ impl VaultLogins {
         let ca = load_ca().await?;
         VaultSecretStore::new(config, &jwt, ca.as_deref())
             .await
-            .map(Arc::new)
+            .map(|store| Arc::new(store.with_jwt_path(jwt_path)))
             .map_err(|e| e.0)
     }
 }
@@ -407,7 +440,8 @@ fn cache_ttl_from_lease(lease_duration: u64, renewable: bool) -> Option<Duration
     (lease_duration > 0 && renewable).then(|| Duration::from_secs(lease_duration * 4 / 5))
 }
 
-/// 401/403: the token is no good (expired or revoked).
+/// 401/403: the token is no good (expired or revoked), or — 403 — the
+/// policy denies the call ([`VaultSecretStore::token_is_stale`] tells).
 fn is_auth_error(err: &ClientError) -> bool {
     matches!(err, ClientError::APIError { code, .. } if *code == 401 || *code == 403)
 }

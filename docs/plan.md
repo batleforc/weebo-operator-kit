@@ -35,7 +35,7 @@ métier).
 |-------------------------|--------------|-------------------------------|-------------------------------------------------------------------------------------------------|
 | `weebo-kit-domain`      | domain       | rien                          | `Reason`/`Severity`, `reason_codes!`, `Failure<R>`/`Advisory<R>`, moteur d'allow-list générique  |
 | `weebo-kit-api`         | api          | serde, schemars, k8s-openapi  | sous-types de CRD : `Condition`, `SecretKeyRef`, `ObjectRef`, `SecretTarget`, `TlsOptions`…     |
-| `weebo-kit-application` | application  | kit-api                       | ports `SecretStore`/`SecretStoreFactory`, helpers d'émission de secrets, `FakeSecretStore`       |
+| `weebo-kit-application` | application  | kit-api, k8s-openapi (types)  | ports `SecretStore`/`SecretStoreFactory`, helpers d'émission de secrets, `FakeSecretStore`       |
 | `weebo-kit-adapters`    | outbound     | kit-application, kube, vaultrs| `K8sSecretStore`, `VaultSecretStore` + `VaultLogins`, `RoutingSecretStore`, `read_secret_key`   |
 | `weebo-kit-runtime`     | inbound/bin  | kit-domain, kit-api, kube     | télémétrie, leader election, `Shutdown`, serveur webhook TLS, métriques, conditions + Events    |
 | `weebo-kit-testkit`     | tests        | envtest, kube                 | `EnvTestCluster::start(crd_dir)`, `wait_for`/`wait_for_absence`                                 |
@@ -268,8 +268,10 @@ erreurs que l'opérateur traduit) :
   domaine de l'opérateur ; mêmes noms, même comportement partout.
 - **Résolution des `*Ref`** (`weebo-kit-application::refs`) :
   `Referenced<Id>`, `RefState<Id>` (`Ready`/`NotFound`/`NotReady`/
-  `OtherInstance`), `require` → `RefError` neutre (`describe` pour le
-  message), `same_instance` (un `instanceRef` vide = la seule instance).
+  `OtherInstance`, plus `NotReconciled` depuis v0.14.0), `require` →
+  `RefError` neutre (`describe` pour le message), `same_instance`
+  (depuis v0.10.0 : égalité stricte des `BoundInstance` — kind, namespace,
+  nom).
   La lecture des CR référencés reste à l'opérateur (ses kinds, son
   status) ; `ClusterError` et le port `PolicySource<R>` (générique sur la
   règle telle que la CRD de policy l'écrit) sont dans les ports du kit.
@@ -542,7 +544,7 @@ sur `checks.yml`, puis supprimer leurs copies (`.tasks/helm.yaml`,
 `weebo-operator-lib` de ghcr doit être rendu public une fois, à la
 première publication.
 
-### Proposition — périmètre de watch et mode namespacé (décidée, cassante — étapes 1 à 3 faites dans l'arbre, non publiées ; reste forgejo full namespacé)
+### Périmètre de watch et mode namespacé (fait, publié en v0.10.0)
 
 État en v0.9.0 : un opérateur = une installation pour tout le cluster.
 Chaque controller surveille son kind avec `Api::all` (namespacés compris),
@@ -843,7 +845,7 @@ chart.
 
 #### État (2026-10-12)
 
-**Étape 1 — faite dans l'arbre, ni commitée ni publiée** (`task lint`,
+**Étape 1 — faite, publiée en v0.10.0** (`82d8f66` ; `task lint`,
 `task test:all` dont `template:check`, `task docs:check` verts) :
 
 - `weebo-kit-runtime::scope` : `WatchScope` (`cluster()`,
@@ -899,7 +901,7 @@ chart.
   kit casse leur build (`controller(api, &scope)`).
 - Pas de bump de version ni de tag : release mineure à faire (cassante).
 
-**Étape 2 — faite dans l'arbre, ni commitée ni publiée** (même release
+**Étape 2 — faite, publiée en v0.10.0** (même release
 que l'étape 1 ; `task lint`, `task test:all` dont `template:check`,
 `task docs:check` verts) :
 
@@ -975,7 +977,8 @@ Pas fait à l'étape 2, à reprendre dans les opérateurs (étape 3) :
   doc de l'enum (« The kind of instance a reference designates. ») au
   lieu de celle du champ.
 
-**Étape 3 — en cours (non commitée)** :
+**Étape 3 — faite, publiée en v0.10.0** (les opérateurs consomment
+depuis le kit par tag, plus par `path`) :
 
 Kit, ajouts pour les opérateurs (non cassants) : `LocalTlsOptions`
 (CA dans le namespace de l'instance, `in_namespace(ns)` → `TlsOptions`)
@@ -1177,7 +1180,7 @@ Les manifests GitOps doivent être réécrits dans la même release (l'outil
 - **D10** — migration par l'outil ci-dessus (namespace cible par
   correspondance, défaut configurable). Recommandé : oui.
 
-#### État (2026-10-12) — fait dans weebo-forgejo, ni commité ni publié
+#### État — fait, publié dans weebo-forgejo v0.2.0 (kit v0.10.1)
 
 `task lint`, `task test:all` (394 réussis, 0 échec, 39 ignorés = tests
 contre un vrai Forgejo), `task recu`, `task lint:helm`, rendu full
@@ -1275,3 +1278,67 @@ aveugle (`ID=hummingbird` : OS non supporté, rien n'est lu).
   un index multi-arch unique (`platforms: linux/amd64,linux/arm64`, sous
   QEMU, bloquant) — à terme, assembler l'index à partir des deux builds
   natifs (`imagetools create`) serait le mieux des deux.
+
+### v0.14.0 — corrections de la revue du 2026-10-13 (cassante)
+
+Détail des points : `docs/review-2026-10-13.md` (K1–K18).
+
+Comportement (sans changement d'API) :
+
+- **Instance par défaut stable** : sans `instanceRef`, l'instance
+  enregistrée dans le status reste tant qu'elle est encore candidate
+  (`instances::resolve_bound`, utilisé par `Instances`). Une instance
+  créée après coup (une `Instance` cluster, une seconde locale) ne prend
+  plus l'objet en silence ; l'instance enregistrée disparue et une autre
+  disponible → `ResolveError::BindingChanged` (message reformulé).
+- **Vault** : un 403 ne relance un login que si `lookup-self` échoue
+  aussi (jeton réellement périmé) — un refus de policy ne crée plus de
+  jeton ; le JWT du ServiceAccount est relu à chaque re-login
+  (`VaultSecretStore::with_jwt_path`, posé par `VaultLogins`). Suppression
+  sans droit `delete` sur `<mount>/metadata/*` : repli sur la suppression
+  de la version courante (`<mount>/data/*`), les anciennes versions
+  restent (warning) — le droit sur `metadata` reste recommandé.
+- `K8sSecretStore` réécrit l'annotation de propriétaire tant qu'elle
+  porte l'ancien id ; `SecretOwner::formerly` n'est accepté que pour le
+  même kind et le même nom (seul le scope change).
+- `drive` ne remet plus la watch « en bonne santé » sur un reconcile
+  réussi (la série d'échecs se termine après `FAILURE_STREAK_GAP`).
+- Requeue jamais sous `MIN_REQUEUE_SECS` (1 s) ; reflectors attendus au
+  plus `STORE_READY_TIMEOUT` (10 s), puis lecture par l'API.
+- Notes d'Event tronquées en octets (1000) sur une frontière de
+  caractère ; advisories d'une même raison fusionnées en une condition ;
+  patch de status non rejoué sur une erreur de (dé)sérialisation.
+- Doc : `SharedWith.namespaceSelector` vide = tout le cluster ; doc du
+  lease (le raccourci « stale » lit l'horloge murale) ; plus aucun nom de
+  produit ni champ de CRD d'opérateur dans les doc comments du kit (les
+  CRD générées changent : `task recu` côté opérateur).
+
+Ajouts :
+
+- `annotations::INSTANCE_TOKEN` (`<domaine>/instance-token`, un
+  **label** de Secret), `Annotations::instance_token_allowed`, et
+  `weebo_kit_adapters::read_local_instance_token` (+ `TokenSecretError`) :
+  le jeton d'une instance **locale** n'est lu que si son Secret porte
+  `<domaine>/instance-token: "true"`. Sinon, quiconque peut créer une
+  instance locale ferait envoyer n'importe quel Secret du namespace vers
+  une URL de son choix (l'opérateur lit avec ses propres droits). Les
+  instances cluster gardent `read_secret_key`.
+
+**Cassant pour les opérateurs** (à faire au bump) :
+
+1. `RefState::NotReconciled` / `RefError::NotReconciled` (variantes
+   ajoutées) : un CR référencé sans condition `Ready` n'est plus
+   `NotReady("NotReconciledYet")`. Ajouter les bras aux `match`
+   exhaustifs (forgejo : `use_cases/refs.rs`, `require` → son code
+   `ReferenceNotReady`, `resolve_member` → `Member::Pending` avec un
+   message propre) et mettre à jour les tests qui attendaient la chaîne.
+2. Instances locales : lire le jeton avec `read_local_instance_token`
+   (authentik : `gateway_factory.rs`, forgejo : l'équivalent), traduire
+   `TokenSecretError::NotAllowed` en code de raison, documenter le label
+   (page « connecter une instance »), et **prévenir les utilisateurs** :
+   les Secrets existants doivent être labellisés avant la mise à jour.
+3. CRD régénérées (`task recu`) : descriptions de `secretTargets[].backend`,
+   `tls`, `sharedWith.namespaceSelector` modifiées.
+4. Tests d'opérateur qui comptaient sur un re-login à chaque 403 Vault
+   (scriptés sans `lookup-self`) : ajouter la réponse `lookup-self`.
+

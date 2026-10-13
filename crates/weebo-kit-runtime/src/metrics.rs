@@ -1,7 +1,7 @@
 //! Reconcile-loop metrics. Recording through `opentelemetry::global` is a
 //! no-op until [`crate::telemetry::init`] installs a real `MeterProvider`
-//! (only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set), so controllers record
-//! unconditionally.
+//! (when `OTEL_EXPORTER_OTLP_ENDPOINT` or `WEEBO_METRICS_ADDR` is set), so
+//! controllers record unconditionally.
 
 use std::time::Duration;
 
@@ -29,8 +29,8 @@ pub struct ReconcileMetrics {
 }
 
 impl ReconcileMetrics {
-    /// `meter`: the operator's meter name (`weebo-forgejo-operator`);
-    /// `prefix`: its metric prefix (`weebo_forgejo`).
+    /// `meter`: the operator's meter name (`weebo-example-operator`);
+    /// `prefix`: its metric prefix (`weebo_example`).
     pub fn new(meter: &'static str, prefix: &str) -> Self {
         Self::with_meter(&opentelemetry::global::meter(meter), prefix)
     }

@@ -105,8 +105,14 @@ pub fn lease(
 /// - expiry is judged on this replica's **monotonic clock**: the lease is
 ///   free once its record hasn't changed for `leaseDurationSeconds` since
 ///   this replica first saw that record — skew between the nodes' wall
-///   clocks never matters. A record stale by more than [`STALE_FACTOR`]
-///   TTLs by the wall clock (a leader long gone) is taken without waiting.
+///   clocks doesn't matter there;
+/// - one shortcut does read the wall clock: a record whose `renewTime` is
+///   older than [`STALE_FACTOR`] TTLs (a leader long gone) is taken without
+///   waiting. A node whose clock runs ahead of the leader's by more than
+///   that (45 s by default) can therefore depose a live leader; the
+///   deposed one sees a conflict at its next renewal and exits
+///   ([`hold`]), so both reconcile for at most one renew interval. Keep
+///   the nodes' clocks synchronized (NTP).
 pub struct LeaseLock {
     api: Api<Lease>,
     name: String,

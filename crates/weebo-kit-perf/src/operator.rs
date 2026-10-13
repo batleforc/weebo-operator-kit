@@ -13,10 +13,10 @@ use crate::prom;
 #[derive(Debug, Clone)]
 pub struct OperatorMetrics {
     /// Metric prefix given to the kit's `ReconcileMetrics`
-    /// (`weebo_authentik` → `weebo_authentik_reconcile_total`).
+    /// (`weebo_example` → `weebo_example_reconcile_total`).
     pub prefix: String,
     /// The gauge at 1 on the replica holding the leader lease
-    /// (`weebo_authentik_leader`): the operator is up once it reads 1.
+    /// (`weebo_example_leader`): the operator is up once it reads 1.
     pub leader_gauge: String,
 }
 

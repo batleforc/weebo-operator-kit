@@ -32,7 +32,7 @@ pub struct Telemetry {
 /// Every `opentelemetry::global::meter(...)` call is safe to make
 /// unconditionally — the global API is a no-op recorder until a real
 /// `MeterProvider` is installed. `service` names the tracer (e.g.
-/// `weebo-forgejo-operator`).
+/// `weebo-example-operator`).
 pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let json = std::env::var("LOG_FORMAT").is_ok_and(|f| f.eq_ignore_ascii_case("json"));

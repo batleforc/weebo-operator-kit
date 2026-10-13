@@ -1,8 +1,8 @@
 //! The operator's two instance kinds — the cluster-scoped `I`
 //! (`XInstance`) and the namespaced `L` (`XLocalInstance`) — as one
 //! [`InstanceDirectory`]: what a CR's `instanceRef` designates
-//! (`weebo_kit_application::instances::resolve`), kept stable once
-//! recorded (`check_binding`).
+//! (`weebo_kit_application::instances::resolve_bound`), kept stable once
+//! recorded.
 //!
 //! Read from live reflector `Store`s when the binary wires them in, from
 //! the API otherwise (tests). The operator's watch scope applies: its
@@ -21,7 +21,7 @@ use serde::de::DeserializeOwned;
 pub use weebo_kit_api::SharesItself;
 use weebo_kit_api::{BoundInstance, InstanceKind, InstanceRef};
 use weebo_kit_application::instances::{
-    Candidate, Candidates, InstanceDirectory, InstanceError, Request, check_binding, resolve,
+    Candidate, Candidates, InstanceDirectory, InstanceError, Request, resolve_bound,
 };
 
 /// Either instance kind, once resolved.
@@ -116,12 +116,15 @@ where
         }
     }
 
+    /// The live store once it has listed, `None` (read from the API) when
+    /// its writer is gone or it still hasn't listed after
+    /// [`STORE_READY_TIMEOUT`](crate::instance::STORE_READY_TIMEOUT) — a watch that
+    /// can't list (RBAC) must not hang every reconcile.
     async fn ready<K: Resource<DynamicType = ()> + Clone + 'static>(
         store: Option<&Store<K>>,
     ) -> Option<&Store<K>> {
         let store = store?;
-        store.wait_until_ready().await.ok()?;
-        Some(store)
+        crate::instance::wait_ready(store).await.then_some(store)
     }
 
     /// Every cluster-scoped instance in scope (none without cluster kinds).
@@ -259,7 +262,6 @@ where
             .candidates(request)
             .await
             .map_err(InstanceError::Kubernetes)?;
-        let resolved = resolve(request, &candidates)?;
-        Ok(check_binding(instance_ref, recorded, resolved)?)
+        Ok(resolve_bound(request, &candidates, recorded)?)
     }
 }

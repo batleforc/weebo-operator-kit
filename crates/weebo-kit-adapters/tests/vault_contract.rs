@@ -1,7 +1,8 @@
-//! Layer-2: the Vault KV v2 store against scripted HTTP — Kubernetes-auth
-//! login, idempotent writes (no new KV version for identical data),
-//! existence checks and hard deletes, routed through `RoutingSecretStore`'s
-//! `vault` backend.
+//! Layer-2: the Vault KV v2 store (`VaultSecretStore`, what
+//! `RoutingSecretStore` sends Vault targets to) against scripted HTTP —
+//! Kubernetes-auth login, idempotent writes (no new KV version for
+//! identical data), existence checks, deletes, and re-logins only on a
+//! stale token.
 
 use std::collections::BTreeMap;
 
@@ -14,8 +15,8 @@ fn spec(server: &MockServer) -> VaultConfig {
     VaultConfig {
         address: server.uri(),
         mount: "secret".into(),
-        path_prefix: "weebo-forgejo".into(),
-        kubernetes_auth_role: "weebo-forgejo".into(),
+        path_prefix: "weebo-example".into(),
+        kubernetes_auth_role: "weebo-example".into(),
         kubernetes_auth_mount: "kubernetes".into(),
         ca_source: None,
     }
@@ -34,7 +35,7 @@ async fn login(server: &MockServer) {
     Mock::given(method("POST"))
         .and(path("/v1/auth/kubernetes/login"))
         .and(body_partial_json(
-            json!({"role": "weebo-forgejo", "jwt": "sa-jwt"}),
+            json!({"role": "weebo-example", "jwt": "sa-jwt"}),
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(envelope(
             serde_json::Value::Null,
@@ -53,6 +54,39 @@ async fn login(server: &MockServer) {
         )))
         .mount(server)
         .await;
+}
+
+/// `lookup-self` refused: the token itself is no longer valid.
+async fn stale_token(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/v1/auth/token/lookup-self"))
+        .respond_with(
+            ResponseTemplate::new(403).set_body_json(json!({"errors": ["permission denied"]})),
+        )
+        .mount(server)
+        .await;
+}
+
+/// `lookup-self` accepted: a 403 is the policy's, not the token's.
+async fn valid_token(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/v1/auth/token/lookup-self"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(envelope(
+            json!({"id": "vault-token"}),
+            serde_json::Value::Null,
+        )))
+        .mount(server)
+        .await;
+}
+
+async fn logins(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path() == "/v1/auth/kubernetes/login")
+        .count()
 }
 
 fn kv_response(data: serde_json::Value) -> ResponseTemplate {
@@ -84,7 +118,7 @@ async fn logs_in_and_caches_for_most_of_the_lease() {
     );
     assert_eq!(
         store.default_path("team-a", "app"),
-        "weebo-forgejo/team-a/app"
+        "weebo-example/team-a/app"
     );
 }
 
@@ -93,13 +127,13 @@ async fn identical_data_is_not_rewritten() {
     let server = MockServer::start().await;
     login(&server).await;
     Mock::given(method("GET"))
-        .and(path("/v1/secret/data/weebo-forgejo/team-a/app"))
-        .respond_with(kv_response(json!({"FORGEJO_TOKEN": "t"})))
+        .and(path("/v1/secret/data/weebo-example/team-a/app"))
+        .respond_with(kv_response(json!({"EXAMPLE_TOKEN": "t"})))
         .mount(&server)
         .await;
     // A write would be a new KV version: it must not happen.
     Mock::given(method("POST"))
-        .and(path("/v1/secret/data/weebo-forgejo/team-a/app"))
+        .and(path("/v1/secret/data/weebo-example/team-a/app"))
         .respond_with(ResponseTemplate::new(200))
         .expect(0)
         .mount(&server)
@@ -108,9 +142,9 @@ async fn identical_data_is_not_rewritten() {
     let store = VaultSecretStore::new(&spec(&server), "sa-jwt", None)
         .await
         .unwrap();
-    let data = BTreeMap::from([("FORGEJO_TOKEN".to_string(), "t".to_string())]);
+    let data = BTreeMap::from([("EXAMPLE_TOKEN".to_string(), "t".to_string())]);
     store
-        .write_path("weebo-forgejo/team-a/app", &data)
+        .write_path("weebo-example/team-a/app", &data)
         .await
         .unwrap();
 }
@@ -127,7 +161,7 @@ async fn new_data_is_written_with_the_vault_token() {
     Mock::given(method("POST"))
         .and(path("/v1/secret/data/custom/path"))
         .and(wiremock::matchers::header("X-Vault-Token", "vault-token"))
-        .and(body_partial_json(json!({"data": {"FORGEJO_TOKEN": "t2"}})))
+        .and(body_partial_json(json!({"data": {"EXAMPLE_TOKEN": "t2"}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(envelope(
             json!({"created_time": "2026-10-06T00:00:00Z", "custom_metadata": null,
                    "deletion_time": "", "destroyed": false, "version": 2}),
@@ -141,7 +175,7 @@ async fn new_data_is_written_with_the_vault_token() {
         .await
         .unwrap();
     assert_eq!(store.read_path("custom/path").await.unwrap(), None);
-    let data = BTreeMap::from([("FORGEJO_TOKEN".to_string(), "t2".to_string())]);
+    let data = BTreeMap::from([("EXAMPLE_TOKEN".to_string(), "t2".to_string())]);
     store.write_path("custom/path", &data).await.unwrap();
 }
 
@@ -164,6 +198,7 @@ async fn delete_removes_every_version_and_is_idempotent() {
 async fn an_expired_token_relogs_in_once() {
     let server = MockServer::start().await;
     login(&server).await;
+    stale_token(&server).await;
     Mock::given(method("GET"))
         .and(path("/v1/secret/data/p"))
         .respond_with(
@@ -207,7 +242,7 @@ async fn a_refused_login_names_the_mount_and_role() {
         .err()
         .expect("login must fail");
     assert!(err.0.contains("\"kubernetes\""), "{}", err.0);
-    assert!(err.0.contains("\"weebo-forgejo\""), "{}", err.0);
+    assert!(err.0.contains("\"weebo-example\""), "{}", err.0);
 }
 
 #[tokio::test]
@@ -230,6 +265,7 @@ async fn a_configured_ca_bundle_is_loaded() {
 async fn writes_and_deletes_relogin_once_on_an_expired_token() {
     let server = MockServer::start().await;
     login(&server).await;
+    stale_token(&server).await;
     let denied =
         || ResponseTemplate::new(403).set_body_json(json!({"errors": ["permission denied"]}));
     // Nothing stored yet (read), then one 403 per write and delete.
@@ -312,4 +348,101 @@ async fn server_errors_are_errors_not_missing_secrets() {
             .is_err()
     );
     assert!(store.delete_path("p").await.is_err());
+}
+
+#[tokio::test]
+async fn a_policy_denial_never_relogs_in() {
+    let server = MockServer::start().await;
+    login(&server).await;
+    valid_token(&server).await;
+    let denied =
+        || ResponseTemplate::new(403).set_body_json(json!({"errors": ["permission denied"]}));
+    for (verb, p) in [
+        ("GET", "/v1/secret/metadata/p"),
+        ("POST", "/v1/secret/metadata/p"),
+        ("GET", "/v1/secret/data/p"),
+    ] {
+        Mock::given(method(verb))
+            .and(path(p))
+            .respond_with(denied())
+            .mount(&server)
+            .await;
+    }
+    let store = VaultSecretStore::new(&spec(&server), "sa-jwt", None)
+        .await
+        .unwrap();
+    // No `metadata` rights: ownership is neither checked nor recorded.
+    assert_eq!(store.owner_of("p").await.unwrap(), None);
+    store.set_owner("p", "Kind/ns/name").await.unwrap();
+    assert!(store.read_path("p").await.is_err());
+    assert_eq!(logins(&server).await, 1, "only the initial login");
+}
+
+#[tokio::test]
+async fn without_metadata_rights_delete_soft_deletes_the_current_version() {
+    let server = MockServer::start().await;
+    login(&server).await;
+    valid_token(&server).await;
+    Mock::given(method("DELETE"))
+        .and(path("/v1/secret/metadata/p"))
+        .respond_with(
+            ResponseTemplate::new(403).set_body_json(json!({"errors": ["permission denied"]})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/v1/secret/data/p"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let store = VaultSecretStore::new(&spec(&server), "sa-jwt", None)
+        .await
+        .unwrap();
+    store.delete_path("p").await.unwrap();
+    assert_eq!(logins(&server).await, 1);
+}
+
+#[tokio::test]
+async fn a_relogin_reads_the_service_account_token_again() {
+    let server = MockServer::start().await;
+    login(&server).await;
+    stale_token(&server).await;
+    Mock::given(method("POST"))
+        .and(path("/v1/auth/kubernetes/login"))
+        .and(body_partial_json(json!({"jwt": "rotated-jwt"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(envelope(
+            serde_json::Value::Null,
+            json!({
+                "client_token": "vault-token-2", "accessor": "a", "policies": [],
+                "token_policies": [], "metadata": {}, "lease_duration": 3600,
+                "renewable": true, "entity_id": "", "token_type": "service", "orphan": true,
+            }),
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/secret/data/p"))
+        .and(wiremock::matchers::header("X-Vault-Token", "vault-token"))
+        .respond_with(
+            ResponseTemplate::new(403).set_body_json(json!({"errors": ["permission denied"]})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/secret/data/p"))
+        .and(wiremock::matchers::header("X-Vault-Token", "vault-token-2"))
+        .respond_with(kv_response(json!({"k": "v"})))
+        .mount(&server)
+        .await;
+    let jwt = std::env::temp_dir().join(format!("weebo-kit-jwt-{}", std::process::id()));
+    std::fs::write(&jwt, "rotated-jwt\n").unwrap();
+    let store = VaultSecretStore::new(&spec(&server), "sa-jwt", None)
+        .await
+        .unwrap()
+        .with_jwt_path(&jwt);
+    let read = store.read_path("p").await.unwrap().unwrap();
+    std::fs::remove_file(&jwt).unwrap();
+    assert_eq!(read["k"], "v");
 }

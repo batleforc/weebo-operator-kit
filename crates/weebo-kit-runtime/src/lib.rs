@@ -41,7 +41,7 @@ mod published_in_the_docs {
             "steady_requeue_secs": controller::STEADY_REQUEUE_SECS,
             "retry_requeue_secs": controller::RETRY_REQUEUE_SECS,
             "status_retries": status::STATUS_RETRIES,
-            "event_note_max_chars": events::MAX_NOTE_CHARS,
+            "event_note_max_chars": events::MAX_NOTE_BYTES,
             "liveness_threshold_secs": health::DEFAULT_LIVENESS_THRESHOLD.as_secs(),
             "failure_streak_gap_secs": health::FAILURE_STREAK_GAP.as_secs(),
             "lease_ttl_secs": leader::LEASE_TTL.as_secs(),

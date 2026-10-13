@@ -22,7 +22,7 @@ pub struct ClusterError(pub String);
 /// must never be able to take over a credential it doesn't own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SecretOwner<'a> {
-    /// The CR's kind (e.g. `ForgejoAccessToken`).
+    /// The CR's kind (e.g. `ExampleAccessToken`).
     pub kind: &'a str,
     /// The CR's namespace, `None` for cluster-scoped CRs (whose targets
     /// must then name one). A namespaced CR may only write into its own
@@ -31,7 +31,10 @@ pub struct SecretOwner<'a> {
     pub name: &'a str,
     /// The id this CR wrote its values under before (a CR moved between
     /// scopes: `Kind/name` → `Kind/<namespace>/name`). A value recorded for
-    /// it is this CR's, and is rewritten under [`Self::id`].
+    /// it is this CR's, and is rewritten under [`Self::id`] — only when it
+    /// names the same kind and name (the scope alone may differ): it comes
+    /// from an annotation anyone editing the CR can set, and must not hand
+    /// over another CR's values.
     pub formerly: Option<&'a str>,
 }
 
@@ -63,7 +66,17 @@ impl<'a> SecretOwner<'a> {
 
     /// Whether a value recorded for `recorded` is this owner's.
     pub fn is(&self, recorded: &str) -> bool {
-        recorded == self.id() || self.formerly == Some(recorded)
+        recorded == self.id() || (self.formerly == Some(recorded) && self.was(recorded))
+    }
+
+    /// `id` is this CR's kind and name, under any scope (`Kind/name` or
+    /// `Kind/<namespace>/name`).
+    fn was(&self, id: &str) -> bool {
+        let mut parts = id.split('/');
+        let (Some(kind), Some(name)) = (parts.next(), parts.next_back()) else {
+            return false;
+        };
+        kind == self.kind && name == self.name && parts.count() <= 1
     }
 
     /// `<kind>/<namespace>/<name>`, or `<kind>/<name>` when cluster-scoped.
@@ -126,4 +139,31 @@ pub trait SecretStoreFactory: Send + Sync {
         &self,
         instance: &BoundInstance,
     ) -> Result<Arc<dyn SecretStore>, SecretStoreError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_former_id_only_counts_for_the_same_kind_and_name() {
+        let owner = SecretOwner::namespaced("Token", "team-a", "ci");
+        assert!(owner.is("Token/team-a/ci"));
+        assert!(!owner.is("Token/ci"));
+        assert!(owner.formerly(Some("Token/ci")).is("Token/ci"));
+        assert!(
+            owner
+                .formerly(Some("Token/team-b/ci"))
+                .is("Token/team-b/ci")
+        );
+        // Another CR's id, set through the annotation: refused.
+        assert!(
+            !owner
+                .formerly(Some("Token/team-a/other"))
+                .is("Token/team-a/other")
+        );
+        assert!(!owner.formerly(Some("Key/ci")).is("Key/ci"));
+        assert!(!owner.formerly(Some("Token/x/y/ci")).is("Token/x/y/ci"));
+        assert!(!owner.formerly(Some("Token")).is("Token"));
+    }
 }

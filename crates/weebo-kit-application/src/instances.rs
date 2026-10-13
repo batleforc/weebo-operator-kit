@@ -10,7 +10,9 @@
 //!   `namespace` pin one. Another namespace's local instance must share
 //!   itself (`sharedWith`) — its token is that namespace's.
 //! - **no `instanceRef`**: the only cluster-scoped instance, else the only
-//!   local instance of the CR's namespace.
+//!   local instance of the CR's namespace — and once recorded, that
+//!   instance as long as it exists ([`resolve_bound`]): an instance created
+//!   later never takes the object over.
 //!
 //! Errors stay neutral ([`ResolveError`]): the operator maps them onto its
 //! reason codes.
@@ -107,12 +109,13 @@ pub enum ResolveError {
     /// this object.
     #[error("{instance} is not shared with {with}")]
     NotShared { instance: String, with: String },
-    /// The name now resolves to another instance than the one recorded in
-    /// the status (a cluster-scoped instance created under a local one's
-    /// name): not followed.
+    /// The name (or, without `instanceRef`, the default) now resolves to
+    /// another instance than the one recorded in the status — a
+    /// cluster-scoped instance created under a local one's name, the
+    /// recorded default gone while another one exists: not followed.
     #[error(
-        "spec.instanceRef {name:?} now designates {now}, not the {recorded} this object is bound to; \
-         set spec.instanceRef.kind to choose"
+        "this object is bound to {recorded}, but its instanceRef now designates {now}; \
+         set spec.instanceRef (with kind) to choose"
     )]
     BindingChanged {
         name: String,
@@ -265,8 +268,9 @@ fn check_shared(
 
 /// Once recorded in the status, an instance stays: when `instanceRef`
 /// names it without `kind` and the same name now resolves to another
-/// instance, the change is refused. Naming another instance, or setting
-/// `kind`, rebinds.
+/// instance, or when there is no `instanceRef` and the default is now
+/// another instance, the change is refused. Naming another instance, or
+/// setting `kind`, rebinds.
 pub fn check_binding(
     instance_ref: Option<&InstanceRef>,
     recorded: Option<&BoundInstance>,
@@ -275,8 +279,8 @@ pub fn check_binding(
     let Some(recorded) = recorded else {
         return Ok(resolved);
     };
-    let pinned = instance_ref.is_some_and(|r| r.kind.is_some());
-    if pinned || recorded.name != resolved.name || *recorded == resolved {
+    let rebinds = instance_ref.is_some_and(|r| r.kind.is_some() || recorded.name != r.name);
+    if rebinds || *recorded == resolved {
         return Ok(resolved);
     }
     Err(ResolveError::BindingChanged {
@@ -284,6 +288,44 @@ pub fn check_binding(
         recorded: Box::new(recorded.clone()),
         now: Box::new(resolved),
     })
+}
+
+/// [`resolve`] then [`check_binding`], keeping a recorded default: without
+/// `instanceRef`, the instance recorded in the status stays while it is
+/// still a candidate this object may use, even when another one has
+/// appeared since (the default would then be ambiguous, or another one).
+pub fn resolve_bound(
+    request: Request<'_>,
+    candidates: &Candidates<'_>,
+    recorded: Option<&BoundInstance>,
+) -> Result<BoundInstance, ResolveError> {
+    if request.instance_ref.is_none()
+        && let Some(recorded) = recorded
+        && may_default_to(request, candidates, recorded)
+    {
+        return Ok(recorded.clone());
+    }
+    let resolved = resolve(request, candidates)?;
+    check_binding(request.instance_ref, recorded, resolved)
+}
+
+/// `bound` is still a candidate `request` could default to.
+fn may_default_to(
+    request: Request<'_>,
+    candidates: &Candidates<'_>,
+    bound: &BoundInstance,
+) -> bool {
+    match bound.kind {
+        InstanceKind::Instance => {
+            (request.cr_namespace.is_none() || candidates.watched_namespace.is_none())
+                && find(&candidates.cluster, None, &bound.name).is_some()
+        }
+        InstanceKind::LocalInstance => {
+            request.cr_namespace.is_some()
+                && bound.namespace.as_deref() == request.cr_namespace
+                && find(&candidates.local, request.cr_namespace, &bound.name).is_some()
+        }
+    }
 }
 
 /// The operator's view of its instances: resolves a CR's `instanceRef`
@@ -517,6 +559,65 @@ mod tests {
         assert_eq!(
             check_binding(Some(&r), Some(&local), other.clone()),
             Ok(other)
+        );
+        // Without a ref, a new default is never followed.
+        assert!(matches!(
+            check_binding(None, Some(&local), cluster.clone()),
+            Err(ResolveError::BindingChanged { .. })
+        ));
+    }
+
+    #[test]
+    fn without_a_ref_the_recorded_default_stays() {
+        let own = BoundInstance::local("team-a", "own");
+        // A cluster instance appeared after the binding to the local one.
+        let c = cluster_wide(&["prod"], &[("team-a", "own")]);
+        assert_eq!(
+            resolve(req(Some("team-a"), None), &c),
+            Ok(BoundInstance::cluster("prod"))
+        );
+        assert_eq!(
+            resolve_bound(req(Some("team-a"), None), &c, Some(&own)),
+            Ok(own.clone())
+        );
+        // A second local instance: still the recorded one.
+        let c = cluster_wide(&[], &[("team-a", "own"), ("team-a", "new")]);
+        assert_eq!(
+            resolve_bound(req(Some("team-a"), None), &c, Some(&own)),
+            Ok(own.clone())
+        );
+        // The recorded one gone, another default: refused.
+        let c = cluster_wide(&["prod"], &[]);
+        assert!(matches!(
+            resolve_bound(req(Some("team-a"), None), &c, Some(&own)),
+            Err(ResolveError::BindingChanged { .. })
+        ));
+        // Gone, and nothing else: no instance.
+        let c = cluster_wide(&[], &[]);
+        assert_eq!(
+            resolve_bound(req(Some("team-a"), None), &c, Some(&own)),
+            Err(ResolveError::NoInstance)
+        );
+        // A cluster default stays for a cluster-wide operator...
+        let prod = BoundInstance::cluster("prod");
+        let c = cluster_wide(&["prod", "other"], &[]);
+        assert_eq!(
+            resolve_bound(req(Some("team-a"), None), &c, Some(&prod)),
+            Ok(prod.clone())
+        );
+        // ...but not once the operator is limited to the namespace.
+        let mut c = cluster_wide(&["prod"], &[("team-a", "own")]);
+        c.watched_namespace = Some("team-a");
+        assert!(matches!(
+            resolve_bound(req(Some("team-a"), None), &c, Some(&prod)),
+            Err(ResolveError::BindingChanged { .. })
+        ));
+        // An explicit ref always goes through resolve.
+        let r = by_name("other");
+        let c = cluster_wide(&["prod", "other"], &[]);
+        assert_eq!(
+            resolve_bound(req(Some("team-a"), Some(&r)), &c, Some(&prod)),
+            Ok(BoundInstance::cluster("other"))
         );
     }
 }

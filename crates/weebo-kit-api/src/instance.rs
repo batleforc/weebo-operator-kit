@@ -127,6 +127,8 @@ pub struct SharedWith {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub namespaces: Vec<String>,
     /// Namespaces whose labels match this selector may use this instance.
+    /// An empty selector (`{}`) matches every namespace: the instance —
+    /// and the token it holds — is then shared with the whole cluster.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace_selector: Option<LabelSelector>,
     /// Cluster-scoped objects may use this instance.

@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::refs::SecretKeyRef;
 
 /// How the operator verifies the instance's TLS certificate. This covers
-/// the **API** connection only — a Vault connection has its own
-/// `secretStore.vault.caSecretRef`, since the two endpoints are routinely
-/// signed by different CAs.
+/// the **API** connection only — the instance's Vault connection, if any,
+/// has its own CA setting, since the two endpoints are routinely signed by
+/// different CAs.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TlsOptions {

@@ -32,8 +32,21 @@ pub const RECONCILE: &str = "Reconcile";
 /// `action` of the Events of a finalizer cleanup.
 pub const CLEANUP: &str = "Cleanup";
 
-/// Events cap the note at 1 KiB.
-pub(crate) const MAX_NOTE_CHARS: usize = 1000;
+/// Events cap the note at 1 KiB (bytes, not characters): notes are cut
+/// below it, on a character boundary.
+pub(crate) const MAX_NOTE_BYTES: usize = 1000;
+
+/// `message` cut to at most `max` bytes, on a character boundary.
+pub(crate) fn truncate_bytes(message: &str, max: usize) -> String {
+    if message.len() <= max {
+        return message.to_string();
+    }
+    let mut end = max;
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    message[..end].to_string()
+}
 
 /// The Events a reconcile that went from `previous` to `current`
 /// deserves, `Ready`'s first.
@@ -154,7 +167,7 @@ fn event(type_: EventType, reason: &str, action: &str, message: &str) -> Event {
     Event {
         type_,
         reason: reason.to_string(),
-        note: Some(message.chars().take(MAX_NOTE_CHARS).collect()),
+        note: Some(truncate_bytes(message, MAX_NOTE_BYTES)),
         action: action.to_string(),
         secondary: None,
     }
@@ -243,6 +256,11 @@ mod tests {
     #[test]
     fn notes_are_capped() {
         let e = event(EventType::Warning, "R", RECONCILE, &"x".repeat(5000));
-        assert_eq!(e.note.unwrap().len(), MAX_NOTE_CHARS);
+        assert_eq!(e.note.unwrap().len(), MAX_NOTE_BYTES);
+        // Multi-byte characters: capped in bytes, never split.
+        let e = event(EventType::Warning, "R", RECONCILE, &"é".repeat(1000));
+        let note = e.note.unwrap();
+        assert!(note.len() <= MAX_NOTE_BYTES, "{}", note.len());
+        assert_eq!(note, "é".repeat(MAX_NOTE_BYTES / 2));
     }
 }

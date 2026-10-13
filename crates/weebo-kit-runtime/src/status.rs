@@ -33,11 +33,16 @@ pub struct StatusUpdate<'a, R> {
 }
 
 /// Worth retrying: the apiserver unreachable, overloaded or timing out —
-/// not a patch it refuses.
+/// not a patch it refuses, nor one that can't be built or read (the same
+/// (de)serialization error would come back).
 pub fn transient(err: &kube::Error) -> bool {
     match err {
         kube::Error::Api(e) => e.code == 429 || e.code >= 500,
-        _ => true,
+        kube::Error::HyperError(_)
+        | kube::Error::Service(_)
+        | kube::Error::ReadEvents(_)
+        | kube::Error::Auth(_) => true,
+        _ => false,
     }
 }
 
@@ -113,5 +118,9 @@ mod tests {
         assert!(transient(&api_error(429)));
         assert!(!transient(&api_error(422)));
         assert!(!transient(&api_error(404)));
+        let serde = serde_json::from_str::<u8>("x").unwrap_err();
+        assert!(!transient(&kube::Error::SerdeError(serde)));
+        let io = std::io::Error::other("reset");
+        assert!(transient(&kube::Error::ReadEvents(io)));
     }
 }

@@ -17,9 +17,9 @@ pub enum SecretStoreBackend {
 #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretTarget {
-    /// `kubernetes` (default) or `vault`. A Vault target reuses the
-    /// connection (address, mount, auth) of the instance's
-    /// `secretStore.vault`, which must then be set.
+    /// `kubernetes` (default) or `vault`. A Vault target reuses the Vault
+    /// connection (address, mount, auth) the instance configures, which it
+    /// must then do.
     #[serde(default)]
     pub backend: SecretStoreBackend,
     /// Kubernetes: the `Secret` name. Vault: names the default path

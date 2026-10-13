@@ -26,6 +26,11 @@ vaultrs = { workspace = true }
 
 [dev-dependencies]
 rcgen = "0.14.10"
+# The process-level crypto provider of the scripted Kubernetes client.
+rustls = { workspace = true }
+# `#[derive(CustomResource)]` of the test instance kinds.
+schemars = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true }
+# `start_paused` in the store-readiness tests.
+tokio = { workspace = true, features = ["test-util"] }
 wiremock = "0.6"

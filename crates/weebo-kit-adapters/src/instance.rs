@@ -12,6 +12,28 @@ use kube::runtime::reflector::Store;
 use kube::{Client, Resource, ResourceExt};
 use serde::de::DeserializeOwned;
 
+/// How long a reconcile waits for a reflector `Store` to finish its first
+/// list before reading from the API instead.
+pub const STORE_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Whether `store` has listed: `false` when its writer is gone (shutdown)
+/// or after [`STORE_READY_TIMEOUT`] (a watch that can't list must not
+/// hang every reconcile).
+pub(crate) async fn wait_ready<K: Resource<DynamicType = ()> + Clone + 'static>(
+    store: &Store<K>,
+) -> bool {
+    match tokio::time::timeout(STORE_READY_TIMEOUT, store.wait_until_ready()).await {
+        Ok(ready) => ready.is_ok(),
+        Err(_) => {
+            tracing::warn!(
+                kind = %K::kind(&()),
+                "the watch has not listed yet: reading from the API"
+            );
+            false
+        }
+    }
+}
+
 pub struct InstanceResolver<I: Resource<DynamicType = ()> + 'static> {
     client: Client,
     store: Option<Store<I>>,
@@ -46,11 +68,11 @@ where
         selector.matches(instance.meta().labels.as_ref().unwrap_or(&empty))
     }
 
-    /// The live store, unless its writer is gone (shutdown): then the API.
+    /// The live store, unless its writer is gone (shutdown) or it hasn't
+    /// listed in time ([`wait_ready`]): then the API.
     async fn ready_store(&self) -> Option<&Store<I>> {
         let store = self.store.as_ref()?;
-        store.wait_until_ready().await.ok()?;
-        Some(store)
+        wait_ready(store).await.then_some(store)
     }
 
     /// Every instance in the cluster.
@@ -139,6 +161,21 @@ mod tests {
         let mut ns = Namespace::default();
         ns.metadata.name = Some(name.into());
         ns
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_store_that_never_lists_falls_back_to_the_api() {
+        let (store, _writer) = kube::runtime::reflector::store::<Namespace>();
+        let start = tokio::time::Instant::now();
+        assert!(!wait_ready(&store).await);
+        assert!(start.elapsed() >= STORE_READY_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn a_store_whose_writer_is_gone_falls_back_at_once() {
+        let (store, writer) = kube::runtime::reflector::store::<Namespace>();
+        drop(writer);
+        assert!(!wait_ready(&store).await);
     }
 
     #[test]

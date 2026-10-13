@@ -48,10 +48,10 @@ enum Ownership {
 
 impl K8sSecretStore {
     /// `field_manager`: the operator's field manager (e.g.
-    /// `weebo-forgejo-operator`); `managed_by`: the value of the
+    /// `weebo-example-operator`); `managed_by`: the value of the
     /// `app.kubernetes.io/managed-by` label on every emitted Secret;
     /// `owner_annotation`: the annotation naming the emitting CR (e.g.
-    /// `forgejo.weebo.io/owner`).
+    /// `example.weebo.io/owner`).
     pub fn new(
         client: Client,
         field_manager: &'static str,
@@ -103,6 +103,18 @@ impl Marks {
             (None, None) if self.written_by_us(secret) => Ownership::Owned,
             _ => Ownership::Foreign("not managed by this operator".to_string()),
         }
+    }
+
+    /// Nothing to rewrite: the same data, recorded under `owner`'s current
+    /// id (one recorded under its former id is rewritten).
+    fn is_current(&self, secret: &Secret, owner: &SecretOwner<'_>, desired: &Secret) -> bool {
+        secret.data == desired.data
+            && secret
+                .metadata
+                .annotations
+                .as_ref()
+                .and_then(|a| a.get(self.owner_annotation))
+                .is_some_and(|id| *id == owner.id())
     }
 
     /// Unlabelled, but last written under this operator's field manager:
@@ -196,13 +208,7 @@ impl SecretStore for K8sSecretStore {
                 ))),
                 Ownership::Owned => {
                     // Steady state: nothing to write.
-                    if secret.data == desired.data
-                        && secret
-                            .metadata
-                            .annotations
-                            .as_ref()
-                            .is_some_and(|a| a.contains_key(self.marks.owner_annotation))
-                    {
+                    if self.marks.is_current(&secret, owner, &desired) {
                         return Ok(());
                     }
                     // A full replace guarded by the resourceVersion just read:
@@ -371,5 +377,22 @@ mod tests {
         assert_eq!(m.ownership(&secret, &OWNER), Ownership::Owned);
         assert_eq!(secret.data.unwrap()["k"].0, b"v");
         assert!(secret.string_data.is_none());
+    }
+
+    #[test]
+    fn a_secret_under_a_former_id_is_rewritten() {
+        let m = marks();
+        let data = BTreeMap::from([("k".to_string(), "v".to_string())]);
+        let current = m.desired("name", &OWNER, &data);
+        assert!(m.is_current(&current, &OWNER, &current));
+        let moved = OWNER.formerly(Some("Token/app"));
+        let mut before = m.desired("name", &SecretOwner::cluster("Token", "app"), &data);
+        before.metadata.labels = current.metadata.labels.clone();
+        assert_eq!(m.ownership(&before, &moved), Ownership::Owned);
+        assert!(!m.is_current(&before, &moved, &m.desired("name", &moved, &data)));
+        // Emitted before owner annotations existed.
+        let mut unannotated = current.clone();
+        unannotated.metadata.annotations = None;
+        assert!(!m.is_current(&unannotated, &OWNER, &current));
     }
 }

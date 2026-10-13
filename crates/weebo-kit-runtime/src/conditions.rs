@@ -9,8 +9,9 @@ use weebo_kit_api::status::ready;
 use weebo_kit_domain::{Advisory, Failure, Reason};
 
 /// The full condition list: `Ready` first, then one condition per advisory
-/// (its `type` is the reason's name). `lastTransitionTime` only moves when
-/// a condition's status flips.
+/// reason (its `type` is the reason's name; condition types are unique, so
+/// the messages of several advisories of one reason are joined). `lastTransitionTime` only moves
+/// when a condition's status flips.
 pub fn conditions<R: Reason>(
     previous: &[Condition],
     outcome: &Result<String, Failure<R>>,
@@ -39,6 +40,10 @@ pub fn conditions<R: Reason>(
         Err(f) => condition(Condition::READY, "False", f.reason, &f.message),
     }];
     for advisory in advisories {
+        if let Some(same) = out.iter_mut().find(|c| c.type_ == advisory.reason.as_str()) {
+            same.message = format!("{}; {}", same.message, advisory.message);
+            continue;
+        }
         out.push(condition(
             advisory.reason.as_str(),
             "True",
@@ -75,8 +80,10 @@ pub async fn announce_ready_change(
             EventType::Warning
         },
         reason: now.reason.clone(),
-        // Events cap the note at 1 KiB.
-        note: Some(now.message.chars().take(1000).collect()),
+        note: Some(crate::events::truncate_bytes(
+            &now.message,
+            crate::events::MAX_NOTE_BYTES,
+        )),
         action: "Reconcile".to_string(),
         secondary: None,
     };
@@ -147,5 +154,22 @@ mod tests {
         assert_eq!(conds.len(), 2);
         assert_eq!(conds[1].type_, "Pending");
         assert_eq!(conds[1].status, "True");
+    }
+
+    #[test]
+    fn one_condition_per_advisory_reason() {
+        let advisory = |m: &str| Advisory {
+            reason: Code::Pending,
+            message: m.into(),
+        };
+        let conds = conditions(
+            &[],
+            &Ok("fine".into()),
+            &[advisory("carol"), advisory("dave")],
+            None,
+            &at(1),
+        );
+        assert_eq!(conds.len(), 2);
+        assert_eq!(conds[1].message, "carol; dave");
     }
 }

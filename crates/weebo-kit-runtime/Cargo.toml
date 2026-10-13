@@ -32,3 +32,6 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 # `start_paused` in the leader-election tests.
 tokio = { workspace = true, features = ["test-util"] }
+# The scripted apiserver of the lease tests.
+rustls = { workspace = true }
+wiremock = "0.6"

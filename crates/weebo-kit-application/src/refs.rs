@@ -25,8 +25,11 @@ pub struct Referenced<Id> {
 pub enum RefState<Id> {
     Ready(Id),
     NotFound,
+    /// Exists but has no `Ready` condition yet (never reconciled): the
+    /// operator names it with its own reason code.
+    NotReconciled,
     /// Exists but isn't usable yet; carries the referenced CR's `Ready`
-    /// reason (`NotReconciledYet` before its first reconcile).
+    /// reason.
     NotReady(String),
     /// Bound to another instance than the referencing CR: an identifier
     /// from one instance means nothing on another.
@@ -37,6 +40,7 @@ pub enum RefState<Id> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefError {
     NotFound,
+    NotReconciled,
     NotReady(String),
     OtherInstance(BoundInstance),
 }
@@ -57,7 +61,7 @@ impl<Id> RefState<Id> {
         match (cr.remote, cr.ready) {
             (Some(id), Some((true, _))) => RefState::Ready(id),
             (_, Some((_, reason))) => RefState::NotReady(reason),
-            (_, None) => RefState::NotReady("NotReconciledYet".to_string()),
+            (_, None) => RefState::NotReconciled,
         }
     }
 
@@ -66,6 +70,7 @@ impl<Id> RefState<Id> {
         match self {
             RefState::Ready(id) => Ok(id),
             RefState::NotFound => Err(RefError::NotFound),
+            RefState::NotReconciled => Err(RefError::NotReconciled),
             RefState::NotReady(why) => Err(RefError::NotReady(why)),
             RefState::OtherInstance(theirs) => Err(RefError::OtherInstance(theirs)),
         }
@@ -77,6 +82,7 @@ impl RefError {
     pub fn describe(&self, kind: &str, name: &str) -> String {
         match self {
             RefError::NotFound => format!("{kind} {name:?} does not exist"),
+            RefError::NotReconciled => format!("{kind} {name:?} has not been reconciled yet"),
             RefError::NotReady(why) => format!("{kind} {name:?} is not ready yet ({why})"),
             RefError::OtherInstance(theirs) => {
                 format!("{kind} {name:?} is bound to {theirs}, not to this CR's instance")
@@ -120,7 +126,7 @@ mod tests {
         );
         assert_eq!(
             RefState::of(cr(None, None), &main()),
-            RefState::NotReady("NotReconciledYet".into())
+            RefState::NotReconciled
         );
         assert_eq!(RefState::<u8>::of(None, &main()), RefState::NotFound);
         let local = BoundInstance::local("team-a", "main");
@@ -137,10 +143,7 @@ mod tests {
             remote: None,
             ready: None,
         });
-        assert_eq!(
-            RefState::of(unbound, &main()),
-            RefState::NotReady("NotReconciledYet".into())
-        );
+        assert_eq!(RefState::of(unbound, &main()), RefState::NotReconciled);
     }
 
     #[test]
@@ -158,6 +161,14 @@ mod tests {
         assert_eq!(
             RefError::NotFound.describe("XUser", "bob"),
             "XUser \"bob\" does not exist"
+        );
+        assert_eq!(
+            RefState::of(cr(None, None), &main()).require(),
+            Err::<u8, _>(RefError::NotReconciled)
+        );
+        assert_eq!(
+            RefError::NotReconciled.describe("XUser", "carol"),
+            "XUser \"carol\" has not been reconciled yet"
         );
     }
 }
