@@ -6,7 +6,8 @@ name: Publish
 #   1. gate: the chart's version and appVersion and the Cargo workspace
 #      version match the tag;
 #   2. one image per variant (`variants`: a Containerfile and a tag suffix),
-#      multi-arch, with SLSA provenance (mode=max) and an SBOM attached,
+#      for `platforms` (amd64 by default), with SLSA provenance (mode=max)
+#      and an SBOM attached,
 #      scanned by Grype before and after the push (any High/Critical
 #      finding blocks it: there is no unfixed-only mode), smoke-run, then
 #      keyless-signed with cosign (GitHub OIDC). An optional variant
@@ -15,6 +16,13 @@ name: Publish
 #   3. the Helm chart (OCI), signed the same way;
 #   4. the GitHub Release: changelog notes (cog), the CRD bundle (signed)
 #      and the chart archive.
+#
+# `arm64: true` adds, per variant, an arm64 image built on a native arm64
+# runner (no QEMU) and published as its own tag `vX.Y.Z[suffix]-arm64`,
+# scanned, smoke-run and signed the same way. It is never a gate: a failure
+# leaves it out, the chart and the release go on. For a single multi-arch
+# tag instead, list the platforms in `platforms` (arm64 then builds under
+# QEMU, about an hour more, and blocks like amd64).
 #
 #   on:
 #     push: { tags: ["v*"] }
@@ -66,9 +74,13 @@ on:
         type: string
         default: '[{"file": "Containerfile", "suffix": "", "required": true}]'
       platforms:
-        description: "Platforms of the pushed images (arm64 builds under QEMU)"
+        description: "Platforms of the image of each variant, a gate of the release (anything but amd64 builds under QEMU)"
         type: string
-        default: linux/amd64,linux/arm64
+        default: linux/amd64
+      arm64:
+        description: "Also publish a separate arm64 image per variant (tag suffix -arm64), built natively, never a gate"
+        type: boolean
+        default: false
       smoke-entrypoint:
         description: "Binary run to prove the image starts (empty: no smoke run)"
         type: string
@@ -122,7 +134,7 @@ jobs:
   image:
     needs: version-check
     runs-on: ubuntu-latest
-    # arm64 is compiled under QEMU emulation: slow, but one runner type.
+    # Long only when `platforms` asks for an emulated one (QEMU).
     timeout-minutes: 240
     # An optional variant may fail (a scan finding, a base not available):
     # the release goes on without it.
@@ -144,6 +156,7 @@ jobs:
       - uses: ./.github/actions/setup-mise
       - run: mise install "$GRYPE"
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        if: ${{ inputs.platforms != 'linux/amd64' }}
         with:
           platforms: arm64
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -223,7 +236,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push the multi-arch image
+      - name: Build and push the image
         id: push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
@@ -239,7 +252,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.file }}
 
       # Gate 2, on what was pushed (by digest): every platform scans clean
-      # and runs (arm64 through QEMU). A failure here leaves the image
+      # and runs (others than amd64 through QEMU). A failure here leaves the image
       # unsigned.
       - name: Scan and smoke-run the pushed digest, per platform
         env:
@@ -281,6 +294,134 @@ jobs:
         run: |
           {
             echo "### ${IMAGE} (${{ matrix.file }})"
+            echo
+            echo "Digest: \`${DIGEST}\`"
+            echo
+            printf '%s\n' "$TAGS" | while read -r tag; do
+              if [ -n "$tag" ]; then echo "- \`$tag\`"; fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Optional, never a gate (`arm64: true`): the arm64 image of each variant,
+  # built on a native arm64 runner and published under its own tag, once
+  # the gated images are out. Same checks: scan, smoke-run, signature.
+  image-arm64:
+    needs: image
+    if: ${{ inputs.arm64 && !cancelled() && needs.image.result == 'success' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.variants) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      - run: mise install "$GRYPE"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Compute tags and labels (the floating tag only for the highest version tag)
+        id: meta
+        env:
+          SUFFIX: ${{ matrix.suffix }}-arm64
+        run: |
+          highest=$(git ls-remote --tags --refs origin 'refs/tags/v[0-9]*.[0-9]*.[0-9]*' \
+            | sed 's#.*refs/tags/##' | sort -V | tail -n1)
+          tags="${IMAGE}:${TAG}${SUFFIX}"
+          if [ "$highest" = "$TAG" ]; then
+            # `latest-arm64`, `static-arm64`…
+            floating="latest-arm64"
+            [ "$SUFFIX" != "-arm64" ] && floating="${SUFFIX#-}"
+            tags="$(printf '%s\n%s:%s' "$tags" "$IMAGE" "$floating")"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "$tags"
+            echo "EOF"
+            echo "labels<<EOF"
+            echo "org.opencontainers.image.version=${TAG#v}"
+            echo "org.opencontainers.image.revision=$(git rev-parse HEAD)"
+            echo "org.opencontainers.image.created=$(git log -1 --format=%cI)"
+            echo "org.opencontainers.image.ref.name=${TAG}${SUFFIX}"
+            echo "EOF"
+            echo "scan=${CHART}-operator:scan${SUFFIX}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build the image for the pre-push scan
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/arm64
+          push: false
+          load: true
+          provenance: false
+          tags: ${{ steps.meta.outputs.scan }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.file }}-arm64
+          cache-from: type=gha,scope=${{ matrix.file }}-arm64
+
+      - name: Scan the image
+        env:
+          SCAN: ${{ steps.meta.outputs.scan }}
+        run: mise exec "$GRYPE" -- grype "docker:$SCAN" --fail-on high
+
+      - name: Smoke-run the image
+        if: ${{ inputs.smoke-entrypoint != '' }}
+        env:
+          SCAN: ${{ steps.meta.outputs.scan }}
+          ENTRYPOINT: ${{ inputs.smoke-entrypoint }}
+          ARGS: ${{ inputs.smoke-args }}
+        run: |
+          # shellcheck disable=SC2086
+          docker run --rm --entrypoint "$ENTRYPOINT" "$SCAN" $ARGS
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the image
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.file }}-arm64
+          cache-to: type=gha,mode=max,scope=${{ matrix.file }}-arm64
+
+      - name: Scan the pushed digest
+        env:
+          REF: ${{ inputs.image }}@${{ steps.push.outputs.digest }}
+        run: mise exec "$GRYPE" -- grype "registry:$REF" --platform linux/arm64 --fail-on high
+
+      - name: Sign the image with cosign
+        env:
+          REF: ${{ inputs.image }}@${{ steps.push.outputs.digest }}
+        run: cosign sign --yes --recursive "$REF"
+
+      - name: Summary
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### ${IMAGE} (${{ matrix.file }}, arm64)"
             echo
             echo "Digest: \`${DIGEST}\`"
             echo
@@ -339,7 +480,8 @@ jobs:
           if-no-files-found: error
 
   github-release:
-    needs: chart
+    # After the arm64 images too (when asked), to list the ones published.
+    needs: [chart, image-arm64]
     if: ${{ !cancelled() && needs.chart.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
@@ -372,14 +514,19 @@ jobs:
         env:
           VARIANTS: ${{ inputs.variants }}
           PLATFORMS: ${{ inputs.platforms }}
+          ARM64: ${{ inputs.arm64 }}
         run: |
           # The images actually published: an optional variant may have
           # been left out.
           images=""
+          arm=""
           for suffix in $(printf '%s' "$VARIANTS" | jq -r '.[].suffix // ""' | sed 's/^$/@main/'); do
             [ "$suffix" = "@main" ] && suffix=""
             if docker buildx imagetools inspect "${IMAGE}:${TAG}${suffix}" >/dev/null 2>&1; then
               images="${images:+$images, }\`${IMAGE}:${TAG}${suffix}\`"
+            fi
+            if [ "$ARM64" = true ] && docker buildx imagetools inspect "${IMAGE}:${TAG}${suffix}-arm64" >/dev/null 2>&1; then
+              arm="${arm:+$arm, }\`${IMAGE}:${TAG}${suffix}-arm64\`"
             fi
           done
           {
@@ -393,6 +540,7 @@ jobs:
             echo '```'
             echo
             echo "Images: ${images} (${PLATFORMS//,/, })."
+            if [ -n "$arm" ]; then echo "arm64 images: ${arm}."; fi
             echo "Signatures, SBOM and provenance: cosign (keyless, this workflow), see the docs."
           } > dist/notes.md
           # Every CRD in one file, for `kubectl apply --server-side -f` and

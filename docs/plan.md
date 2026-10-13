@@ -1263,3 +1263,15 @@ aveugle (`ID=hummingbird` : OS non supporté, rien n'est lu).
   chaque plateforme tourne sur le digest de son propre manifeste. Les
   images v0.16.1/v0.2.1 restent dans GHCR, non signées ; les releases
   utilisables sont les patchs suivants.
+- arm64 hors du chemin critique (décidé le 2026-10-13 : pas d'ARM en
+  production pour l'instant ; le build arm64 sous QEMU coûtait ~1h25 par
+  variant à chaque release). v0.13.0 : `platforms` vaut `linux/amd64` par
+  défaut (QEMU n'est installé que si on demande autre chose) ; `arm64:
+  true` ajoute un job `image-arm64` par variant, sur runner arm64 natif
+  (`ubuntu-24.04-arm`, gratuit pour les dépôts publics), publié sous son
+  propre tag `vX.Y.Z[suffixe]-arm64` (+ `latest-arm64`/`static-arm64`),
+  scanné, smoke-runné et signé, jamais bloquant (la release le liste s'il
+  est sorti). Le jour où ARM devient une cible : soit `arm64: true`, soit
+  un index multi-arch unique (`platforms: linux/amd64,linux/arm64`, sous
+  QEMU, bloquant) — à terme, assembler l'index à partir des deux builds
+  natifs (`imagetools create`) serait le mieux des deux.

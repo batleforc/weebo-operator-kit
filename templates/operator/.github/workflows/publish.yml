@@ -7,6 +7,9 @@ name: Publish
 # GitHub Release. The static variant is optional: a failure there leaves it
 # out of the release instead of blocking it.
 #
+# Images are amd64. `arm64: true` adds a separate arm64 image per variant
+# (`vX.Y.Z-arm64`, `vX.Y.Z-static-arm64`), built natively, never a gate.
+#
 # The chart is named after the repository, the image after the repository
 # with `-operator`.
 on:
@@ -37,3 +40,4 @@ jobs:
          {"file": "Containerfile.static", "suffix": "-static", "required": false}]
       smoke-entrypoint: /usr/local/bin/operator
       smoke-args: --version
+      arm64: false
