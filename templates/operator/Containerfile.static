@@ -1,13 +1,15 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
-# Hardened variant (Red Hat Hummingbird images): same build as Containerfile.
-# The workspace is rustls end to end (kube's rustls-tls, reqwest's `rustls`
-# feature) — no OpenSSL needed at build or run time.
-FROM registry.access.redhat.com/hi/rust:latest-builder@sha256:6ecd7053f3415021e6241c672570ba156073b77210e9fb30c581d07311e78b5a AS builder
+# The `-static` image: one statically linked (musl) binary on Red Hat
+# Hummingbird's static base — no libc, no GCC runtime, nothing else to
+# patch. The workspace is rustls end to end (kube's rustls-tls, reqwest's
+# `rustls` feature): no OpenSSL; ring and aws-lc's C builds with musl-gcc.
+FROM rust:1-slim-trixie@sha256:2752b332db73fdbb7dc576f06c82ed1f312005784ef913d7e04a28f5f55dc581 AS builder
 
-# The builder image defaults to a non-root user without write access to
-# /build; root is confined to this throwaway stage.
-# hadolint ignore=DL3002
-USER 0
+# Throwaway build stage: the toolchain's packages follow the pinned image.
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
+    && rm -rf /var/lib/apt/lists/* \
+    && rustup target add "$(uname -m)-unknown-linux-musl"
 
 WORKDIR /build
 
@@ -24,26 +26,26 @@ RUN find crates -name '*.rs' -delete && \
 # --locked: build exactly what Cargo.lock resolves. Failure is tolerated
 # here only because stubs may not satisfy every crate; the real build below
 # is the one that gates.
-RUN cargo build --locked --release -p operator 2>/dev/null; exit 0
+RUN cargo build --locked --release -p operator --target "$(uname -m)-unknown-linux-musl" \
+    2>/dev/null; exit 0
 
 COPY crates/ crates/
 RUN find crates -name '*.rs' -exec touch {} + && \
-    cargo build --locked --release -p operator
+    target="$(uname -m)-unknown-linux-musl" && \
+    cargo build --locked --release -p operator --target "$target" && \
+    mkdir /out && cp "target/$target/release/{{project-name}}-operator" /out/operator
 
 # ── Runtime image ─────────────────────────────────────────────────────────────
-# Red Hat Hummingbird core runtime: minimal, continuously rebuilt for CVEs.
-# Grype reads its RPM database (Trivy doesn't know the OS): the publish
-# workflow scans it like the distroless one.
-FROM registry.access.redhat.com/hi/core-runtime:latest@sha256:1abbb3f306dd1df28c46415def816056247cf850b861655097d46af971746f9b AS runtime
+# Red Hat Hummingbird static: CA certificates and passwd only.
+FROM registry.access.redhat.com/hi/static:latest@sha256:85fafe17d51d330089d4f39a9716bcc0eacfbda0c15ecb39f669cbfcd815ff8b AS runtime
 
-COPY --from=builder /build/target/release/{{project-name}}-operator /usr/local/bin/operator
+COPY --from=builder /out/operator /usr/local/bin/operator
 
-# Same numeric UID as the distroless Containerfile, deliberately: the chart
-# pins one `runAsUser`, valid whichever image is deployed.
+# The same numeric UID as Containerfile's: the chart pins one `runAsUser`.
 USER 65532:65532
 
 LABEL org.opencontainers.image.title="{{project-name}}-operator" \
-      org.opencontainers.image.description="Kubernetes operator managing {{product}} objects as CRDs (Red Hat Hummingbird)" \
+      org.opencontainers.image.description="Kubernetes operator managing {{product}} objects as CRDs (static)" \
       org.opencontainers.image.source="https://github.com/batleforc/{{project-name}}" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="batleforc"

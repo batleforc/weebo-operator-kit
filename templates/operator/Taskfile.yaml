@@ -15,7 +15,7 @@ includes:
     taskfile: https://raw.githubusercontent.com/batleforc/weebo-operator-kit/v0.11.0/tasks/repo.yaml
     checksum: 162d15bf9c41f494efcb6d73e089ac685d23bc98269a41daf62db26534f52f72
     vars:
-      CONTAINERFILES: Containerfile Containerfile.hardened
+      CONTAINERFILES: Containerfile Containerfile.static
   helm:
     taskfile: https://raw.githubusercontent.com/batleforc/weebo-operator-kit/v0.11.0/tasks/helm.yaml
     checksum: e3d0c9ef0c9d5ae970396a38214bba4dabd6cb2c141613db3844f360c08dab56
@@ -54,7 +54,7 @@ tasks:
       - task: helm:crds
 
   lint:
-    desc: "cargo fmt --check + clippy -D warnings, actionlint on CI, hadolint on the Containerfile"
+    desc: "cargo fmt --check + clippy -D warnings, actionlint on CI, hadolint on the Containerfiles"
     cmds:
       - task: rust:lint
       - task: repo:lint
@@ -87,7 +87,7 @@ tasks:
       - task: rust:coverage
 
   audit:
-    desc: "Check dependencies and the Containerfile for CVE (cargo-deny + trivy)"
+    desc: "Check dependencies and the Containerfiles for CVE (cargo-deny + trivy)"
     cmds:
       - task: rust:audit
       - task: repo:audit

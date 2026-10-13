@@ -1237,16 +1237,21 @@ aveugle (`ID=hummingbird` : OS non supporté, rien n'est lu).
   échec est laissé de côté (le chart et la release partent), un variant
   requis arrête tout. La porte e2e reste dans l'opérateur (un job dont
   l'appel dépend).
-- Images de base : **Debian 13** (`distroless/cc-debian13` + builder
-  `rust:1-slim-trixie`) — 0 High/Critical (Grype et Trivy), là où
-  `cc-debian12` portait encore des `libssl3`/`libc6` High/Critical.
-- Variant **Hummingbird** (`registry.access.redhat.com/hi/core-runtime`,
-  builder `hi/rust`) : `Containerfile.hardened`, optionnel. À ce jour
-  Grype y trouve 2 High sans correctif (`libgcc`/`libstdc++`,
-  CVE-2026-95619) : il n'est pas publié tant que Red Hat ne livre pas le
-  correctif.
-- Gabarit : `Containerfile` Debian 13, `Containerfile.hardened`,
-  `.github/workflows/publish.yml` (chart et image déduits du nom du
-  dépôt), `--version` du binaire pour le smoke-run, lint des deux
-  Containerfiles.
+- Images de base (décidé le 2026-10-13, après un scan Grype à base à
+  jour) : aucune image avec libc n'est sans High — CVE-2026-95619 touche
+  le runtime GCC (`libgcc`/`libstdc++`) de Hummingbird comme de Debian 13
+  (« won't fix » chez Debian), qui a aussi `libc6` et `zlib1g`. Retenu :
+  - **image principale = Red Hat Hummingbird** (`hi/core-runtime`,
+    builder `hi/rust`), CVE-2026-95619 **acceptée** dans le `.grype.yaml`
+    de l'opérateur (noms de paquets en regex : `^libgcc$`,
+    `^libstdc\+\+$`), à retirer au correctif ;
+  - **variant `-static`** (optionnel) : binaire musl statique
+    (`rust:1-slim-trixie` + `musl-tools`, `ring`/`aws-lc-sys` compilent)
+    sur `hi/static` — aucune faille ; même UID 65532, mêmes chemins de CA
+    (`/etc/ssl/certs/ca-bundle.crt`). Prototype : 39 Mo, `--version` ok.
+  - Debian distroless abandonné.
+- Gabarit : `Containerfile` (Hummingbird), `Containerfile.static`,
+  `.grype.yaml`, `.github/workflows/publish.yml` (chart et image déduits
+  du nom du dépôt), `--version` du binaire pour le smoke-run, lint des
+  deux Containerfiles.
 

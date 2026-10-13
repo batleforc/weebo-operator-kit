@@ -29,7 +29,7 @@ name: Publish
 #         chart: weebo-example
 #         variants: >-
 #           [{"file": "Containerfile", "suffix": "", "required": true},
-#            {"file": "Containerfile.hardened", "suffix": "-hardened", "required": false}]
+#            {"file": "Containerfile.static", "suffix": "-static", "required": false}]
 #         smoke-entrypoint: /usr/local/bin/operator
 #         smoke-args: --version
 #
@@ -161,7 +161,7 @@ jobs:
           tags="${IMAGE}:${TAG}${SUFFIX}"
           if [ "$highest" = "$TAG" ]; then
             # `latest` for the main variant, the suffix without its dash
-            # (`hardened`) for the others.
+            # (`static`) for the others.
             floating="latest"
             [ -n "$SUFFIX" ] && floating="${SUFFIX#-}"
             tags="$(printf '%s\n%s:%s' "$tags" "$IMAGE" "$floating")"
