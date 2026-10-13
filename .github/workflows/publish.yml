@@ -252,8 +252,17 @@ jobs:
             echo "::group::$platform"
             mise exec "$GRYPE" -- grype "registry:$REF" --platform "$platform" --fail-on high
             if [ -n "$ENTRYPOINT" ]; then
+              # Run the platform's own manifest: with the containerd image
+              # store, pulling the index digest a second time for another
+              # platform fails ("cannot overwrite digest").
+              os=${platform%%/*}
+              arch=${platform#*/}
+              arch=${arch%%/*}
+              digest=$(docker buildx imagetools inspect --raw "$REF" \
+                | jq -er --arg os "$os" --arg arch "$arch" \
+                  'first(.manifests[] | select(.platform.os == $os and .platform.architecture == $arch) | .digest)')
               # shellcheck disable=SC2086
-              docker run --rm --platform "$platform" --entrypoint "$ENTRYPOINT" "$REF" $ARGS
+              docker run --rm --platform "$platform" --entrypoint "$ENTRYPOINT" "${REF%@*}@$digest" $ARGS
             fi
             echo "::endgroup::"
           done

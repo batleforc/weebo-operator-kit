@@ -1255,3 +1255,11 @@ aveugle (`ID=hummingbird` : OS non supporté, rien n'est lu).
   du nom du dépôt), `--version` du binaire pour le smoke-run, lint des
   deux Containerfiles.
 
+- Premier passage réel (authentik v0.16.1, forgejo v0.2.1) : images
+  construites, poussées et scannées propres, mais le smoke-run arm64
+  échouait (`docker: cannot overwrite digest` — avec le store d'images
+  containerd, re-tirer le digest d'index pour une seconde plateforme est
+  refusé) ; rien n'a été signé, ni chart ni release. Corrigé en v0.12.1 :
+  chaque plateforme tourne sur le digest de son propre manifeste. Les
+  images v0.16.1/v0.2.1 restent dans GHCR, non signées ; les releases
+  utilisables sont les patchs suivants.
