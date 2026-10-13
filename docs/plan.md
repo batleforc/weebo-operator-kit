@@ -135,7 +135,8 @@ Issu de la revue « prod ready » de weebo-forgejo :
   Vault ; `VaultLogins` verrouille par instance et rejoue un échec 15 s.
 - **Leader election** réécrite (plus de `kube-leader-election`) : écritures
   du Lease gardées par `resourceVersion` (jamais deux leaders), expiration
-  jugée sur l'horloge monotone locale ; `leader::is_leader()` pour une jauge.
+  jugée sur l'horloge monotone locale uniquement (depuis v0.14.1, plus de
+  raccourci sur `renewTime`) ; `leader::is_leader()` pour une jauge.
 - `health` : `/readyz`, `/livez`, `/healthz` ; `webhook_server::spawn`
   prend `Health` + `Shutdown` et draine (`WEEBO_SHUTDOWN_DRAIN_SECONDS`).
 - `telemetry::init` renvoie un `Telemetry` (flush à l'arrêt) ; Prometheus
@@ -1309,7 +1310,8 @@ Comportement (sans changement d'API) :
   caractère ; advisories d'une même raison fusionnées en une condition ;
   patch de status non rejoué sur une erreur de (dé)sérialisation.
 - Doc : `SharedWith.namespaceSelector` vide = tout le cluster ; doc du
-  lease (le raccourci « stale » lit l'horloge murale) ; plus aucun nom de
+  lease (le raccourci « stale » lisait l'horloge murale : retiré en
+  v0.14.1) ; plus aucun nom de
   produit ni champ de CRD d'opérateur dans les doc comments du kit (les
   CRD générées changent : `task recu` côté opérateur).
 
@@ -1342,3 +1344,15 @@ Ajouts :
 4. Tests d'opérateur qui comptaient sur un re-login à chaque 403 Vault
    (scriptés sans `lookup-self`) : ajouter la réponse `lookup-self`.
 
+### v0.14.1 — prise du lease sur l'horloge monotone seule
+
+`LeaseLock` ne prend plus un lease dont le `renewTime` paraît vieux de
+plus de 3 TTL selon l'horloge murale locale : un nœud en avance de plus
+de 45 s pouvait déposer un leader vivant. Comme client-go, un candidat ne
+prend le lease qu'après l'avoir vu inchangé (même `resourceVersion`)
+pendant `leaseDurationSeconds` sur sa propre horloge monotone ; le
+décalage entre horloges ne compte plus. Contrepartie : à côté d'un leader
+mort sans avoir rendu le lease, la reprise attend un TTL (15 s). Une
+release qui s'arrête proprement le rend (`Leadership::release`).
+`leader::STALE_FACTOR` est déprécié (plus utilisé). Rien à changer côté
+opérateurs.

@@ -1,7 +1,9 @@
 //! Layer-2: `LeaseLock` against a scripted Kubernetes API — taking a free
-//! or long-stale lease, leaving a live one alone, losing a race on the
-//! `resourceVersion`, renewing, and stepping down.
+//! lease or one left unchanged for its TTL (on this replica's monotonic
+//! clock, whatever its `renewTime` says), leaving a live one alone, losing
+//! a race on the `resourceVersion`, renewing, and stepping down.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use k8s_openapi::jiff::{Timestamp, ToSpan};
@@ -30,9 +32,18 @@ fn micro_time(t: Timestamp) -> String {
 }
 
 fn lease_json(holder: &str, renewed: Timestamp, transitions: i32) -> serde_json::Value {
+    lease_at("7", holder, renewed, transitions)
+}
+
+fn lease_at(
+    version: &str,
+    holder: &str,
+    renewed: Timestamp,
+    transitions: i32,
+) -> serde_json::Value {
     json!({
         "apiVersion": "coordination.k8s.io/v1", "kind": "Lease",
-        "metadata": {"name": "op-leader", "namespace": "ops", "resourceVersion": "7"},
+        "metadata": {"name": "op-leader", "namespace": "ops", "resourceVersion": version},
         "spec": {
             "holderIdentity": holder, "leaseDurationSeconds": 15,
             "acquireTime": micro_time(renewed), "renewTime": micro_time(renewed),
@@ -95,10 +106,19 @@ async fn a_live_lease_of_another_replica_is_left_alone() {
     assert!(!lock(&server, "me").try_acquire_or_renew().await.unwrap());
 }
 
+/// Lets `by` pass on this replica's monotonic clock. The clock is only
+/// paused around the jump: paused while a request is in flight, tokio would
+/// auto-advance it into the HTTP client's timeouts.
+async fn wait(by: Duration) {
+    tokio::time::pause();
+    tokio::time::advance(by).await;
+    tokio::time::resume();
+}
+
 #[tokio::test]
-async fn a_long_stale_lease_is_taken_over() {
+async fn a_lease_unchanged_for_its_ttl_is_taken_over() {
     let server = MockServer::start().await;
-    current(&server, lease_json("other", Timestamp::now() - 1.hour(), 3)).await;
+    current(&server, lease_json("other", Timestamp::now(), 3)).await;
     Mock::given(method("PUT"))
         .and(path(LEASE))
         .and(body_partial_json(json!({
@@ -109,19 +129,56 @@ async fn a_long_stale_lease_is_taken_over() {
         .expect(1)
         .mount(&server)
         .await;
-    assert!(lock(&server, "me").try_acquire_or_renew().await.unwrap());
+    let lock = lock(&server, "me");
+    // First sighting of the record: its TTL starts now, here.
+    assert!(!lock.try_acquire_or_renew().await.unwrap());
+    wait(Duration::from_secs(10)).await;
+    assert!(!lock.try_acquire_or_renew().await.unwrap());
+    wait(Duration::from_secs(6)).await;
+    assert!(lock.try_acquire_or_renew().await.unwrap());
+}
+
+#[tokio::test]
+async fn a_renewed_lease_is_never_taken_whatever_its_renew_time() {
+    // The holder's clock runs an hour behind: its renewTime looks long
+    // stale, but the record keeps changing — the holder is alive.
+    let server = MockServer::start().await;
+    let calls = AtomicUsize::new(7);
+    Mock::given(method("GET"))
+        .and(path(LEASE))
+        .respond_with(move |_: &wiremock::Request| {
+            let version = calls.fetch_add(1, Ordering::SeqCst).to_string();
+            ok(lease_at(&version, "other", Timestamp::now() - 1.hour(), 3))
+        })
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(LEASE))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let lock = lock(&server, "me");
+    for _ in 0..4 {
+        assert!(!lock.try_acquire_or_renew().await.unwrap());
+        wait(Duration::from_secs(10)).await;
+    }
 }
 
 #[tokio::test]
 async fn losing_the_race_on_the_resource_version_is_not_an_error() {
     let server = MockServer::start().await;
-    current(&server, lease_json("other", Timestamp::now() - 1.hour(), 3)).await;
+    current(&server, lease_json("other", Timestamp::now(), 3)).await;
     Mock::given(method("PUT"))
         .and(path(LEASE))
         .respond_with(status(409, "Conflict"))
+        .expect(1)
         .mount(&server)
         .await;
-    assert!(!lock(&server, "me").try_acquire_or_renew().await.unwrap());
+    let lock = lock(&server, "me");
+    assert!(!lock.try_acquire_or_renew().await.unwrap());
+    wait(Duration::from_secs(16)).await;
+    assert!(!lock.try_acquire_or_renew().await.unwrap());
 }
 
 #[tokio::test]

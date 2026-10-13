@@ -102,17 +102,14 @@ pub fn lease(
 /// - every write carries the `resourceVersion` it was computed from, so of
 ///   two replicas taking over an expired lease at once only one succeeds
 ///   (the other gets a conflict) — no split brain;
-/// - expiry is judged on this replica's **monotonic clock**: the lease is
-///   free once its record hasn't changed for `leaseDurationSeconds` since
-///   this replica first saw that record — skew between the nodes' wall
-///   clocks doesn't matter there;
-/// - one shortcut does read the wall clock: a record whose `renewTime` is
-///   older than [`STALE_FACTOR`] TTLs (a leader long gone) is taken without
-///   waiting. A node whose clock runs ahead of the leader's by more than
-///   that (45 s by default) can therefore depose a live leader; the
-///   deposed one sees a conflict at its next renewal and exits
-///   ([`hold`]), so both reconcile for at most one renew interval. Keep
-///   the nodes' clocks synchronized (NTP).
+/// - expiry is judged on this replica's **monotonic clock** only: the
+///   lease is free once its record (`resourceVersion`, which every renewal
+///   changes) hasn't changed for `leaseDurationSeconds` since this replica
+///   first saw that record. `renewTime` is never compared with the local
+///   wall clock, so skew between the nodes' clocks doesn't matter; the
+///   price is that a replica starting next to a long-dead leader waits one
+///   TTL before taking over (a leader that stops cleanly steps down,
+///   [`Leadership::release`]).
 pub struct LeaseLock {
     api: Api<Lease>,
     name: String,
@@ -121,7 +118,12 @@ pub struct LeaseLock {
     observed: Mutex<Option<(String, Instant)>>,
 }
 
-/// See [`LeaseLock`].
+/// No longer used: a lease is never taken on its `renewTime` (see
+/// [`LeaseLock`]).
+#[deprecated(
+    since = "0.14.1",
+    note = "a lease is only taken once unchanged for its TTL"
+)]
 pub const STALE_FACTOR: u32 = 3;
 
 impl LeaseLock {
@@ -195,12 +197,7 @@ impl LeaseLock {
             let ttl = spec
                 .lease_duration_seconds
                 .map_or(self.ttl, |s| Duration::from_secs(s.max(0) as u64));
-            let expired_locally = observed_since.elapsed() >= ttl;
-            let stale = spec.renew_time.as_ref().is_some_and(|r| {
-                let age = Timestamp::now().duration_since(r.0);
-                age.as_secs() > (ttl * STALE_FACTOR).as_secs() as i64
-            });
-            if !expired_locally && !stale {
+            if observed_since.elapsed() < ttl {
                 return Ok(false);
             }
         }
