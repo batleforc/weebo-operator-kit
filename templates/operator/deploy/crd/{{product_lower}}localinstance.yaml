@@ -84,8 +84,10 @@ spec:
               tokenSecretRef:
                 description: |-
                   The API token the operator authenticates with, in a `Secret` of
-                  this namespace. Read on every reconcile: rotating it needs no
-                  restart.
+                  this namespace labelled
+                  `{{product | downcase}}.weebo.io/instance-token: "true"` (without the
+                  label the operator doesn't read it). Read on every reconcile:
+                  rotating it needs no restart.
                 properties:
                   key:
                     type: string

@@ -10,7 +10,9 @@ use std::sync::Arc;
 use api::{Instance, LocalInstance};
 use application::ports::{BoundInstance, GatewayFactory, GatewayFactoryError, RemoteGateway};
 use kube::{Client, ResourceExt};
-use weebo_kit_adapters::{Instances, Resolved, read_secret_key};
+use weebo_kit_adapters::{
+    Instances, Resolved, TokenSecretError, read_local_instance_token, read_secret_key,
+};
 use weebo_kit_api::SecretKeyRef;
 
 use crate::http_gateway::HttpGateway;
@@ -28,17 +30,35 @@ impl HttpGatewayFactory {
         Self { client, instances }
     }
 
-    async fn token(&self, secret_ref: &SecretKeyRef) -> Result<String, GatewayFactoryError> {
+    /// A local instance's token is only read from a Secret labelled for it
+    /// (`<group>/instance-token: "true"`): the operator reads with its own
+    /// rights, and the CR names the URL the token is sent to.
+    async fn token(
+        &self,
+        secret_ref: &SecretKeyRef,
+        local: bool,
+    ) -> Result<String, GatewayFactoryError> {
         let where_ = || {
             format!(
                 "secret {}/{} key {:?}",
                 secret_ref.namespace, secret_ref.name, secret_ref.key
             )
         };
-        let bytes = read_secret_key(&self.client, secret_ref)
-            .await
-            .map_err(GatewayFactoryError::Kubernetes)?
-            .ok_or_else(|| GatewayFactoryError::TokenSecret(format!("{} not found", where_())))?;
+        let bytes = if local {
+            read_local_instance_token(&self.client, secret_ref, &api::ANNOTATIONS)
+                .await
+                .map_err(|e| match e {
+                    TokenSecretError::NotAllowed { .. } => {
+                        GatewayFactoryError::TokenNotAllowed(e.to_string())
+                    }
+                    TokenSecretError::Kubernetes(e) => GatewayFactoryError::Kubernetes(e),
+                })?
+        } else {
+            read_secret_key(&self.client, secret_ref)
+                .await
+                .map_err(GatewayFactoryError::Kubernetes)?
+        }
+        .ok_or_else(|| GatewayFactoryError::TokenSecret(format!("{} not found", where_())))?;
         let token = String::from_utf8(bytes)
             .map_err(|_| GatewayFactoryError::TokenSecret(format!("{} is not UTF-8", where_())))?;
         // A token written with `echo` carries a trailing newline.
@@ -59,8 +79,8 @@ impl GatewayFactory for HttpGatewayFactory {
             .map_err(GatewayFactoryError::Kubernetes)?
             .ok_or_else(|| GatewayFactoryError::InstanceNotFound(bound.clone()))?;
         // A local instance's token lives in its own namespace.
-        let (url, secret_ref) = match &instance {
-            Resolved::Cluster(i) => (&i.spec.url, i.spec.token_secret_ref.clone()),
+        let (url, secret_ref, local) = match &instance {
+            Resolved::Cluster(i) => (&i.spec.url, i.spec.token_secret_ref.clone(), false),
             Resolved::Local(l) => {
                 let local = &l.spec.token_secret_ref;
                 let secret_ref = SecretKeyRef {
@@ -68,10 +88,10 @@ impl GatewayFactory for HttpGatewayFactory {
                     namespace: l.namespace().unwrap_or_default(),
                     key: local.key.clone(),
                 };
-                (&l.spec.url, secret_ref)
+                (&l.spec.url, secret_ref, true)
             }
         };
-        let token = self.token(&secret_ref).await?;
+        let token = self.token(&secret_ref, local).await?;
         let client = HttpGateway::default_client().map_err(GatewayFactoryError::InvalidSpec)?;
         let gateway =
             HttpGateway::new(url, token, client).map_err(GatewayFactoryError::InvalidSpec)?;

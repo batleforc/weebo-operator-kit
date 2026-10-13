@@ -27,6 +27,10 @@ weebo_kit_domain::reason_codes! {
         /// The instance's `tokenSecretRef` Secret, or its key, is missing
         /// or not UTF-8.
         TokenSecretMissing,
+        /// The `tokenSecretRef` Secret of a `{{product}}LocalInstance` lacks
+        /// the `instance-token: "true"` label: the operator only reads a
+        /// Secret that opts in.
+        TokenSecretNotAllowed,
         /// The instance's spec can't produce a client (e.g. an invalid
         /// `url`). Only a change of the CR clears it.
         InvalidSpec,

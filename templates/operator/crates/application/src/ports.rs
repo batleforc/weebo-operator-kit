@@ -69,6 +69,9 @@ pub enum GatewayFactoryError {
     /// The token `Secret` or its key is missing / not UTF-8.
     #[error("token secret: {0}")]
     TokenSecret(String),
+    /// A local instance's token `Secret` doesn't carry the consent label.
+    #[error("{0}")]
+    TokenNotAllowed(String),
     /// A Kubernetes API read failed — usually transient.
     #[error("Kubernetes API error: {0}")]
     Kubernetes(String),
@@ -82,6 +85,7 @@ impl GatewayFactoryError {
         match self {
             GatewayFactoryError::InstanceNotFound(_) => ReasonCode::InstanceNotFound,
             GatewayFactoryError::TokenSecret(_) => ReasonCode::TokenSecretMissing,
+            GatewayFactoryError::TokenNotAllowed(_) => ReasonCode::TokenSecretNotAllowed,
             GatewayFactoryError::Kubernetes(_) => ReasonCode::KubernetesApiError,
             GatewayFactoryError::InvalidSpec(_) => ReasonCode::InvalidSpec,
         }

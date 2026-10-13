@@ -1356,3 +1356,13 @@ mort sans avoir rendu le lease, la reprise attend un TTL (15 s). Une
 release qui s'arrête proprement le rend (`Leadership::release`).
 `leader::STALE_FACTOR` est déprécié (plus utilisé). Rien à changer côté
 opérateurs.
+
+### v0.14.2 — le template lit le jeton d'une LocalInstance avec l'opt-in
+
+`templates/operator` lisait le jeton d'une `<Product>LocalInstance` avec
+`read_secret_key` : un opérateur généré contournait le label
+`<domain>/instance-token: "true"` de la v0.14.0. La gateway factory du
+template passe désormais par `read_local_instance_token` ; un Secret sans
+label donne `TokenSecretNotAllowed` (nouveau code du template). Les
+opérateurs existants (forgejo, authentik) le faisaient déjà ; rien à
+changer pour eux.

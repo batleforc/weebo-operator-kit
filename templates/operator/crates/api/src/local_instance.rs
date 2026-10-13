@@ -31,8 +31,10 @@ pub struct {{product}}LocalInstanceSpec {
     /// Base URL of the {{product}} server, e.g. `https://example.com`.
     pub url: String,
     /// The API token the operator authenticates with, in a `Secret` of
-    /// this namespace. Read on every reconcile: rotating it needs no
-    /// restart.
+    /// this namespace labelled
+    /// `{{product | downcase}}.weebo.io/instance-token: "true"` (without the
+    /// label the operator doesn't read it). Read on every reconcile:
+    /// rotating it needs no restart.
     pub token_secret_ref: LocalSecretKeyRef,
     /// Other namespaces (or cluster-scoped objects) allowed to use this
     /// instance — and its token. Unset: this namespace only.
