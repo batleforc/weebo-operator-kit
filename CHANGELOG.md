@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.14.0](https://github.com/batleforc/weebo-operator-kit/compare/ada19bee672aec918f8770a54dc85ab416c8f9ec..v0.14.0) - 2026-10-13
+#### Bug Fixes
+- ![BREAKING](https://img.shields.io/badge/BREAKING-red) (**kit**) review fixes of 2026-10-13 in the crates - ([ada19be](https://github.com/batleforc/weebo-operator-kit/commit/ada19bee672aec918f8770a54dc85ab416c8f9ec)) - Max Batleforc, Claude Opus 5.5
+- ![BREAKING](https://img.shields.io/badge/BREAKING-red) (**tooling**) review fixes of 2026-10-13 in the chart, CI and template - ([cecf7ca](https://github.com/batleforc/weebo-operator-kit/commit/cecf7ca52eb99264a9f5d47f8932f8944825a486)) - Max Batleforc, Claude Opus 5.5
+#### Documentation
+- plan of the review fixes of 2026-10-13 - ([6a4c75c](https://github.com/batleforc/weebo-operator-kit/commit/6a4c75cd3961e0ac2e46db13147159303754aaf0)) - Max Batleforc, Claude Opus 5.5
+
+- - -
+
 ## [v0.13.0](https://github.com/batleforc/weebo-operator-kit/compare/a06a448d7dc570ba1a965729a74d20cd33146ff2..v0.13.0) - 2026-10-13
 #### Features
 - (**publish**) amd64 by default, optional native arm64 images - ([a06a448](https://github.com/batleforc/weebo-operator-kit/commit/a06a448d7dc570ba1a965729a74d20cd33146ff2)) - Max Batleforc, Claude Opus 5.5
