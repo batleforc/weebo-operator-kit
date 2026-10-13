@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.11.0](https://github.com/batleforc/weebo-operator-kit/compare/682334ff81c4394c2545966fa08fd2b3430be99a..v0.11.0) - 2026-10-13
+#### Features
+- reusable publish workflow, Debian 13 and Hummingbird images - ([682334f](https://github.com/batleforc/weebo-operator-kit/commit/682334ff81c4394c2545966fa08fd2b3430be99a)) - Max Batleforc, Claude Opus 5.5
+
+- - -
+
 ## [v0.10.1](https://github.com/batleforc/weebo-operator-kit/compare/247fa04c35c26b9841574c180f97978fbce9d3f5..v0.10.1) - 2026-10-12
 #### Bug Fixes
 - (**template**) kit:sync and kit:cog honour TAG - ([247fa04](https://github.com/batleforc/weebo-operator-kit/commit/247fa04c35c26b9841574c180f97978fbce9d3f5)) - Max Batleforc, Claude Opus 5.5

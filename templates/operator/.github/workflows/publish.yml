@@ -23,7 +23,7 @@ permissions: {}
 
 jobs:
   publish:
-    uses: batleforc/weebo-operator-kit/.github/workflows/publish.yml@v0.10.1
+    uses: batleforc/weebo-operator-kit/.github/workflows/publish.yml@v0.11.0
     permissions:
       contents: write
       packages: write
