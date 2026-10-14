@@ -4009,6 +4009,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "rcgen",
+ "regex",
  "rustls",
  "schemars",
  "serde",
@@ -4022,6 +4023,7 @@ dependencies = [
  "vaultrs",
  "weebo-kit-api",
  "weebo-kit-application",
+ "weebo-kit-domain",
  "wiremock",
 ]
 

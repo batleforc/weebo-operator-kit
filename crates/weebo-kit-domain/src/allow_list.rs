@@ -119,7 +119,9 @@ pub fn evaluate_policies<K: PartialEq + Debug + Clone>(
     evaluate(policy_kind, request, &rules, !policies.is_empty())
 }
 
-fn namespace_matches(pattern: &str, namespace: &str) -> bool {
+/// A namespace pattern: an exact name, `*`, or a prefix glob such as
+/// `team-*`. The kit's only namespace pattern grammar.
+pub fn namespace_matches(pattern: &str, namespace: &str) -> bool {
     match pattern.strip_suffix('*') {
         Some(prefix) => namespace.starts_with(prefix),
         None => pattern == namespace,

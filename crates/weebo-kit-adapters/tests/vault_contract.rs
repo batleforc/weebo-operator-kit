@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 use weebo_kit_adapters::{VaultConfig, VaultSecretStore};
+use weebo_kit_api::VaultPathGrant;
 use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -16,6 +17,7 @@ fn spec(server: &MockServer) -> VaultConfig {
         address: server.uri(),
         mount: "secret".into(),
         path_prefix: "weebo-example".into(),
+        path_grants: vec![],
         kubernetes_auth_role: "weebo-example".into(),
         kubernetes_auth_mount: "kubernetes".into(),
         ca_source: None,
@@ -243,6 +245,25 @@ async fn a_refused_login_names_the_mount_and_role() {
         .expect("login must fail");
     assert!(err.0.contains("\"kubernetes\""), "{}", err.0);
     assert!(err.0.contains("\"weebo-example\""), "{}", err.0);
+}
+
+#[tokio::test]
+async fn invalid_grants_fail_before_any_login() {
+    let server = MockServer::start().await;
+    let config = VaultConfig {
+        path_grants: vec![VaultPathGrant {
+            namespaces: vec!["auth".into()],
+            cluster_scoped: false,
+            paths: vec!["+/*".into()],
+        }],
+        ..spec(&server)
+    };
+    let err = VaultSecretStore::new(&config, "sa-jwt", None)
+        .await
+        .err()
+        .expect("a whole-mount grant must be refused");
+    assert!(err.0.contains("pathGrants[0]"), "{}", err.0);
+    assert_eq!(logins(&server).await, 0);
 }
 
 #[tokio::test]

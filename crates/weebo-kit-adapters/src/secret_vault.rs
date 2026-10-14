@@ -16,8 +16,9 @@ use vaultrs::api::kv2::requests::SetSecretMetadataRequest;
 use vaultrs::client::{Client as _, VaultClient, VaultClientSettingsBuilder};
 use vaultrs::error::ClientError;
 use vaultrs::{auth::kubernetes, kv2, token};
-use weebo_kit_api::SecretKeyRef;
+use weebo_kit_api::{SecretKeyRef, VaultPathGrant};
 use weebo_kit_application::ports::SecretStoreError;
+use weebo_kit_domain::vault_paths::{self, PathGrant};
 
 /// The operator's projected ServiceAccount token, exchanged for a Vault
 /// token. Overridable with `VAULT_KUBERNETES_JWT_PATH`.
@@ -29,8 +30,11 @@ pub struct VaultConfig {
     pub address: String,
     /// KV v2 mount.
     pub mount: String,
-    /// Default paths are `<path_prefix>/<namespace>/<name>`.
+    /// Default paths are `<path_prefix>/<namespace>/<name>` (`<namespace>/<name>`
+    /// when empty).
     pub path_prefix: String,
+    /// The paths open to objects outside their namespace's subtree.
+    pub path_grants: Vec<VaultPathGrant>,
     pub kubernetes_auth_role: String,
     pub kubernetes_auth_mount: String,
     /// Identifies the CA bundle (e.g. `namespace/name/key` of its `Secret`
@@ -62,6 +66,7 @@ pub struct VaultSecretStore {
     client: RwLock<VaultClient>,
     mount: String,
     path_prefix: String,
+    path_grants: Vec<VaultPathGrant>,
     kubernetes_auth_mount: String,
     kubernetes_auth_role: String,
     jwt: String,
@@ -74,11 +79,15 @@ pub struct VaultSecretStore {
 
 impl VaultSecretStore {
     /// `ca_pem`: PEM bundle from `spec.caSecretRef`, read by the caller.
+    /// Invalid `path_grants` fail before any login (the CRD schema refuses
+    /// them already; this is the net for an older schema).
     pub async fn new(
         spec: &VaultConfig,
         jwt: &str,
         ca_pem: Option<&[u8]>,
     ) -> Result<Self, SecretStoreError> {
+        vault_paths::validate(&path_grants(&spec.path_grants))
+            .map_err(|e| SecretStoreError(format!("Vault connection: {e}")))?;
         let mut builder = VaultClientSettingsBuilder::default();
         builder.address(&spec.address);
         // vaultrs has no default timeout: a black-holed Vault would hang
@@ -119,6 +128,7 @@ impl VaultSecretStore {
             client: RwLock::new(client),
             mount: spec.mount.clone(),
             path_prefix: spec.path_prefix.clone(),
+            path_grants: spec.path_grants.clone(),
             kubernetes_auth_mount: spec.kubernetes_auth_mount.clone(),
             kubernetes_auth_role: spec.kubernetes_auth_role.clone(),
             jwt: jwt.trim().to_string(),
@@ -142,7 +152,20 @@ impl VaultSecretStore {
     /// `<pathPrefix>/<namespace>/<name>` — one secret per emitting CR, the
     /// same convention as the Kubernetes backend's naming.
     pub fn default_path(&self, namespace: &str, name: &str) -> String {
-        format!("{}/{namespace}/{name}", self.path_prefix)
+        vault_paths::default_path(&self.path_prefix, namespace, name)
+    }
+
+    /// The normalized `path` when `writer` may write it: under
+    /// `<pathPrefix>/<namespace>/`, or opened by a grant
+    /// ([`vault_paths::check`]).
+    pub fn check_path<'p>(
+        &self,
+        writer: vault_paths::Writer<'_>,
+        namespace: Option<&str>,
+        path: &'p str,
+    ) -> Result<&'p str, vault_paths::PathDenied> {
+        let grants = path_grants(&self.path_grants);
+        vault_paths::check(&self.path_prefix, &grants, writer, namespace, path)
     }
 
     /// The login runs under a read guard (it doesn't use the token); the
@@ -207,10 +230,10 @@ impl VaultSecretStore {
     /// The KV v2 custom-metadata key naming the emitting CR.
     pub const OWNER_METADATA_KEY: &'static str = "owner";
 
-    /// `<pathPrefix>/<namespace>/`: the only subtree a namespaced CR may
-    /// write to.
+    /// `<pathPrefix>/<namespace>/`: the subtree a namespace's CRs write to
+    /// without a grant.
     pub fn namespace_prefix(&self, namespace: &str) -> String {
-        format!("{}/{namespace}/", self.path_prefix)
+        vault_paths::subtree(&self.path_prefix, namespace)
     }
 
     /// The owner id recorded on `path` (`Ok(None)`: nothing stored, or
@@ -444,6 +467,18 @@ fn cache_ttl_from_lease(lease_duration: u64, renewable: bool) -> Option<Duration
 /// policy denies the call ([`VaultSecretStore::token_is_stale`] tells).
 fn is_auth_error(err: &ClientError) -> bool {
     matches!(err, ClientError::APIError { code, .. } if *code == 401 || *code == 403)
+}
+
+/// The domain's view of the instance's grants.
+fn path_grants(grants: &[VaultPathGrant]) -> Vec<PathGrant<'_>> {
+    grants
+        .iter()
+        .map(|g| PathGrant {
+            namespaces: &g.namespaces,
+            cluster_scoped: g.cluster_scoped,
+            paths: &g.paths,
+        })
+        .collect()
 }
 
 /// A CA PEM in a temp file for one `VaultClient::new`, removed on drop.

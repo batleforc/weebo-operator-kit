@@ -16,6 +16,6 @@ pub mod tls;
 pub use annotations::Annotations;
 pub use instance::{BoundInstance, InstanceKind, InstanceRef, SharedWith, SharesItself};
 pub use refs::{LocalSecretKeyRef, ObjectRef, SecretKeyRef};
-pub use secret::{SecretStoreBackend, SecretTarget};
+pub use secret::{SecretStoreBackend, SecretTarget, VaultPathGrant};
 pub use status::Condition;
 pub use tls::{LocalTlsOptions, TlsOptions};

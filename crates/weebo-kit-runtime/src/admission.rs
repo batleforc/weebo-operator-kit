@@ -14,8 +14,9 @@ use kube::core::admission::{AdmissionRequest, AdmissionResponse, AdmissionReview
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use serde::de::DeserializeOwned;
-use weebo_kit_api::Annotations;
+use weebo_kit_api::{Annotations, SecretStoreBackend, SecretTarget, VaultPathGrant};
 use weebo_kit_domain::Reason;
+use weebo_kit_domain::vault_paths::{self, PathGrant, Writer};
 
 use crate::{Health, WatchScope};
 
@@ -166,6 +167,54 @@ fn respond<R: Reason>(
             response.into_review()
         }
     }
+}
+
+/// What the Vault paths check reads of the instance's Vault connection.
+#[derive(Debug, Clone, Copy)]
+pub struct VaultPaths<'a> {
+    pub path_prefix: &'a str,
+    pub path_grants: &'a [VaultPathGrant],
+}
+
+/// Refuses the Vault targets the secret stores would refuse, with their
+/// message: an explicit `path` outside `<pathPrefix>/<namespace>/` that no
+/// grant opens to the object (`namespace`: its own, `None` when
+/// cluster-scoped), or any Vault target when the instance has no Vault
+/// connection (`vault: None`). Call it once the object's instance is
+/// resolved: an instance not found is the reconcile's to report.
+pub fn check_vault_targets(
+    targets: &[SecretTarget],
+    namespace: Option<&str>,
+    vault: Option<VaultPaths<'_>>,
+) -> Result<(), String> {
+    for target in targets
+        .iter()
+        .filter(|t| t.backend == SecretStoreBackend::Vault)
+    {
+        let Some(vault) = vault else {
+            return Err(format!(
+                "secret target {:?} writes to Vault, but the instance configures no Vault connection",
+                target.name
+            ));
+        };
+        let Some(path) = &target.path else {
+            continue;
+        };
+        let grants: Vec<PathGrant<'_>> = vault
+            .path_grants
+            .iter()
+            .map(|g| PathGrant {
+                namespaces: &g.namespaces,
+                cluster_scoped: g.cluster_scoped,
+                paths: &g.paths,
+            })
+            .collect();
+        let writer = namespace.map_or(Writer::Cluster, Writer::Namespaced);
+        let subtree = target.namespace.as_deref().or(namespace);
+        vault_paths::check(vault.path_prefix, &grants, writer, subtree, path)
+            .map_err(|e| format!("secret target {:?}: {e}", target.name))?;
+    }
+    Ok(())
 }
 
 /// Refuses an `UPDATE` that takes an object out of the operator's label
@@ -443,5 +492,49 @@ mod tests {
             missing: String,
         }
         assert!(typed::<Strict>(req.object.as_ref().unwrap()).is_err());
+    }
+
+    fn vault_target(name: &str, path: Option<&str>) -> SecretTarget {
+        SecretTarget {
+            backend: SecretStoreBackend::Vault,
+            name: name.into(),
+            namespace: None,
+            path: path.map(String::from),
+        }
+    }
+
+    #[test]
+    fn vault_targets_are_checked_like_the_stores_do() {
+        let grants = [VaultPathGrant {
+            namespaces: vec!["auth".into()],
+            cluster_scoped: false,
+            paths: vec!["batlehub/auth".into()],
+        }];
+        let vault = Some(VaultPaths {
+            path_prefix: "weebo",
+            path_grants: &grants,
+        });
+        let granted = [vault_target("app", Some("batlehub/auth"))];
+        assert_eq!(check_vault_targets(&granted, Some("auth"), vault), Ok(()));
+        let err = check_vault_targets(&granted, Some("team-a"), vault).unwrap_err();
+        assert!(err.starts_with("secret target \"app\": "), "{err}");
+        assert!(err.contains("namespace \"team-a\""), "{err}");
+        let own = [
+            vault_target("app", Some("weebo/team-a/app")),
+            vault_target("x", None),
+        ];
+        assert_eq!(check_vault_targets(&own, Some("team-a"), vault), Ok(()));
+        assert!(check_vault_targets(&granted, None, vault).is_err());
+    }
+
+    #[test]
+    fn a_vault_target_needs_a_vault_connection() {
+        let kubernetes = [SecretTarget {
+            backend: SecretStoreBackend::Kubernetes,
+            ..vault_target("app", None)
+        }];
+        assert_eq!(check_vault_targets(&kubernetes, Some("a"), None), Ok(()));
+        let err = check_vault_targets(&[vault_target("app", None)], Some("a"), None).unwrap_err();
+        assert!(err.contains("no Vault connection"), "{err}");
     }
 }

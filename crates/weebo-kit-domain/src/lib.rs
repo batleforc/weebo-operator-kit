@@ -4,6 +4,7 @@
 pub mod allow_list;
 pub mod failure;
 pub mod reason;
+pub mod vault_paths;
 
 pub use failure::{Advisory, Failure};
 pub use reason::{Reason, Severity};

@@ -128,7 +128,10 @@ Issu de la revue « prod ready » de weebo-forgejo :
   0.1.0, label seul, sont adoptés). Création par POST, puis `replace`
   gardé par `resourceVersion` (les clés retirées disparaissent). Vault :
   propriétaire dans le `custom_metadata` KV (best effort sans droit
-  `metadata`), et un CR namespacé reste sous `<pathPrefix>/<namespace>/`.
+  `metadata`), et un CR reste sous `<pathPrefix>/<namespace>/` (le sien,
+  ou celui que nomme la cible d'un CR cluster), sauf chemin ouvert par
+  les `pathGrants` de l'instance (`weebo_kit_domain::vault_paths`, RFC
+  `docs/rfc-vault-path-grants.md`, kit v0.15.0).
 - `emit::check_target(s)` : un CR namespacé n'écrit que dans son
   namespace (`TargetViolation`), vérifié avant tout appel et par les stores.
 - `RoutingSecretStore::lazy` : Vault n'est contacté qu'à la première cible
@@ -966,7 +969,9 @@ Pas fait à l'étape 2, à reprendre dans les opérateurs (étape 3) :
   `<pathPrefix>/<namespace>/`, pas de choix de mount/rôle au-delà de la
   release) : le gabarit n'a pas de secret store, rien à brancher dans le
   kit tant qu'aucun opérateur ne construit son `VaultConfig` depuis une
-  `LocalInstance`. Exigence écrite sur `SecretStoreFactory`.
+  `LocalInstance`. Exigence écrite sur `SecretStoreFactory`. Les
+  `pathGrants` (kit v0.15.0) n'existent que sur l'instance cluster : un
+  `VaultConfig` construit pour une `LocalInstance` a `path_grants` vide.
 - **Policy par instance** : le kit fournit `governed_by_policy()` ; ce
   sont les reconcilers et webhooks de forgejo/authentik qui doivent
   sauter la policy pour un CR lié à une `LocalInstance`.

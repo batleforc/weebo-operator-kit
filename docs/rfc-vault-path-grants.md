@@ -2,7 +2,8 @@
 
 - **Dépôt :** weebo-operator-kit (puis weebo-authentik, weebo-forgejo)
 - **Base :** kit v0.14.3, weebo-authentik v0.17.2, weebo-forgejo v0.3.2
-- **Statut :** acceptée, 2026-10-14 (décisions en fin de document)
+- **Statut :** acceptée, 2026-10-14 (décisions en fin de document) ;
+  partie kit implémentée sur `docs/rfc-vault-path-grants`
 - **Release visée :** kit v0.15.0 (mineure, cassante pour la compilation des opérateurs)
 
 ## Résumé
@@ -119,13 +120,16 @@ spec:
 **Règle d'évaluation** pour le `path` explicite d'un owner namespacé `ns` :
 
 1. On le normalise : `/` initiaux retirés. Il est refusé s'il est vide, s'il
-   contient un segment vide (`a//b`) ou un segment `..`. Ce contrôle existe
-   déjà en partie et devient commun aux deux branches.
+   contient un segment vide (`a//b`, `a/`) ou un segment `.` ou `..`. Ce
+   contrôle existe déjà en partie et devient commun aux deux branches. Le
+   chemin écrit est le chemin normalisé.
 2. Accepté s'il est sous `<pathPrefix>/<ns>/` (règle actuelle, inchangée).
 3. Sinon, accepté si **un** grant a un motif de `namespaces` qui couvre
    `ns` **et** une entrée de `paths` qui couvre le chemin.
 4. Sinon, refusé. Le message dit ce qui manque :
-   `Vault path "x/y" of target "t" is outside "weebo-authentik/team-a/" and no pathGrants entry of instance "main" allows it for namespace "team-a"`.
+   `target "t": Vault path "x/y" is outside "weebo-authentik/team-a/" and no pathGrants entry of the instance allows it for namespace "team-a"`.
+   Le store ne connaît pas le nom de l'instance (la connexion Vault est
+   partagée par clé) : le message dit « the instance ».
 
 **Motifs :**
 
@@ -136,7 +140,8 @@ spec:
 - `paths` : une suite de segments séparés par `/`, comparée **segment par
   segment** (jamais comme un préfixe de chaîne). Même vocabulaire que les
   policies Vault :
-  - un segment littéral ne couvre que lui-même ;
+  - un segment littéral ne couvre que lui-même, et ne contient ni `*` ni
+    `+` (`a*` est refusé, pas lu comme un glob) ;
   - `+` couvre **exactement un** segment, quel qu'il soit, à n'importe
     quelle position : `+/auth` couvre `batlehub/auth` et `angos/auth`,
     mais ni `auth`, ni `a/b/auth`, ni `batlehub/auth/x` ;
@@ -146,8 +151,8 @@ spec:
 
   Un motif doit contenir **au moins un segment littéral**. `*`, `+`, `+/*`
   et `+/+` sont refusés : un grant « tout le mount » ne s'écrit pas par
-  accident. Les segments vides, `..` et un `/` initial sont refusés, comme
-  dans les chemins.
+  accident. Les segments vides, `.`, `..` et un `/` initial sont refusés,
+  comme dans les chemins.
 
 **Ce que `pathGrants` ne change pas :**
 
@@ -205,32 +210,44 @@ jamais les deux (règle CEL).
 
 ## Conception dans le kit
 
-Les couches suivent les règles d'`AGENTS.md` : ce qui est pur va dans le
+Les couches suivent les règles de `CLAUDE.md` : ce qui est pur va dans le
 domaine, et rien ne nomme un produit.
 
 | Crate | Changement |
 | --- | --- |
-| `weebo-kit-api` | `VaultPathGrant { namespaces: Vec<String>, cluster_scoped: bool, paths: Vec<String> }` (serde camelCase, schemars). Les doc comments deviennent la description CRD et parlent de « l'instance ». Les opérateurs l'embarquent dans leur `VaultSecretStoreSpec`. |
-| `weebo-kit-domain` | `vault_paths` : `normalize(path) -> Result<String, PathError>`, `under_prefix(prefix, ns, path)`, `granted(grants, owner, path) -> bool` (segments, `+`, `*` final ; `owner` vaut `Namespaced(ns)` ou `Cluster`), `validate(grants) -> Result<(), GrantError>`, et `check(prefix, grants, owner, target_ns, path) -> Result<(), PathDenied>`, l'unique point d'entrée appelé par les stores et par les webhooks. `allow_list::namespace_matches` devient `pub`. |
-| `weebo-kit-adapters` | `VaultConfig.path_grants: Vec<VaultPathGrant>`, recopié dans `VaultSecretStore`. `vault_path` délègue à `check` pour tous les owners (la branche « cluster, chemin libre » disparaît). `namespace_prefix` et `default_path` gèrent le préfixe vide. `VaultConfig` fait partie de la clé du cache `VaultLogins` : modifier les grants recrée la connexion, ce qui est sans effet visible. |
+| `weebo-kit-api` | `VaultPathGrant { namespaces: Vec<String>, cluster_scoped: bool, paths: Vec<String> }` (serde camelCase, schemars) et `PATH_PATTERN`. Les doc comments deviennent la description CRD et parlent de « l'instance ». Les opérateurs l'embarquent dans leur `VaultSecretStoreSpec`, **avec une borne** : `#[schemars(length(max = 32))]` sur le champ `pathGrants` (voir Validation). |
+| `weebo-kit-domain` | `vault_paths` : `normalize`, `subtree(prefix, ns)` et `default_path(prefix, ns, name)` (préfixe vide sauté), `granted(grants, writer, path)`, `validate(grants) -> Result<(), GrantError>`, et `check(prefix, grants, writer, namespace, path) -> Result<&str, PathDenied>`, l'unique point d'entrée des stores et des webhooks, qui rend le chemin normalisé. Les grants y sont une vue empruntée `PathGrant<'a>` (le domaine ne dépend pas de l'API), l'écrivain un `Writer::Namespaced(ns)` ou `Writer::Cluster`. Un motif invalide ne couvre rien. `allow_list::namespace_matches` devient `pub`. |
+| `weebo-kit-adapters` | `VaultConfig.path_grants: Vec<VaultPathGrant>`, recopié dans `VaultSecretStore`, validé dans `VaultSecretStore::new` **avant** le login. `VaultSecretStore::check_path` délègue à `vault_paths::check` ; `RoutingSecretStore::vault_path` l'appelle pour tous les owners (la branche « cluster, chemin libre » disparaît). `namespace_prefix` et `default_path` délèguent au domaine. `VaultConfig` fait partie de la clé du cache `VaultLogins` : modifier les grants refait le login, sans effet visible. |
 | `weebo-kit-application` | Rien : `check_target` reste la règle de namespace, indépendante de Vault. |
-| `weebo-kit-runtime` | Un assistant de webhook, `admission::check_vault_targets(targets, owner_ns, instance_vault)`, qui renvoie le refus formaté, pour que les deux opérateurs ne le réécrivent pas. Il prend la vue Vault de l'instance résolue (`pathPrefix`, `pathGrants`), pas l'instance elle-même : le kit ne connaît pas les kinds. |
+| `weebo-kit-runtime` | `admission::check_vault_targets(targets, namespace, vault: Option<VaultPaths>)` : `VaultPaths { path_prefix, path_grants }` est la vue Vault de l'instance résolue (le kit ne connaît pas les kinds), `None` quand elle n'a pas de Vault. Renvoie le message du store (`secret target "t": …`), que l'opérateur met dans son `Denial` avec sa raison. |
 | `templates/operator` | Le gabarit n'a pas de secret store : rien à faire. Une note dans `plan.md` suffit. |
-| `packages/operator-docs` | Une section « Writing outside the namespace subtree » dans la page de guide générée pour les credentials. |
+| `packages/operator-docs` | Rien : le générateur de pages CRD reprend les descriptions du schéma. Le guide (« Writing outside the namespace subtree ») va dans les pages d'opérateur (`connect-instance.mdx`), qui ne vivent pas dans le kit. |
 
 **Validation des grants, à trois niveaux :**
 
-1. **Schéma CRD.** Le `JsonSchema` de `VaultPathGrant` porte un `pattern`
-   par entrée de `paths` (segments non vides sans `..`, `*` seulement en
-   dernier), `minItems: 1` sur `paths`, et l'exclusion `namespaces` /
-   `clusterScoped` (exactement l'un des deux). Un motif mal formé est
-   refusé par l'apiserver, sans webhook. La règle « au moins un segment
-   littéral » ne s'exprime pas proprement en regex : elle passe par une
-   règle CEL (`x-kubernetes-validations`) sur l'élément.
+1. **Schéma CRD.** Le `JsonSchema` de `VaultPathGrant` porte, par entrée
+   de `paths`, le `pattern` `PATH_PATTERN` (segments non vides, `*` et `+`
+   seulement en segment entier, `*` seulement en dernier, pas de `/`
+   initial) et deux règles CEL, faute de lookahead dans les regex de
+   l'apiserver : `!self.matches('(^|/)\\.\\.?(/|$)')` (ni `.` ni `..`) et
+   `self.matches('(^|/)[^/*+]+(/|$)')` (au moins un segment littéral).
+   `paths` a `minItems: 1`, et une règle CEL sur le grant impose
+   exactement l'un de `namespaces` et `clusterScoped`. Un motif mal formé
+   est refusé par l'apiserver, sans webhook.
+
+   **Bornes.** Les règles CEL sont dans des listes : l'apiserver estime
+   leur coût sur la taille maximale des listes et des chaînes, et refuse
+   la CRD si l'estimation dépasse son budget. `VaultPathGrant` borne ses
+   listes (`paths` ≤ 64 entrées de 512 caractères, `namespaces` ≤ 64), et
+   l'opérateur doit borner `pathGrants` (`#[schemars(length(max = 32))]`).
+   Vérifié sur un apiserver envtest (kube 1.36) : avec la borne, la CRD est
+   acceptée et la matrice de motifs se comporte comme `validate` ; sans
+   elle, la CRD est refusée à l'installation (l'envtest de l'opérateur
+   l'attrape).
 2. **`vault_paths::validate`** à la construction du `VaultSecretStore`,
    comme filet si le schéma a été contourné (CRD ancienne). Un grant
-   invalide fait échouer le login avec un message explicite, et les CR
-   passent `SecretStoreError`.
+   invalide fait échouer la connexion avant tout login, avec un message
+   explicite (`pathGrants[i]: …`), et les CR passent `SecretStoreError`.
 3. **Reconcile de l'instance.** L'opérateur appelle le même `validate`
    pour mettre l'instance en `Ready: False` avec une raison à lui (le kit
    ne définit pas de code de raison).
@@ -249,12 +266,16 @@ fonction `vault_paths::check` que les stores :
   - instance trouvée sans `secretStore.vault` alors qu'une cible est
     Vault : refus ;
 - le message de refus est celui du store, préfixé du kind et du nom ;
-- le kit expose `vault_paths::check` dans le domaine, et chaque opérateur
-  l'appelle depuis son handler `/validate` ;
+- chaque opérateur appelle `admission::check_vault_targets` du runtime
+  (qui passe par `vault_paths::check`) depuis son `Admission::admit` ;
 - la vérification au reconcile reste : si on retire un grant de
   l'instance, les CR déjà admis le découvrent au prochain reconcile
   (`SecretStoreError`). Réadmettre tout le monde à chaque changement
   d'instance n'est pas prévu.
+- la suppression aussi : un CR dont le chemin n'est plus couvert reste en
+  `Terminating` (`SecretStoreError`) tant que le grant n'est pas remis.
+  Comportement accepté : retirer un grant laisse la valeur en place
+  plutôt que de l'orpheliner en silence.
 
 Les CR liés à une `LocalInstance` n'ont pas de cible Vault (refus existant)
 et ne sont pas concernés.
@@ -318,9 +339,11 @@ et ne sont pas concernés.
 ## Compatibilité et versions
 
 - **Kit v0.15.0 (mineure).** `VaultConfig` gagne un champ, ce qui casse la
-  construction littérale chez les opérateurs (règle d'`AGENTS.md` : un
+  construction littérale chez les opérateurs (règle de `CLAUDE.md` : un
   changement qui casse la compilation d'un opérateur est une mineure en
-  0.x). Le comportement est inchangé sans grants.
+  0.x). Le comportement est inchangé sans grants, à deux détails près :
+  le chemin explicite écrit est normalisé (`/` initiaux retirés), et un
+  segment `.` est refusé comme `..`.
 - **Opérateurs :** un champ CRD optionnel (`pathGrants`, `default` vide,
   `skip_serializing_if = "Vec::is_empty"`). Ajout seulement, aucune
   migration, CRD à régénérer.
@@ -346,19 +369,25 @@ et ne sont pas concernés.
   - owner cluster : sous `<pathPrefix>/<target.namespace>/` accepté ; hors
     de ce sous-arbre, refusé sans grant `clusterScoped` et accepté avec ;
     un grant `namespaces: ["*"]` ne couvre **pas** un owner cluster.
-- **Schéma :** le `pattern` et la règle CEL générés, testés contre la même
-  matrice (motif accepté par le schéma si et seulement si `validate`
-  l'accepte).
+- **Schéma :** `weebo-kit-adapters/tests/grant_schema.rs` compile le
+  `pattern` et les regex des règles CEL générés, et vérifie sur une
+  matrice qu'un motif est accepté par le schéma si et seulement si
+  `validate` l'accepte. La règle d'exclusion et le budget CEL ont été
+  vérifiés une fois sur envtest (voir Validation) ; l'envtest des
+  opérateurs, qui installe leurs CRD, le refait à chaque build.
 - **`routing_contract.rs` (wiremock) :**
   - un CR namespacé avec un grant écrit hors de son sous-arbre ;
   - sans grant, il est refusé avec le message attendu ;
   - avec grant mais sur une valeur appartenant à un autre owner, il est
     refusé ;
   - avec `pathPrefix: ""`, le chemin par défaut vaut `<ns>/<name>` ;
-  - un owner cluster avec un `path` libre et sans grant est refusé (test
-    qui remplace l'actuel « cluster owner writes anywhere », s'il existe).
-- **`vault_contract.rs` :** inchangé (les grants ne touchent pas aux
-  appels Vault).
+  - un owner cluster avec un `path` libre et sans grant est refusé, et
+    accepté avec un grant `clusterScoped` (il n'existait pas de test
+    « cluster owner writes anywhere »).
+- **`vault_contract.rs` :** un grant invalide fait échouer la connexion
+  sans aucun login ; le reste est inchangé.
+- **Runtime :** `check_vault_targets` refuse comme le store, et refuse une
+  cible Vault quand l'instance n'a pas de Vault.
 - **Opérateurs (envtest) :**
   - une `AuthentikApplication` dans `auth` avec `path: batlehub/auth` passe
     `Ready` avec un grant et `SecretStoreError` sans (même chose pour un
@@ -371,9 +400,12 @@ et ne sont pas concernés.
 
 1. PR kit (`feat!: vault path grants on the cluster instance`), puis tag
    v0.15.0.
-2. weebo-authentik : passage au kit v0.15.0, champ CRD, validation dans le
-   reconcile de l'instance, docs (`connect-instance.mdx`, section « Where
-   credentials go »), release 0.18.0.
+2. weebo-authentik : passage au kit v0.15.0, champ CRD (borné à 32),
+   `path_grants` recopié dans le `VaultConfig` de l'instance cluster (vide
+   pour une `LocalInstance`), `check_vault_targets` dans le `/validate`,
+   validation dans le reconcile de l'instance, docs
+   (`connect-instance.mdx`, section « Where credentials go »), release
+   0.18.0.
 3. weebo-forgejo : même chose, release 0.4.0.
 4. weebo-si : ajouter `pathGrants` dans `2.argo/helm/auth/sub`
    (`foundation.vault`), puis dérouler le plan de montée 0.15.0 → 0.18.0
@@ -391,3 +423,5 @@ et ne sont pas concernés.
 4. **Admission** : les chemins Vault explicites sont vérifiés dès
    `/validate`, avec la même fonction que les stores et les réflecteurs
    d'instances (pas d'appel API).
+5. **Grant retiré** : le reconcile **et** la suppression des CR concernés
+   échouent (`SecretStoreError`) jusqu'à ce que le grant soit remis.

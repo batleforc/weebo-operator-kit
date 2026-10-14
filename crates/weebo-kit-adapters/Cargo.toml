@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 weebo-kit-api = { workspace = true }
 weebo-kit-application = { workspace = true }
+weebo-kit-domain = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 k8s-openapi = { workspace = true }
@@ -26,6 +27,8 @@ vaultrs = { workspace = true }
 
 [dev-dependencies]
 rcgen = "0.14.10"
+# The grant schema's `pattern` and CEL regexes, checked against the domain.
+regex = "1"
 # The process-level crypto provider of the scripted Kubernetes client.
 rustls = { workspace = true }
 # `#[derive(CustomResource)]` of the test instance kinds.
