@@ -1,6 +1,6 @@
 {
   "name": "@weebo/operator-docs",
-  "version": "0.14.2",
+  "version": "0.14.3",
   "description": "Shared format of the weebo operators' Fumadocs/Next documentation sites: CRD reference generator, manifest builder, theme, layout and routes.",
   "license": "MIT",
   "repository": {

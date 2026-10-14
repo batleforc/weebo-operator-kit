@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.14.3](https://github.com/batleforc/weebo-operator-kit/compare/2daaade0adbb09f95f3997cccef91737b285523b..v0.14.3) - 2026-10-14
+#### Bug Fixes
+- (**template**) the operator's license is a placeholder (#1) - ([2daaade](https://github.com/batleforc/weebo-operator-kit/commit/2daaade0adbb09f95f3997cccef91737b285523b)) - Maxime, Claude Opus 5.5
+
+- - -
+
 ## [v0.14.2](https://github.com/batleforc/weebo-operator-kit/compare/23c723dc53982954cd2283333a182fe3b6a26ee3..v0.14.2) - 2026-10-13
 #### Bug Fixes
 - (**template**) read a local instance's token through the opt-in check - ([23c723d](https://github.com/batleforc/weebo-operator-kit/commit/23c723dc53982954cd2283333a182fe3b6a26ee3)) - Max Batleforc, Claude Opus 5.5
