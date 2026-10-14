@@ -46,7 +46,7 @@ USER 65532:65532
 LABEL org.opencontainers.image.title="{{project-name}}-operator" \
       org.opencontainers.image.description="Kubernetes operator managing {{product}} objects as CRDs" \
       org.opencontainers.image.source="https://github.com/batleforc/{{project-name}}" \
-      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.licenses="{{license}}" \
       org.opencontainers.image.vendor="batleforc"
 
 ENTRYPOINT ["/usr/local/bin/operator"]
