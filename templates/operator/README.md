@@ -29,6 +29,9 @@ kinds, env, egress), `values.yaml` follows the kit's values contract.
 
 ## First steps
 
+The project is licensed `{{license}}` (`Cargo.toml`, the image's labels):
+add the matching `LICENSE.md`.
+
 ```bash
 task init     # toolchain (mise) and mise.lock — commit it, cog.toml from the kit, git hooks
 task doctor   # envtest prerequisites

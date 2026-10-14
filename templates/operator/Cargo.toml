@@ -14,7 +14,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
+license = "{{license}}"
 publish = false
 repository = "https://github.com/batleforc/{{project-name}}"
 

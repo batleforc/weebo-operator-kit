@@ -21,3 +21,9 @@ pre = ["hooks/pre.rhai"]
 type = "string"
 prompt = "Product the operator drives, in CamelCase (the kinds' prefix: <Product>Instance, <Product>Object; group <product>.weebo.io)"
 regex = "^[A-Z][A-Za-z0-9]*$"
+
+[placeholders.license]
+type = "string"
+prompt = "SPDX license of the operator (Cargo.toml, the image's org.opencontainers.image.licenses)"
+choices = ["Apache-2.0", "MIT"]
+default = "Apache-2.0"

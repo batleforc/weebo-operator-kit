@@ -525,7 +525,7 @@ ne nomme un produit, ce qui varie est un paramètre.
   l'appelle sur lui-même.
 - **Gabarit `cargo-generate`** `templates/operator` :
   `cargo generate --git https://github.com/batleforc/weebo-operator-kit --tag vX.Y.Z templates/operator`
-  (placeholder `product`, en CamelCase). Workspace hexagonal câblé sur
+  (placeholders `product`, en CamelCase, et `license`, `Apache-2.0` par défaut). Workspace hexagonal câblé sur
   le kit (domain, api, application, adapters-outbound, adapters-inbound,
   operator, crdgen, testkit), CRD `<Product>Instance` (URL + token) et
   `<Product>Object` (objet distant d'exemple, finalizer), gateway HTTP
@@ -1366,3 +1366,13 @@ template passe désormais par `read_local_instance_token` ; un Secret sans
 label donne `TokenSecretNotAllowed` (nouveau code du template). Les
 opérateurs existants (forgejo, authentik) le faisaient déjà ; rien à
 changer pour eux.
+
+### v0.14.3 — licence du template en placeholder
+
+`templates/operator` écrivait `license = "MIT"` et
+`org.opencontainers.image.licenses="MIT"` en dur, alors que les opérateurs
+n'ont pas tous la même licence (forgejo et batlehub : Apache-2.0 ;
+authentik : MIT). Nouveau placeholder `license` (`Apache-2.0` par défaut,
+ou `MIT`), utilisé par `Cargo.toml` et les deux Containerfiles. Le fichier
+de licence reste à ajouter par l'opérateur. Rien à changer pour les
+opérateurs existants.
