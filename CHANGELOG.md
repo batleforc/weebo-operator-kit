@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.15.0](https://github.com/batleforc/weebo-operator-kit/compare/fd1fe206f7b6c0fa0dcf3c39d45513ad8e567256..v0.15.0) - 2026-10-14
+#### Features
+- ![BREAKING](https://img.shields.io/badge/BREAKING-red) vault path grants on the cluster instance (#2) - ([fd1fe20](https://github.com/batleforc/weebo-operator-kit/commit/fd1fe206f7b6c0fa0dcf3c39d45513ad8e567256)) - Maxime, Claude Opus 5.5
+
+- - -
+
 ## [v0.14.3](https://github.com/batleforc/weebo-operator-kit/compare/2daaade0adbb09f95f3997cccef91737b285523b..v0.14.3) - 2026-10-14
 #### Bug Fixes
 - (**template**) the operator's license is a placeholder (#1) - ([2daaade](https://github.com/batleforc/weebo-operator-kit/commit/2daaade0adbb09f95f3997cccef91737b285523b)) - Maxime, Claude Opus 5.5
