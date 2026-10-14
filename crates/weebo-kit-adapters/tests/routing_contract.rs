@@ -1,5 +1,6 @@
 //! Layer-2: `RoutingSecretStore` against scripted HTTP (Vault, and the
-//! Kubernetes API) — the Vault paths a namespaced CR may write to, the
+//! Kubernetes API) — the Vault paths a CR may write to (its namespace's
+//! subtree, or what the instance's grants open to it), the
 //! ownership recorded in the KV custom metadata, and Vault resolved only
 //! when a target needs it.
 
@@ -12,7 +13,7 @@ use serde_json::json;
 use weebo_kit_adapters::{
     K8sSecretStore, RoutingSecretStore, VaultConfig, VaultResolver, VaultSecretStore,
 };
-use weebo_kit_api::{SecretStoreBackend, SecretTarget};
+use weebo_kit_api::{SecretStoreBackend, SecretTarget, VaultPathGrant};
 use weebo_kit_application::ports::{SecretOwner, SecretStore};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -25,6 +26,14 @@ fn envelope(data: serde_json::Value, auth: serde_json::Value) -> serde_json::Val
 }
 
 async fn vault(server: &MockServer) -> Arc<VaultSecretStore> {
+    vault_with(server, "weebo-example", vec![]).await
+}
+
+async fn vault_with(
+    server: &MockServer,
+    path_prefix: &str,
+    path_grants: Vec<VaultPathGrant>,
+) -> Arc<VaultSecretStore> {
     Mock::given(method("POST"))
         .and(path("/v1/auth/kubernetes/login"))
         .respond_with(ResponseTemplate::new(200).set_body_json(envelope(
@@ -40,7 +49,8 @@ async fn vault(server: &MockServer) -> Arc<VaultSecretStore> {
     let config = VaultConfig {
         address: server.uri(),
         mount: "secret".into(),
-        path_prefix: "weebo-example".into(),
+        path_prefix: path_prefix.into(),
+        path_grants,
         kubernetes_auth_role: "weebo-example".into(),
         kubernetes_auth_mount: "kubernetes".into(),
         ca_source: None,
@@ -118,7 +128,12 @@ async fn a_namespaced_cr_stays_under_its_namespace_prefix() {
             .write(&vault_target("ci", Some(outside)), &OWNER, &data)
             .await
             .expect_err(outside);
-        assert!(err.0.contains("outside"), "{outside}: {}", err.0);
+        let refused = if outside.contains("..") {
+            "\"..\" segment"
+        } else {
+            "allows it for namespace \"team-a\""
+        };
+        assert!(err.0.contains(refused), "{outside}: {}", err.0);
         assert!(
             store
                 .delete(&vault_target("ci", Some(outside)), &OWNER)
@@ -127,14 +142,7 @@ async fn a_namespaced_cr_stays_under_its_namespace_prefix() {
         );
     }
     // Nothing ever reached the KV engine.
-    let kv_calls = server
-        .received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .filter(|r| r.url.path().starts_with("/v1/secret/"))
-        .count();
-    assert_eq!(kv_calls, 0);
+    assert_eq!(kv_calls(&server).await, 0);
 }
 
 #[tokio::test]
@@ -255,4 +263,173 @@ async fn an_unavailable_vault_only_fails_vault_targets() {
         .await
         .unwrap_err();
     assert!(err.0.contains("not configured"), "{}", err.0);
+}
+
+/// Every KV call the server received.
+async fn kv_calls(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path().starts_with("/v1/secret/"))
+        .count()
+}
+
+/// An empty KV path `p`: no value, no metadata, writes accepted.
+async fn free(server: &MockServer, p: &str) {
+    for kv in ["data", "metadata"] {
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/secret/{kv}/{p}")))
+            .respond_with(ResponseTemplate::new(404).set_body_json(json!({"errors": []})))
+            .mount(server)
+            .await;
+    }
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/secret/data/{p}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(envelope(
+            json!({"created_time": "2026-10-14T00:00:00Z", "custom_metadata": null,
+                   "deletion_time": "", "destroyed": false, "version": 1}),
+            serde_json::Value::Null,
+        )))
+        .expect(1)
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/secret/metadata/{p}")))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+fn grant(namespaces: &[&str], paths: &[&str]) -> VaultPathGrant {
+    VaultPathGrant {
+        namespaces: namespaces.iter().map(|s| s.to_string()).collect(),
+        cluster_scoped: false,
+        paths: paths.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+#[tokio::test]
+async fn a_grant_opens_a_path_outside_the_namespace_subtree() {
+    let server = MockServer::start().await;
+    free(&server, "batlehub/auth").await;
+    let vault = vault_with(
+        &server,
+        "weebo-example",
+        vec![grant(&["team-*"], &["+/auth"])],
+    )
+    .await;
+    let store = RoutingSecretStore::new(kubernetes(&server), Ok(vault), SecretStoreBackend::Vault);
+    let data = BTreeMap::from([("k".to_string(), "v".to_string())]);
+    store
+        .write(&vault_target("ci", Some("/batlehub/auth")), &OWNER, &data)
+        .await
+        .unwrap();
+    // Only what the grant covers.
+    let err = store
+        .write(&vault_target("ci", Some("batlehub/auth/x")), &OWNER, &data)
+        .await
+        .unwrap_err();
+    assert!(err.0.contains("no pathGrants entry"), "{}", err.0);
+}
+
+#[tokio::test]
+async fn a_grant_never_hands_over_another_owners_value() {
+    let server = MockServer::start().await;
+    owned_by(&server, "batlehub/auth", "Token/team-b/other").await;
+    let vault = vault_with(
+        &server,
+        "weebo-example",
+        vec![grant(&["team-a"], &["batlehub/auth"])],
+    )
+    .await;
+    let store = RoutingSecretStore::new(kubernetes(&server), Ok(vault), SecretStoreBackend::Vault);
+    let data = BTreeMap::from([("k".to_string(), "v".to_string())]);
+    let err = store
+        .write(&vault_target("ci", Some("batlehub/auth")), &OWNER, &data)
+        .await
+        .unwrap_err();
+    assert!(err.0.contains("Token/team-b/other"), "{}", err.0);
+    let writes = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "POST" && r.url.path().starts_with("/v1/secret/"))
+        .count();
+    assert_eq!(writes, 0);
+}
+
+#[tokio::test]
+async fn an_empty_prefix_puts_default_paths_under_the_namespace() {
+    let server = MockServer::start().await;
+    free(&server, "team-a/ci").await;
+    let vault = vault_with(&server, "", vec![]).await;
+    assert_eq!(vault.default_path("team-a", "ci"), "team-a/ci");
+    let store = RoutingSecretStore::new(kubernetes(&server), Ok(vault), SecretStoreBackend::Vault);
+    let data = BTreeMap::from([("k".to_string(), "v".to_string())]);
+    store
+        .write(&vault_target("ci", None), &OWNER, &data)
+        .await
+        .unwrap();
+    // Explicit paths stay under `<namespace>/`.
+    let err = store
+        .write(&vault_target("ci", Some("team-b/ci")), &OWNER, &data)
+        .await
+        .unwrap_err();
+    assert!(err.0.contains("outside \"team-a/\""), "{}", err.0);
+}
+
+#[tokio::test]
+async fn a_cluster_scoped_owner_needs_its_namespace_subtree_or_a_cluster_grant() {
+    let server = MockServer::start().await;
+    let cluster_owner = SecretOwner::cluster("Token", "ci");
+    let data = BTreeMap::from([("k".to_string(), "v".to_string())]);
+    let refused = vault_with(
+        &server,
+        "weebo-example",
+        vec![grant(&["*"], &["platform/+"])],
+    )
+    .await;
+    let store =
+        RoutingSecretStore::new(kubernetes(&server), Ok(refused), SecretStoreBackend::Vault);
+    for (namespace, p) in [
+        (None, "platform/ci"),
+        (Some("team-a"), "weebo-example/team-b/ci"),
+    ] {
+        let target = SecretTarget {
+            namespace: namespace.map(String::from),
+            ..vault_target("ci", Some(p))
+        };
+        let err = store
+            .write(&target, &cluster_owner, &data)
+            .await
+            .unwrap_err();
+        assert!(err.0.contains("cluster-scoped objects"), "{p}: {}", err.0);
+    }
+    assert_eq!(kv_calls(&server).await, 0);
+
+    free(&server, "platform/ci").await;
+    let granted = vault_with(
+        &server,
+        "weebo-example",
+        vec![VaultPathGrant {
+            namespaces: vec![],
+            cluster_scoped: true,
+            paths: vec!["platform/+".into()],
+        }],
+    )
+    .await;
+    let store =
+        RoutingSecretStore::new(kubernetes(&server), Ok(granted), SecretStoreBackend::Vault);
+    store
+        .write(
+            &vault_target("ci", Some("platform/ci")),
+            &cluster_owner,
+            &data,
+        )
+        .await
+        .unwrap();
 }

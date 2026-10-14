@@ -9,6 +9,7 @@ use tokio::sync::OnceCell;
 use weebo_kit_api::{SecretStoreBackend, SecretTarget};
 use weebo_kit_application::emit::check_target;
 use weebo_kit_application::ports::{SecretOwner, SecretStore, SecretStoreError};
+use weebo_kit_domain::vault_paths::Writer;
 
 use crate::secret_k8s::K8sSecretStore;
 use crate::secret_vault::VaultSecretStore;
@@ -76,38 +77,33 @@ impl RoutingSecretStore {
             .map_err(|why| SecretStoreError(why.clone()))
     }
 
-    /// The target's KV path. A namespaced owner stays under its own
-    /// `<pathPrefix>/<namespace>/`, explicit `path` included.
+    /// The target's KV path, normalized. An explicit `path` stays under
+    /// `<pathPrefix>/<namespace>/` (the owner's namespace, or the one a
+    /// cluster-scoped owner's target names) unless the instance's grants
+    /// open it to the owner.
     fn vault_path(
         vault: &VaultSecretStore,
         target: &SecretTarget,
         owner: &SecretOwner<'_>,
     ) -> Result<String, SecretStoreError> {
         check_target(target, owner).map_err(|e| SecretStoreError(e.to_string()))?;
+        let ns = target.namespace.as_deref().or(owner.namespace);
         if let Some(path) = &target.path {
-            if let Some(ns) = owner.namespace {
-                let prefix = vault.namespace_prefix(ns);
-                let normalized = path.trim_start_matches('/');
-                if !normalized.starts_with(&prefix) || normalized.split('/').any(|s| s == "..") {
-                    return Err(SecretStoreError(format!(
-                        "Vault path {path:?} of target {:?} is outside {prefix:?}, \
-                         the only subtree a CR in namespace {ns:?} may write to",
-                        target.name
-                    )));
-                }
-            }
-            return Ok(path.clone());
+            let writer = match owner.namespace {
+                Some(ns) => Writer::Namespaced(ns),
+                None => Writer::Cluster,
+            };
+            return vault
+                .check_path(writer, ns, path)
+                .map(String::from)
+                .map_err(|e| SecretStoreError(format!("target {:?}: {e}", target.name)));
         }
-        let ns = target
-            .namespace
-            .as_deref()
-            .or(owner.namespace)
-            .ok_or_else(|| {
-                SecretStoreError(format!(
-                    "Vault target {:?} needs a path or a namespace",
-                    target.name
-                ))
-            })?;
+        let ns = ns.ok_or_else(|| {
+            SecretStoreError(format!(
+                "Vault target {:?} needs a path or a namespace",
+                target.name
+            ))
+        })?;
         Ok(vault.default_path(ns, &target.name))
     }
 
