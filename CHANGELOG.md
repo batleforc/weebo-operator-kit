@@ -2,6 +2,14 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.15.1](https://github.com/batleforc/weebo-operator-kit/compare/ccab8f9e860d7c956891ea75eeb0eaed452540b0..v0.15.1) - 2026-10-15
+#### Bug Fixes
+- (**publish**) a first prerelease publishes, marked as a prerelease (#4) - ([8d5a343](https://github.com/batleforc/weebo-operator-kit/commit/8d5a343569b08c77bd09f0544830401c595c8fae)) - Maxime, Claude Opus 5.5
+#### Miscellaneous Chores
+- (**deps**) rustls 0.23.46 (RUSTSEC-2026-0346..0349) (#3) - ([ccab8f9](https://github.com/batleforc/weebo-operator-kit/commit/ccab8f9e860d7c956891ea75eeb0eaed452540b0)) - Maxime, Claude Opus 5.5
+
+- - -
+
 ## [v0.15.0](https://github.com/batleforc/weebo-operator-kit/compare/fd1fe206f7b6c0fa0dcf3c39d45513ad8e567256..v0.15.0) - 2026-10-14
 #### Features
 - ![BREAKING](https://img.shields.io/badge/BREAKING-red) vault path grants on the cluster instance (#2) - ([fd1fe20](https://github.com/batleforc/weebo-operator-kit/commit/fd1fe206f7b6c0fa0dcf3c39d45513ad8e567256)) - Maxime, Claude Opus 5.5
