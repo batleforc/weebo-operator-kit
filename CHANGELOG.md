@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.16.0](https://github.com/batleforc/weebo-operator-kit/compare/17205022d8f40d9e01e5600fb7245419613514cd..v0.16.0) - 2026-10-15
+#### Features
+- vault CAS claims, admission parity and shared operator helpers (review 2026-10-15) (#5) - ([1720502](https://github.com/batleforc/weebo-operator-kit/commit/17205022d8f40d9e01e5600fb7245419613514cd)) - Maxime, Claude Opus 5.5
+
+- - -
+
 ## [v0.15.1](https://github.com/batleforc/weebo-operator-kit/compare/ccab8f9e860d7c956891ea75eeb0eaed452540b0..v0.15.1) - 2026-10-15
 #### Bug Fixes
 - (**publish**) a first prerelease publishes, marked as a prerelease (#4) - ([8d5a343](https://github.com/batleforc/weebo-operator-kit/commit/8d5a343569b08c77bd09f0544830401c595c8fae)) - Maxime, Claude Opus 5.5
