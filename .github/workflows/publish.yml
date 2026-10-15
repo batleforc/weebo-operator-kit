@@ -197,14 +197,16 @@ jobs:
         run: |
           # Final releases only (sort -V puts v1.0.0-rc1 after v1.0.0), read
           # with the job's token (the checkout keeps no credentials; a
-          # private repository refuses an anonymous ls-remote).
+          # private repository refuses an anonymous ls-remote). None yet (a
+          # first prerelease): no floating tag — `|| true`, grep finding
+          # nothing must not fail the pipeline.
           auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
           highest=$(git -c "http.extraheader=AUTHORIZATION: basic $auth" \
             ls-remote --tags --refs origin 'refs/tags/v*' \
-            | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+            | sed 's#.*refs/tags/##' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+            | sort -V | tail -n1)
           if [ -z "$highest" ]; then
-            echo "::error::no vX.Y.Z tag found on origin: cannot tell whether $TAG is the latest" >&2
-            exit 1
+            echo "::notice::no vX.Y.Z tag on origin yet: $TAG gets no floating tag"
           fi
           tags="${IMAGE}:${TAG}${SUFFIX}"
           if [ "$highest" = "$TAG" ]; then
@@ -389,14 +391,16 @@ jobs:
         run: |
           # Final releases only (sort -V puts v1.0.0-rc1 after v1.0.0), read
           # with the job's token (the checkout keeps no credentials; a
-          # private repository refuses an anonymous ls-remote).
+          # private repository refuses an anonymous ls-remote). None yet (a
+          # first prerelease): no floating tag — `|| true`, grep finding
+          # nothing must not fail the pipeline.
           auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
           highest=$(git -c "http.extraheader=AUTHORIZATION: basic $auth" \
             ls-remote --tags --refs origin 'refs/tags/v*' \
-            | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+            | sed 's#.*refs/tags/##' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+            | sort -V | tail -n1)
           if [ -z "$highest" ]; then
-            echo "::error::no vX.Y.Z tag found on origin: cannot tell whether $TAG is the latest" >&2
-            exit 1
+            echo "::notice::no vX.Y.Z tag on origin yet: $TAG gets no floating tag"
           fi
           tags="${IMAGE}:${TAG}${SUFFIX}"
           if [ "$highest" = "$TAG" ]; then
@@ -628,6 +632,9 @@ jobs:
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file dist/notes.md
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
           else
+            # A prerelease (vX.Y.Z-…) is marked so, never shown as Latest.
+            prerelease=()
+            case "$TAG" in *-*) prerelease=(--prerelease --latest=false) ;; esac
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
-              --title "$TAG" --notes-file dist/notes.md "${assets[@]}"
+              --title "$TAG" --notes-file dist/notes.md "${prerelease[@]}" "${assets[@]}"
           fi
