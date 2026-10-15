@@ -46,6 +46,9 @@ egress:                        # NetworkPolicy egress to the remote system
   - comment: Example instances.
     rules: {{ toJson .Values.networkPolicy.egress.example }}
 clusterRules: []               # extra ClusterRole rules
+watchRules: []                 # extra rules of the watch Role (watch.namespace):
+                               # the namespaced resources the operator reads or
+                               # writes in the watched namespace
 clusterSecrets: true           # false: with watch.namespace, no Secret access
                                # beyond that namespace (no cluster-scoped kind
                                # reads or writes Secrets); default true
@@ -88,15 +91,39 @@ ClusterRole for a Role in that namespace. With a selector, the
 kit's `ScopeGuard`). The webhooks' `namespaceSelector`/`objectSelector`
 default to the scope. Nothing set: the whole cluster, as before.
 
+`params.clusterRules` only reach the ClusterRole, which a release with
+`watch.clusterKinds: false` does not render. The rules an operator needs
+on namespaced resources of the watched namespace (the Deployments,
+Services, NetworkPolicies… it writes for a namespaced CR) go to
+`params.watchRules` too: rendered in the watch Role (`<fullname>-watch`)
+whenever `watch.namespace` is set, so a full-namespaced release keeps
+them, limited to that namespace. Typically:
+
+```yaml
+{{- $namespaced := list (dict "apiGroups" (list "apps") "resources" (list "deployments") "verbs" (list "get" "create" "patch" "delete")) }}
+clusterRules: {{ toJson $namespaced }}
+watchRules: {{ toJson $namespaced }}
+```
+
+## The operator's own pod
+
+`WEEBO_OPERATOR_POD_LABELS` holds the operator pod's selector labels as a
+JSON object (`{"app.kubernetes.io/instance":"…","app.kubernetes.io/name":"…"}`,
+`nameOverride` applied — the Deployment's `matchLabels`), next to
+`POD_NAMESPACE`. An operator writing NetworkPolicies for what it deploys
+uses them to let itself in (`podSelector.matchLabels` +
+`namespaceSelector` on `kubernetes.io/metadata.name`); the kit reads them
+with `weebo_kit_runtime::pod::own_labels`.
+
 ## Templates
 
 | Template                                   | Renders                                                      |
 | ------------------------------------------ | ------------------------------------------------------------ |
 | `weebo-operator.all`                       | everything below, `---`-separated, skipping what is disabled  |
-| `weebo-operator.deployment`                | the operator Deployment (probes, drain, `params.env`)         |
+| `weebo-operator.deployment`                | the operator Deployment (probes, drain, kit env incl. `WEEBO_OPERATOR_POD_LABELS`, `params.env`) |
 | `weebo-operator.serviceAccount`            | `serviceAccount.create`                                       |
 | `weebo-operator.clusterRole` / `…Binding`  | `params.kinds` (+ status, finalizers), Secrets, Events; with `watch.namespace`, the cluster-scoped kinds only |
-| `weebo-operator.watchRole`                 | `watch.namespace`: `params.namespacedKinds`, Secrets, Events in that namespace (`-watch`) |
+| `weebo-operator.watchRole`                 | `watch.namespace`: `params.namespacedKinds`, Secrets, Events, `params.watchRules` in that namespace (`-watch`) |
 | `weebo-operator.leaderElectionRole`        | Lease Role + RoleBinding in the release namespace             |
 | `weebo-operator.namespacedExampleRole`     | `rbac.namespacedExample` on `params.namespacedKinds`          |
 | `weebo-operator.service`                   | the webhook Service                                           |

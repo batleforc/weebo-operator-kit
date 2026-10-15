@@ -1,4 +1,4 @@
-// Guided choices for the manifest builder, in the spirit of batlehub's config
+// Guided choices for the manifest builder, in the spirit of a config
 // generator: several kinds accept mutually exclusive ways of doing one thing
 // (credentials go to a Kubernetes Secret or to Vault, a resource is created
 // empty or from a template). The schema can only say "these are all

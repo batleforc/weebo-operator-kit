@@ -15,6 +15,8 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use serde::de::DeserializeOwned;
 use weebo_kit_api::{Annotations, SecretStoreBackend, SecretTarget, VaultPathGrant};
+use weebo_kit_application::emit;
+use weebo_kit_application::ports::SecretOwner;
 use weebo_kit_domain::Reason;
 use weebo_kit_domain::vault_paths::{self, PathGrant, Writer};
 
@@ -177,16 +179,27 @@ pub struct VaultPaths<'a> {
 }
 
 /// Refuses the Vault targets the secret stores would refuse, with their
-/// message: an explicit `path` outside `<pathPrefix>/<namespace>/` that no
-/// grant opens to the object (`namespace`: its own, `None` when
-/// cluster-scoped), or any Vault target when the instance has no Vault
-/// connection (`vault: None`). Call it once the object's instance is
-/// resolved: an instance not found is the reconcile's to report.
+/// message: any Vault target when the instance has no Vault connection
+/// (`vault: None`); a target breaking the namespace rules
+/// ([`emit::check_target`]: a namespaced object naming another namespace,
+/// a cluster-scoped one with neither a namespace nor a path); an explicit
+/// `path` outside `<pathPrefix>/<namespace>/` that no grant opens to the
+/// object. `namespace` is the object's own, `None` when cluster-scoped:
+/// the subtree is the object's namespace, or the one its target names when
+/// it is cluster-scoped. Kubernetes targets are left alone (the namespace
+/// rules of every target: [`emit::check_targets`]). Call it once the
+/// object's instance is resolved: an instance not found is the reconcile's
+/// to report.
 pub fn check_vault_targets(
     targets: &[SecretTarget],
     namespace: Option<&str>,
     vault: Option<VaultPaths<'_>>,
 ) -> Result<(), String> {
+    // Only the namespace matters to the rules (kind and name are not read).
+    let owner = match namespace {
+        Some(ns) => SecretOwner::namespaced("", ns, ""),
+        None => SecretOwner::cluster("", ""),
+    };
     for target in targets
         .iter()
         .filter(|t| t.backend == SecretStoreBackend::Vault)
@@ -197,6 +210,7 @@ pub fn check_vault_targets(
                 target.name
             ));
         };
+        emit::check_target(target, &owner).map_err(|e| e.to_string())?;
         let Some(path) = &target.path else {
             continue;
         };
@@ -210,7 +224,10 @@ pub fn check_vault_targets(
             })
             .collect();
         let writer = namespace.map_or(Writer::Cluster, Writer::Namespaced);
-        let subtree = target.namespace.as_deref().or(namespace);
+        // The stores' subtree: the object's own namespace (a namespaced
+        // object's target may only repeat it), the target's for a
+        // cluster-scoped one.
+        let subtree = namespace.or(target.namespace.as_deref());
         vault_paths::check(vault.path_prefix, &grants, writer, subtree, path)
             .map_err(|e| format!("secret target {:?}: {e}", target.name))?;
     }
@@ -508,13 +525,13 @@ mod tests {
         let grants = [VaultPathGrant {
             namespaces: vec!["auth".into()],
             cluster_scoped: false,
-            paths: vec!["batlehub/auth".into()],
+            paths: vec!["shared/auth".into()],
         }];
         let vault = Some(VaultPaths {
             path_prefix: "weebo",
             path_grants: &grants,
         });
-        let granted = [vault_target("app", Some("batlehub/auth"))];
+        let granted = [vault_target("app", Some("shared/auth"))];
         assert_eq!(check_vault_targets(&granted, Some("auth"), vault), Ok(()));
         let err = check_vault_targets(&granted, Some("team-a"), vault).unwrap_err();
         assert!(err.starts_with("secret target \"app\": "), "{err}");
@@ -525,6 +542,63 @@ mod tests {
         ];
         assert_eq!(check_vault_targets(&own, Some("team-a"), vault), Ok(()));
         assert!(check_vault_targets(&granted, None, vault).is_err());
+    }
+
+    #[test]
+    fn vault_targets_follow_the_stores_namespace_rules() {
+        let grants = [VaultPathGrant {
+            namespaces: vec!["team-*".into()],
+            cluster_scoped: false,
+            paths: vec!["shared/auth".into()],
+        }];
+        let vault = Some(VaultPaths {
+            path_prefix: "weebo",
+            path_grants: &grants,
+        });
+        // A namespaced object naming another namespace: refused like the
+        // stores do (CrossNamespace), even with a path in that subtree.
+        let elsewhere = [SecretTarget {
+            namespace: Some("team-b".into()),
+            ..vault_target("x", Some("weebo/team-b/x"))
+        }];
+        let err = check_vault_targets(&elsewhere, Some("team-a"), vault).unwrap_err();
+        assert!(
+            err.contains("may only write into its own namespace"),
+            "{err}"
+        );
+        // Its own namespace repeated: fine.
+        let own = [SecretTarget {
+            namespace: Some("team-a".into()),
+            ..vault_target("x", Some("weebo/team-a/x"))
+        }];
+        assert_eq!(check_vault_targets(&own, Some("team-a"), vault), Ok(()));
+        // The subtree is the object's namespace, not the target's.
+        let other_subtree = [vault_target("x", Some("weebo/team-b/x"))];
+        assert!(check_vault_targets(&other_subtree, Some("team-a"), vault).is_err());
+        // A cluster-scoped object: neither a namespace nor a path.
+        let err = check_vault_targets(&[vault_target("x", None)], None, vault).unwrap_err();
+        assert!(err.contains("needs a namespace"), "{err}");
+        // With a namespace, its subtree; with a path only, a cluster grant.
+        let named = [SecretTarget {
+            namespace: Some("team-b".into()),
+            ..vault_target("x", None)
+        }];
+        assert_eq!(check_vault_targets(&named, None, vault), Ok(()));
+        let in_subtree = [SecretTarget {
+            namespace: Some("team-b".into()),
+            ..vault_target("x", Some("weebo/team-b/x"))
+        }];
+        assert_eq!(check_vault_targets(&in_subtree, None, vault), Ok(()));
+        // Kubernetes targets are not this check's.
+        let kubernetes = [SecretTarget {
+            backend: SecretStoreBackend::Kubernetes,
+            namespace: Some("team-b".into()),
+            ..vault_target("x", None)
+        }];
+        assert_eq!(
+            check_vault_targets(&kubernetes, Some("team-a"), vault),
+            Ok(())
+        );
     }
 
     #[test]

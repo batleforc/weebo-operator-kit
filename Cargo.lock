@@ -4090,6 +4090,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "weebo-kit-api",
+ "weebo-kit-application",
  "weebo-kit-domain",
  "wiremock",
 ]

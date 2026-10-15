@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { budgetPage, eventsPage, metricsPage, reasonCodesPage } from "./pages.mjs";
 import { SMALL_CLUSTER } from "./perf.mjs";
-import { parseReasonCodes, scanUsage } from "./rust.mjs";
+import { leaderGauge as leaderGaugeOf, parseReasonCodes, scanUsage } from "./rust.mjs";
 
 /** The kit runtime's constants the pages quote, kept equal by a weebo-kit-runtime test. */
 const RUNTIME = JSON.parse(
@@ -66,7 +66,7 @@ export function generateReference(config, { root, group }) {
   for (const m of config.extraMetrics ?? []) {
     if (!usage.text.includes(m.name)) throw new Error(`metric ${m.name} not found in the operator's sources`);
   }
-  const leaderGauge = usage.text.includes(`"${prefix}_leader"`) ? `${prefix}_leader` : undefined;
+  const leaderGauge = leaderGaugeOf(usage.text, prefix);
 
   const overrides = config.budget ?? {};
   for (const key of Object.keys(overrides)) {

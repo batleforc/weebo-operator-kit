@@ -160,12 +160,16 @@ subjects:
 {{/*
 With watch.namespace: the namespaced kinds (params.namespacedKinds) in
 that namespace only, and their Secrets and Events there.
+params.watchRules appends rules of its own: what the operator reads or
+writes in the watched namespace (the namespaced part of
+params.clusterRules, which a watch.clusterKinds: false release does not
+render at all).
 */}}
 {{- define "weebo-operator.watchRole" -}}
 {{- $ctx := .ctx -}}
 {{- $p := .params -}}
 {{- $ns := include "weebo-operator.watchNamespace" $ctx -}}
-{{- if and $ns $p.namespacedKinds -}}
+{{- if and $ns (or $p.namespacedKinds $p.watchRules) -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -174,7 +178,9 @@ metadata:
   labels:
     {{- include "weebo-operator.labels" $ctx | nindent 4 }}
 rules:
-  {{- include "weebo-operator.kindRules" (dict "group" $p.group "kinds" $p.namespacedKinds) | nindent 2 }}
+  {{- with $p.namespacedKinds }}
+  {{- include "weebo-operator.kindRules" (dict "group" $p.group "kinds" .) | nindent 2 }}
+  {{- end }}
   # Emitted credentials: read by name, created, replaced, deleted with
   # their CR. Never listed or watched.
   - apiGroups: [""]
@@ -183,6 +189,9 @@ rules:
   - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
+  {{- with $p.watchRules }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

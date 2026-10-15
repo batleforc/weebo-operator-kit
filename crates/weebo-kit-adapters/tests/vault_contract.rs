@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::json;
-use weebo_kit_adapters::{VaultConfig, VaultSecretStore};
+use weebo_kit_adapters::{CasWrite, PathMetadata, VaultConfig, VaultSecretStore};
 use weebo_kit_api::VaultPathGrant;
 use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -466,4 +466,70 @@ async fn a_relogin_reads_the_service_account_token_again() {
     let read = store.read_path("p").await.unwrap().unwrap();
     std::fs::remove_file(&jwt).unwrap();
     assert_eq!(read["k"], "v");
+}
+
+#[tokio::test]
+async fn check_and_set_writes_report_a_moved_version_as_a_conflict() {
+    let server = MockServer::start().await;
+    login(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/v1/secret/data/p"))
+        .respond_with(kv_response(json!({"k": "old"})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/secret/data/p"))
+        .and(body_partial_json(json!({"options": {"cas": 1}})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(envelope(
+            json!({"created_time": "2026-10-06T00:00:00Z", "custom_metadata": null,
+                   "deletion_time": "", "destroyed": false, "version": 2}),
+            serde_json::Value::Null,
+        )))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/secret/data/p"))
+        .and(body_partial_json(json!({"options": {"cas": 0}})))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "errors": ["check-and-set parameter did not match the current version"]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/secret/metadata/p"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(envelope(
+            json!({
+                "cas_required": false, "created_time": "2026-10-06T00:00:00Z",
+                "current_version": 1, "custom_metadata": {"owner": "Kind/ns/name"},
+                "delete_version_after": "0s", "max_versions": 0, "oldest_version": 0,
+                "updated_time": "2026-10-06T00:00:00Z", "versions": {},
+            }),
+            serde_json::Value::Null,
+        )))
+        .mount(&server)
+        .await;
+    let store = VaultSecretStore::new(&spec(&server), "sa-jwt", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        store.metadata("p").await.unwrap(),
+        PathMetadata::Present {
+            owner: Some("Kind/ns/name".into()),
+            current_version: 1
+        }
+    );
+    let new = BTreeMap::from([("k".to_string(), "new".to_string())]);
+    let old = BTreeMap::from([("k".to_string(), "old".to_string())]);
+    assert_eq!(
+        store.write_path_cas("p", &old, 0).await.unwrap(),
+        CasWrite::Unchanged
+    );
+    assert_eq!(
+        store.write_path_cas("p", &new, 1).await.unwrap(),
+        CasWrite::Written
+    );
+    assert_eq!(
+        store.write_path_cas("p", &new, 0).await.unwrap(),
+        CasWrite::Conflict
+    );
 }

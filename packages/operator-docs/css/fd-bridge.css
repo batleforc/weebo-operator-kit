@@ -3,7 +3,7 @@
 
    Every value is a `var(--token)` from tokens.css, so this block is written
    once and both renditions fall out of the token layer (the light values live
-   under `:root[data-theme="light"]` there). Mirrors batlehub's
+   under `:root[data-theme="light"]` there). Mirrors the design system's
    `docs/.vitepress/theme/vp-bridge.css`, re-targeted at Fumadocs' names.
    ═══════════════════════════════════════════════════════════════════════════ */
 

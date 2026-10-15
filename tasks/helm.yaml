@@ -78,6 +78,12 @@ tasks:
         out="$({{.T}} --set watch.labelSelector.matchLabels.shard=a --set webhook.enabled=false)"
         && if printf '%s\n' "$out" | grep -q ValidatingWebhookConfiguration; then exit 1; fi
       - "{{.T}} --set references.crossNamespace=true | grep -q 'name: WEEBO_CROSS_NAMESPACE_REFS'"
+      # The operator pod's own selector labels, as JSON, nameOverride
+      # applied (what its NetworkPolicies select to let it in).
+      - >-
+        {{.T}} --set nameOverride=other
+        | grep -A1 'name: WEEBO_OPERATOR_POD_LABELS'
+        | grep -qF '"app.kubernetes.io/instance":"smoke","app.kubernetes.io/name":"other"'
       # Full namespaced: nothing cluster-scoped in the render.
       - >-
         {{.T}} --set watch.namespace=team-a --set watch.clusterKinds=false --set crds.install=false

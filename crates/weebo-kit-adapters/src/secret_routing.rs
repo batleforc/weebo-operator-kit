@@ -12,7 +12,7 @@ use weebo_kit_application::ports::{SecretOwner, SecretStore, SecretStoreError};
 use weebo_kit_domain::vault_paths::Writer;
 
 use crate::secret_k8s::K8sSecretStore;
-use crate::secret_vault::VaultSecretStore;
+use crate::secret_vault::{CasWrite, PathMetadata, VaultSecretStore};
 
 type VaultResult = Result<Arc<VaultSecretStore>, String>;
 
@@ -122,6 +122,91 @@ impl RoutingSecretStore {
     }
 }
 
+impl RoutingSecretStore {
+    /// Writes `data` to `path` for `owner`, the owner recorded with it.
+    /// Several objects may target one path (a grant opens it to a whole
+    /// namespace pattern), and three Vault calls (read the owner, write,
+    /// record the owner) are not atomic; so:
+    ///
+    /// 1. a path owned by another object is refused;
+    /// 2. a path not yet `owner`'s (free, or holding a value written before
+    ///    owners were recorded: adopted) is claimed first — the owner
+    ///    recorded, then read back: of two concurrent claims, the one read
+    ///    back wins, the other is refused like in 1;
+    /// 3. the value is written with check-and-set on the version read with
+    ///    the owner (`0` on a new path): a writer that raced past 2 loses
+    ///    here, reads the owner again and is refused (or, owner unchanged,
+    ///    gets a conflict error retried on its next reconcile);
+    /// 4. after the write, the owner is read once more: a claim taken over
+    ///    in the meantime is reported as the refusal of 1 (the new owner's
+    ///    next write replaces the value).
+    ///
+    /// Without `read` on `<mount>/metadata/*` ownership isn't checked: the
+    /// value is written as is, the owner recorded best effort.
+    async fn vault_write(
+        vault: &VaultSecretStore,
+        path: &str,
+        owner: &SecretOwner<'_>,
+        data: &BTreeMap<String, String>,
+    ) -> Result<(), SecretStoreError> {
+        let id = owner.id();
+        let refused = |other: &str| {
+            SecretStoreError(format!("Vault path {path} belongs to {other}, not {id}"))
+        };
+        let version = match vault.metadata(path).await? {
+            PathMetadata::Unreadable => {
+                vault.write_path(path, data).await?;
+                return vault.set_owner(path, &id).await;
+            }
+            PathMetadata::Present {
+                owner: Some(other), ..
+            } if !owner.is(&other) => return Err(refused(&other)),
+            PathMetadata::Present {
+                owner: Some(recorded),
+                current_version,
+            } if recorded == id => current_version,
+            claimed => {
+                let seen = match claimed {
+                    PathMetadata::Present {
+                        current_version, ..
+                    } => current_version,
+                    _ => 0,
+                };
+                vault.set_owner(path, &id).await?;
+                match vault.metadata(path).await? {
+                    PathMetadata::Present {
+                        owner: Some(other), ..
+                    } if !owner.is(&other) => return Err(refused(&other)),
+                    PathMetadata::Present {
+                        current_version, ..
+                    } => current_version,
+                    // The claim isn't readable back (no `create` on the
+                    // metadata, a metadata-only entry not kept): the
+                    // version read first.
+                    PathMetadata::Absent | PathMetadata::Unreadable => seen,
+                }
+            }
+        };
+        let taken_over = |recorded: Option<String>| match recorded {
+            Some(other) if !owner.is(&other) => Some(other),
+            _ => None,
+        };
+        match vault.write_path_cas(path, data, version).await? {
+            CasWrite::Unchanged => Ok(()),
+            CasWrite::Written => match taken_over(vault.owner_of(path).await?) {
+                Some(other) => Err(refused(&other)),
+                None => Ok(()),
+            },
+            CasWrite::Conflict => match taken_over(vault.owner_of(path).await?) {
+                Some(other) => Err(refused(&other)),
+                None => Err(SecretStoreError(format!(
+                    "Vault path {path} was written by someone else while {id} wrote it; retrying"
+                ))),
+            },
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl SecretStore for RoutingSecretStore {
     fn default_backend(&self) -> SecretStoreBackend {
@@ -139,14 +224,7 @@ impl SecretStore for RoutingSecretStore {
             SecretStoreBackend::Vault => {
                 let vault = self.vault().await?;
                 let path = Self::vault_path(vault, target, owner)?;
-                if let Err(other) = Self::vault_owned(vault, &path, owner).await? {
-                    return Err(SecretStoreError(format!(
-                        "Vault path {path} belongs to {other}, not {}",
-                        owner.id()
-                    )));
-                }
-                vault.write_path(&path, data).await?;
-                vault.set_owner(&path, &owner.id()).await
+                Self::vault_write(vault, &path, owner, data).await
             }
         }
     }

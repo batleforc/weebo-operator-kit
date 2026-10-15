@@ -33,12 +33,12 @@ fn schema_and_domain_accept_the_same_path_patterns() {
     };
     let namespaces = vec!["auth".to_string()];
     for candidate in [
-        "batlehub/auth",
+        "shared/auth",
         "a",
         "+/auth",
         "a/+/c",
         "a/+/c/*",
-        "batlehub/*",
+        "shared/*",
         "+/auth/*",
         "a.b/c-d_e",
         "...",

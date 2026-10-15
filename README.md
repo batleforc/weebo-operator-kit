@@ -24,7 +24,7 @@ Plus one npm package for the operators' documentation sites:
 
 | Package                                                  | What it gives an operator's docs site                                                        |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| [`@weebo/operator-docs`](packages/operator-docs/README.md) | CRD reference generator (`weebo-crd-docs`), manifest builder, BatleHub theme, layouts, routes |
+| [`@weebo/operator-docs`](packages/operator-docs/README.md) | CRD reference generator (`weebo-crd-docs`), manifest builder, theme, layouts, routes |
 
 And what the operators kept copying around the code:
 
