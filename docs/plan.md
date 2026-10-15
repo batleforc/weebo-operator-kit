@@ -36,8 +36,8 @@ métier).
 | `weebo-kit-domain`      | domain       | rien                          | `Reason`/`Severity`, `reason_codes!`, `Failure<R>`/`Advisory<R>`, moteur d'allow-list générique  |
 | `weebo-kit-api`         | api          | serde, schemars, k8s-openapi  | sous-types de CRD : `Condition`, `SecretKeyRef`, `ObjectRef`, `SecretTarget`, `TlsOptions`…     |
 | `weebo-kit-application` | application  | kit-api, k8s-openapi (types)  | ports `SecretStore`/`SecretStoreFactory`, helpers d'émission de secrets, `FakeSecretStore`       |
-| `weebo-kit-adapters`    | outbound     | kit-application, kube, vaultrs| `K8sSecretStore`, `VaultSecretStore` + `VaultLogins`, `RoutingSecretStore`, `read_secret_key`   |
-| `weebo-kit-runtime`     | inbound/bin  | kit-domain, kit-api, kube     | télémétrie, leader election, `Shutdown`, serveur webhook TLS, métriques, conditions + Events    |
+| `weebo-kit-adapters`    | outbound     | kit-application, kube, vaultrs| `K8sSecretStore`, `VaultSecretStore` (check-and-set) + `VaultLogins`, `RoutingSecretStore`, `read_secret_key` |
+| `weebo-kit-runtime`     | inbound/bin  | kit-domain, kit-api, kit-application, kube | télémétrie, leader election + jauge, `Shutdown`, serveur webhook TLS, métriques, conditions + Events, status (`publish`, `record`), finalizer, reflectors, pod de l'opérateur |
 | `weebo-kit-testkit`     | tests        | envtest, kube                 | `EnvTestCluster::start(crd_dir)`, `wait_for`/`wait_for_absence`                                 |
 | `weebo-kit-perf`        | tests        | kit-testkit, kube             | `PerfRun` (binaire release contre envtest), `/proc`, métriques, `Budget::small_cluster`          |
 
@@ -1381,3 +1381,72 @@ authentik : MIT). Nouveau placeholder `license` (`Apache-2.0` par défaut,
 ou `MIT`), utilisé par `Cargo.toml` et les deux Containerfiles. Le fichier
 de licence reste à ajouter par l'opérateur. Rien à changer pour les
 opérateurs existants.
+
+### v0.15.2 — corrections de la revue du 2026-10-15 (non cassante)
+
+Comportement :
+
+- **Propriété Vault sans course** : avec les `pathGrants`, plusieurs CR
+  visent le même chemin par construction ; lire l'owner, écrire, puis
+  enregistrer l'owner en trois appels laissait deux reconciles
+  concurrents finir avec la valeur de A et B comme owner.
+  `RoutingSecretStore` écrit désormais ainsi : chemin d'un autre → refus ;
+  chemin libre ou sans owner (adopté, comme avant) → l'owner est
+  enregistré d'abord puis relu (de deux revendications, celle relue gagne,
+  l'autre est refusée) ; la valeur est écrite en **check-and-set** KV v2
+  sur la version lue avec l'owner (`cas=0` à la création : un seul
+  créateur gagne) ; le perdant relit l'owner et reçoit le refus habituel
+  (« belongs to … »), ou une erreur de conflit rejouée au reconcile suivant
+  si l'owner n'a pas changé ; après l'écriture, l'owner est relu une
+  dernière fois (revendication reprise entre-temps → refus). Sans droit
+  `read` sur `<mount>/metadata/*`, rien ne change (écriture sans CAS,
+  propriété non vérifiée). Ajouts : `VaultSecretStore::metadata`
+  (`PathMetadata`), `write_path_cas` (`CasWrite`). Vérifié contre OpenBao
+  (métadonnée seule = version 0, `cas=0` accepté puis refusé).
+- **Admission = reconcile** : `admission::check_vault_targets` applique
+  `emit::check_target` (cible Vault d'un objet namespacé nommant un autre
+  namespace → `CrossNamespace` ; objet cluster sans namespace ni chemin →
+  `MissingNamespace`), et le sous-arbre d'un objet namespacé est celui de
+  son namespace, et non celui que la cible nomme. `weebo-kit-runtime`
+  dépend désormais de `weebo-kit-application` (aucun client ajouté).
+- Doc : un `pathPrefix` vide fait de chaque namespace un dossier de
+  premier niveau du mount (un namespace nommé comme un dossier ouvert par
+  un grant le possède) : avertissement sur `VaultConfig::path_prefix`,
+  `vault_paths::subtree` et dans la RFC §2. À reprendre dans la
+  description du champ `pathPrefix` de chaque opérateur.
+- Plus aucun nom de produit dans le code et les commentaires du kit
+  (exemple de `VaultPathGrant.paths` : `shared/auth` — description de CRD
+  modifiée, `task recu` côté opérateur ; tests ; `weebo-kit-perf` ;
+  `operator-docs`, dont le nom du thème Shiki `weebo-css-variables`).
+
+Ajouts (aucun opérateur ne casse) :
+
+- `controller::finalize_with(obj, recorder, annotations, released,
+  cleanup, always)` : `always` tourne à chaque suppression, force-orphan
+  compris (ce que l'opérateur a accordé *sur le cluster* à la CR : un
+  `ClusterRoleBinding`…). `finalize` = `finalize_with` sans hook.
+- `status::record(api, field_manager, name, &fields)` : un merge patch de
+  champs de status, rejoué comme `publish` sur une erreur transitoire,
+  jamais sur une erreur de (dé)sérialisation — pour enregistrer ce qui
+  vient d'être écrit à distance sans attendre le `publish` final.
+- `store::spawn_reflector(api, scope, health, name)` et
+  `leader::register_leader_gauge(meter, prefix)` (+ `_on(&Meter, prefix)`)
+  : les copies des `main.rs` des opérateurs (le template les utilise).
+  Le générateur de référence de `operator-docs` reconnaît
+  `register_leader_gauge(` et `finalize_with(`.
+- `pod::own_labels()` / `pod::own_namespace()` et, dans le chart,
+  `WEEBO_OPERATOR_POD_LABELS` (labels de sélection du pod, JSON,
+  `nameOverride` appliqué) : de quoi écrire une NetworkPolicy qui laisse
+  entrer l'opérateur.
+- Chart : `params.watchRules`, règles ajoutées au Role du namespace
+  surveillé (`watch.namespace`) — un release `watch.clusterKinds: false`
+  ne rend pas de ClusterRole, donc aucune `clusterRules`. Le Role est
+  rendu dès qu'il y a des `namespacedKinds` ou des `watchRules`.
+  `task chart:check` le vérifie (`charts/testdata/watch-rules.yaml`),
+  `helm:lint` vérifie la variable d'environnement.
+
+Côté opérateurs (à l'adoption) : remplacer `spawn_reflector` et
+`register_leader_gauge` locaux, passer les règles namespacées dans
+`watchRules` (batlehub : spec §7.1), `record` pour les champs de status
+écrits après un effet distant, `task recu` (description de
+`pathGrants[].paths`), nouvelle somme `sha256` de `tasks/helm.yaml`.

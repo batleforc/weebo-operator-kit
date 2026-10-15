@@ -81,6 +81,18 @@ tasks:
       - mise exec -- helm lint charts/weebo-operator-lib
       - task: template:render
       - task: helm:lint
+      # params.watchRules: in the watch Role of a watched namespace (even
+      # without namespaced kinds), nowhere without one.
+      - |
+        set -eu
+        chart="{{.TEMPLATE_OUT}}/deploy/charts/weebo-example"
+        cp charts/testdata/watch-rules.yaml "$chart/templates/zz-watch-rules.yaml"
+        trap 'rm -f "$chart/templates/zz-watch-rules.yaml"' EXIT
+        out="$(mise exec -- helm template smoke "$chart" --set watch.namespace=team-a --set watch.clusterKinds=false --set crds.install=false --show-only templates/zz-watch-rules.yaml)"
+        printf '%s\n' "$out" | grep -q '^  namespace: team-a$'
+        printf '%s\n' "$out" | grep -q '^    - deployments$'
+        out="$(mise exec -- helm template smoke "$chart")"
+        if printf '%s\n' "$out" | grep -q 'deployments$'; then exit 1; fi
 
   template:render:
     desc: "Render templates/operator (cargo-generate) for a product named Example into TEMPLATE_OUT, wired on this working tree (kit crates and library chart by path)"

@@ -1,0 +1,9 @@
+{{- /*
+Kit test only (`task chart:check`): copied into the rendered template
+chart, renders its watch Role with `params.watchRules` and without
+namespaced kinds. Not part of the library chart.
+*/ -}}
+{{- $p := include "operator.params" . | fromYaml -}}
+{{- $_ := set $p "namespacedKinds" list -}}
+{{- $_ := set $p "watchRules" (list (dict "apiGroups" (list "apps") "resources" (list "deployments") "verbs" (list "get" "create" "patch" "delete"))) -}}
+{{ include "weebo-operator.watchRole" (dict "ctx" . "params" $p) }}

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
-use vaultrs::api::kv2::requests::SetSecretMetadataRequest;
+use vaultrs::api::kv2::requests::{SetSecretMetadataRequest, SetSecretRequestOptions};
 use vaultrs::client::{Client as _, VaultClient, VaultClientSettingsBuilder};
 use vaultrs::error::ClientError;
 use vaultrs::{auth::kubernetes, kv2, token};
@@ -32,6 +32,13 @@ pub struct VaultConfig {
     pub mount: String,
     /// Default paths are `<path_prefix>/<namespace>/<name>` (`<namespace>/<name>`
     /// when empty).
+    ///
+    /// An empty prefix makes every namespace's subtree a top-level folder
+    /// of the mount: a namespace named like a folder that holds other
+    /// values (one a grant opens, `shared/` say) owns that folder — its
+    /// objects write there without any grant. Keep a prefix unless the
+    /// mount is reserved to per-namespace folders and no namespace can be
+    /// created with the name of another top-level folder.
     pub path_prefix: String,
     /// The paths open to objects outside their namespace's subtree.
     pub path_grants: Vec<VaultPathGrant>,
@@ -237,8 +244,18 @@ impl VaultSecretStore {
     }
 
     /// The owner id recorded on `path` (`Ok(None)`: nothing stored, or
-    /// stored before owners were recorded).
+    /// stored before owners were recorded, or a policy that can't read the
+    /// metadata).
     pub async fn owner_of(&self, path: &str) -> Result<Option<String>, SecretStoreError> {
+        Ok(match self.metadata(path).await? {
+            PathMetadata::Present { owner, .. } => owner,
+            PathMetadata::Absent | PathMetadata::Unreadable => None,
+        })
+    }
+
+    /// What `<mount>/metadata/<path>` says: the owner recorded there and
+    /// the current version, the check-and-set base of the next write.
+    pub async fn metadata(&self, path: &str) -> Result<PathMetadata, SecretStoreError> {
         let result = self
             .with_relogin(|| async {
                 let client = self.client.read().await;
@@ -246,15 +263,18 @@ impl VaultSecretStore {
             })
             .await?;
         match result {
-            Ok(meta) => Ok(meta
-                .custom_metadata
-                .and_then(|m| m.get(Self::OWNER_METADATA_KEY).cloned())),
-            Err(ClientError::APIError { code: 404, .. }) => Ok(None),
+            Ok(meta) => Ok(PathMetadata::Present {
+                owner: meta
+                    .custom_metadata
+                    .and_then(|m| m.get(Self::OWNER_METADATA_KEY).cloned()),
+                current_version: meta.current_version,
+            }),
+            Err(ClientError::APIError { code: 404, .. }) => Ok(PathMetadata::Absent),
             // A policy without `read` on `<mount>/metadata/*`: ownership
             // can't be checked, only the path confinement applies.
             Err(ClientError::APIError { code: 403, .. }) => {
                 tracing::warn!(%path, "no read access to the KV metadata: secret ownership is not checked");
-                Ok(None)
+                Ok(PathMetadata::Unreadable)
             }
             Err(e) => Err(SecretStoreError(format!("Vault read metadata {path}: {e}"))),
         }
@@ -307,6 +327,39 @@ impl VaultSecretStore {
         .map_err(|e| SecretStoreError(format!("Vault write {path}: {e}")))
     }
 
+    /// [`Self::write_path`] with KV v2 check-and-set: the write only lands
+    /// if `path`'s current version is still `version` (`0`: nothing was
+    /// ever written there — two creators racing, only one wins). Identical
+    /// data is not rewritten ([`CasWrite::Unchanged`]); a version that
+    /// moved on is [`CasWrite::Conflict`], not an error.
+    pub async fn write_path_cas(
+        &self,
+        path: &str,
+        data: &BTreeMap<String, String>,
+        version: u64,
+    ) -> Result<CasWrite, SecretStoreError> {
+        if self.read_path(path).await.ok().flatten().as_ref() == Some(data) {
+            return Ok(CasWrite::Unchanged);
+        }
+        let cas = u32::try_from(version).map_err(|_| {
+            SecretStoreError(format!(
+                "Vault write {path}: version {version} out of range"
+            ))
+        })?;
+        let result = self
+            .with_relogin(|| async {
+                let client = self.client.read().await;
+                let options = SetSecretRequestOptions { cas };
+                kv2::set_with_options(&*client, &self.mount, path, data, options).await
+            })
+            .await?;
+        match result {
+            Ok(_) => Ok(CasWrite::Written),
+            Err(e) if is_cas_mismatch(&e) => Ok(CasWrite::Conflict),
+            Err(e) => Err(SecretStoreError(format!("Vault write {path}: {e}"))),
+        }
+    }
+
     /// `Ok(None)` when nothing is stored at `path`.
     pub async fn read_path(
         &self,
@@ -350,6 +403,40 @@ impl VaultSecretStore {
             Err(e) => Err(SecretStoreError(format!("Vault delete {path}: {e}"))),
         }
     }
+}
+
+/// What the KV metadata of a path says ([`VaultSecretStore::metadata`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathMetadata {
+    /// Nothing at the path: no value, no metadata.
+    Absent,
+    /// `owner`: the id recorded, `None` for a value written before owners
+    /// were recorded (or by hand). `current_version`: `0` when only the
+    /// metadata exists (an owner recorded before the first write); a
+    /// deleted latest version still counts.
+    Present {
+        owner: Option<String>,
+        current_version: u64,
+    },
+    /// The policy can't read `<mount>/metadata/*`: ownership isn't checked.
+    Unreadable,
+}
+
+/// The outcome of [`VaultSecretStore::write_path_cas`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CasWrite {
+    /// A new version was written.
+    Written,
+    /// The path already held this data: nothing written.
+    Unchanged,
+    /// The path's version moved since it was read: someone else wrote.
+    Conflict,
+}
+
+/// KV v2's refusal of a check-and-set write whose version doesn't match.
+fn is_cas_mismatch(err: &ClientError) -> bool {
+    matches!(err, ClientError::APIError { code: 400, errors }
+        if errors.iter().any(|e| e.contains("check-and-set")))
 }
 
 enum Cached {

@@ -2,7 +2,8 @@
 //! `status` subresource — the condition list, `observedGeneration` on
 //! success, the operator's own fields (remote id…) — retried while the
 //! apiserver is unavailable, then the Events announcing it
-//! ([`crate::events::announce_outcome`]).
+//! ([`crate::events::announce_outcome`]). And [`record`]: a status field
+//! written as soon as the remote write it records, with the same retries.
 
 use std::fmt::Debug;
 use std::time::Duration;
@@ -81,13 +82,50 @@ where
         status.insert("observedGeneration".into(), generation.into());
     }
     let patch = Patch::Merge(serde_json::json!({ "status": status }));
+    let name = obj.name_any();
+    let params = PatchParams::apply(field_manager);
+    retrying(|| api.patch_status(&name, &params, &patch)).await?;
+    events::announce_outcome(recorder, &obj.object_ref(&()), previous, &conds).await;
+    Ok(conds)
+}
+
+/// Merges `fields` into the `status` of `name` — one merge patch, retried
+/// on a transient error like [`publish`]'s. For what a reconcile must
+/// record as soon as it did it, outside the final [`publish`]: the id of
+/// a remote object it just created, a hash of what it just wrote remotely.
+/// A lost patch there leaves the CR at odds with its own remote object
+/// (the next reconcile sees a "conflict" with itself); retrying in place
+/// narrows that window to an apiserver unavailable for the whole backoff.
+/// `fields` serializes to a JSON object of status fields (`null` drops
+/// one); a value that can't be serialized fails at once
+/// (`kube::Error::SerdeError`), never retried. Returns the patched object.
+pub async fn record<K, T>(
+    api: &Api<K>,
+    field_manager: &str,
+    name: &str,
+    fields: &T,
+) -> Result<K, kube::Error>
+where
+    K: Clone + Debug + DeserializeOwned,
+    T: Serialize + ?Sized,
+{
+    let fields = serde_json::to_value(fields).map_err(kube::Error::SerdeError)?;
+    let patch = Patch::Merge(serde_json::json!({ "status": fields }));
+    let params = PatchParams::apply(field_manager);
+    retrying(|| api.patch_status(name, &params, &patch)).await
+}
+
+/// `op`, tried again up to [`STATUS_RETRIES`] times on a [`transient`]
+/// error, with a doubling backoff (0.5 s, 1 s, 2 s).
+async fn retrying<T, F, Fut>(mut op: F) -> Result<T, kube::Error>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, kube::Error>>,
+{
     let mut attempt = 0;
     loop {
-        match api
-            .patch_status(&obj.name_any(), &PatchParams::apply(field_manager), &patch)
-            .await
-        {
-            Ok(_) => break,
+        match op().await {
+            Ok(done) => return Ok(done),
             Err(err) if attempt < STATUS_RETRIES && transient(&err) => {
                 attempt += 1;
                 tracing::warn!(error = %err, attempt, "status patch failed, retrying");
@@ -96,8 +134,6 @@ where
             Err(err) => return Err(err),
         }
     }
-    events::announce_outcome(recorder, &obj.object_ref(&()), previous, &conds).await;
-    Ok(conds)
 }
 
 #[cfg(test)]
@@ -110,6 +146,45 @@ mod tests {
                 .with_code(code)
                 .boxed(),
         )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn patches_are_retried_on_transient_errors_only() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let calls = AtomicU32::new(0);
+        // Two 503s, then success.
+        let done = retrying(|| async {
+            match calls.fetch_add(1, Ordering::SeqCst) {
+                0 | 1 => Err(api_error(503)),
+                _ => Ok(7),
+            }
+        })
+        .await;
+        assert_eq!(done.unwrap(), 7);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        // Unavailable throughout: given up after the retries.
+        calls.store(0, Ordering::SeqCst);
+        let failed: Result<(), _> = retrying(|| async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err(api_error(503))
+        })
+        .await;
+        assert!(failed.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), STATUS_RETRIES + 1);
+        // Refused or unreadable: never retried.
+        for err in [
+            || api_error(422),
+            || kube::Error::SerdeError(serde_json::from_str::<u8>("x").unwrap_err()),
+        ] {
+            calls.store(0, Ordering::SeqCst);
+            let failed: Result<(), _> = retrying(|| async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err(err())
+            })
+            .await;
+            assert!(failed.is_err());
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        }
     }
 
     #[test]

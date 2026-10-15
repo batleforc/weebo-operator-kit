@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { generateCrdDocs } from "../src/crd-docs/generate.mjs";
 import { meaning, shownAs } from "../src/reference/pages.mjs";
 import { measured, workload } from "../src/reference/perf.mjs";
-import { parseReasonCodes, scanUsage } from "../src/reference/rust.mjs";
+import { leaderGauge, parseReasonCodes, scanUsage } from "../src/reference/rust.mjs";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const catalogFile = path.join(fixtures, "crates/domain/src/error.rs");
@@ -44,6 +44,24 @@ test("how the code uses it, tests left out", () => {
   assert.deepEqual([...usage.errors.keys()], ["KubernetesApiError", "Unreachable"]);
   // Unreachable is also a Failure: it reaches a condition.
   assert.deepEqual([...usage.errorsOnly], ["KubernetesApiError"]);
+});
+
+test("the kit's helpers count as uses: finalize_with, register_leader_gauge", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "weebo-usage-"));
+  fs.mkdirSync(path.join(dir, "src"));
+  fs.writeFileSync(
+    path.join(dir, "src/main.rs"),
+    `fn main() {
+    leader::register_leader_gauge("example-operator", "weebo_example");
+    controller::finalize_with(obj, recorder, annotations, ReasonCode::Released, cleanup, hook).await;
+}
+`,
+  );
+  const used = scanUsage(dir, catalog.enumName, catalogFile);
+  assert.deepEqual([...used.released], ["Released"]);
+  assert.equal(leaderGauge(used.text, "weebo_example"), "weebo_example_leader");
+  assert.equal(leaderGauge("fn main() {}", "weebo_example"), undefined);
+  fs.rmSync(dir, { recursive: true });
 });
 
 test("where each code shows up", () => {

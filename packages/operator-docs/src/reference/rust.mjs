@@ -118,12 +118,23 @@ function withoutTestModules(source) {
 }
 
 /**
+ * The operator's leader gauge, `<prefix>_leader`, when its sources register
+ * it: by name, or through the kit's `leader::register_leader_gauge`.
+ */
+export function leaderGauge(text, prefix) {
+  return text.includes(`"${prefix}_leader"`) || /\bregister_leader_gauge\s*\(/.test(text)
+    ? `${prefix}_leader`
+    : undefined;
+}
+
+/**
  * How the operator's code uses its catalog, from every non-test `.rs` file
  * under `dir` but `catalogFile`:
  * - `denials`: codes of an admission `Denial` (or `undecidable`);
  * - `lifecycle`: code → action (`Reconcile`/`Cleanup`) of an
  *   `announce_change` Event;
- * - `released`: the code the kit's `controller::finalize` announces;
+ * - `released`: the code the kit's `controller::finalize` (or
+ *   `finalize_with`) announces;
  * - `errors`: code → actions of the `(Code, events::…)` pairs an
  *   `error_policy` warns with, and `errorsOnly`: those never used
  *   anywhere else (they never reach a condition);
@@ -158,7 +169,7 @@ export function scanUsage(dir, enumName, catalogFile) {
       ...codes(new RegExp(`fn\\s+undecidable\\s*\\([^)]*\\)[^{]*\\{\\s*${code}`, "g")),
     ]),
     lifecycle,
-    released: codes(new RegExp(`controller::finalize\\([^;]*?${code}`, "g")),
+    released: codes(new RegExp(`controller::finalize(?:_with)?\\([^;]*?${code}`, "g")),
     errors,
     errorsOnly,
     text,

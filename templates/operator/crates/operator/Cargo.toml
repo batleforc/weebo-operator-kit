@@ -14,11 +14,8 @@ adapters-inbound = { workspace = true }
 adapters-outbound = { workspace = true }
 api = { workspace = true }
 anyhow = { workspace = true }
-futures = { workspace = true }
 kube = { workspace = true }
-opentelemetry = { workspace = true }
 rustls = { workspace = true }
-serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }

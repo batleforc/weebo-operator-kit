@@ -1,8 +1,8 @@
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   BatleHub design system — "The Proof Sheet" — applied to Fumadocs.
+   The weebo design system — "The Proof Sheet" — applied to Fumadocs.
 
-   Layering mirrors batlehub's docs site: tokens.css decides every value,
+   Layering mirrors the design system's own docs site: tokens.css decides every value,
    fd-bridge.css maps Fumadocs' variables onto them, and this file holds the
    component rules. No colour literal appears below this line; ask for a
    token, never for a rendition.

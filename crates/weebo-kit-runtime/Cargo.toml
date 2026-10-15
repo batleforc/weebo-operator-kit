@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 weebo-kit-api = { workspace = true }
 weebo-kit-domain = { workspace = true }
+weebo-kit-application = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }

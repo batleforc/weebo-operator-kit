@@ -2,7 +2,7 @@
 //! phases — idle windows and loads — each measured on the process, on the
 //! operator's reconcile metrics and on the apiserver's request counter.
 //!
-//! The shape that makes the numbers comparable, after batlehub's soak:
+//! The shape that makes the numbers comparable, after a soak test's:
 //!
 //! ```text
 //! start ─▶ warm-up load ─▶ idle "baseline" ─▶ loads… ─▶ idle "final" ─▶ stop

@@ -5,7 +5,7 @@ import { createCssVariablesTheme } from "shiki";
 // form state, so it can't go through the static MDX build-time pipeline
 // the rest of the site's code fences use.
 //
-// `variableDefaults` bakes the BatleHub dark-rendition tokens in as
+// `variableDefaults` bakes the theme's dark-rendition tokens in as
 // `var(--shiki-x, <default>)` fallbacks, so highlighting still renders
 // correctly even if the `.yaml-preview` wrapper class in global.css never
 // reaches these spans (e.g. inherited through a portal, or the class name
@@ -13,7 +13,7 @@ import { createCssVariablesTheme } from "shiki";
 // dependency. The keyword colour is the in-gamut accent (0.235 chroma, not
 // Monofolio's out-of-gamut 0.26), matching the --accent token.
 export const yamlPreviewTheme = createCssVariablesTheme({
-  name: "batlehub-css-variables",
+  name: "weebo-css-variables",
   variablePrefix: "--shiki-",
   fontStyle: true,
   variableDefaults: {

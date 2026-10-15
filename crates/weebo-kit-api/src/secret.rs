@@ -74,7 +74,7 @@ pub struct VaultPathGrant {
     /// Path patterns under the mount, compared segment by segment: a
     /// literal segment matches itself, `+` exactly one segment, and a last
     /// `*` one or more. Each holds at least one literal segment, e.g.
-    /// `batlehub/auth`, `+/auth`, `platform/*`. Prefer exact paths where
+    /// `shared/auth`, `+/auth`, `platform/*`. Prefer exact paths where
     /// values not written by the operator live: a covered object may take
     /// over a value no object owns yet.
     #[schemars(schema_with = "path_patterns")]

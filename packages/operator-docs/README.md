@@ -15,7 +15,7 @@ comes from here:
 | `@weebo/operator-docs/config`      | the route constants alone (`docsRoute`, …), for `proxy.ts`                                                  |
 | `@weebo/operator-docs/diagram-style` | SVG styles for the operator's own diagrams, on the theme's tokens                                        |
 | `@weebo/operator-docs/next`        | `withOperatorDocs`, the whole `next.config.mjs`                                                              |
-| `@weebo/operator-docs/css/theme.css` | the BatleHub theme: tokens, Fumadocs bridge, component rules                                              |
+| `@weebo/operator-docs/css/theme.css` | the theme: design tokens, Fumadocs bridge, component rules                                              |
 
 The package ships TypeScript sources: the site compiles them with its own
 code (`withOperatorDocs` adds the package to `transpilePackages`).

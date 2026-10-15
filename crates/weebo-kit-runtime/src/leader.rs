@@ -26,6 +26,24 @@ pub fn is_leader() -> bool {
     LEADER.load(Ordering::Relaxed)
 }
 
+/// Registers `<prefix>_leader` on the global meter provider's `meter`
+/// (the operator's meter name, e.g. `weebo-example-operator`): a gauge at
+/// 1 on the replica holding the lease, 0 on a standby. Call it once, after
+/// the meter provider is installed (`telemetry::init`); the callback lives
+/// as long as the provider.
+pub fn register_leader_gauge(meter: &'static str, prefix: &str) {
+    register_leader_gauge_on(&opentelemetry::global::meter(meter), prefix);
+}
+
+/// [`register_leader_gauge`] on an explicit `meter`.
+pub fn register_leader_gauge_on(meter: &opentelemetry::metrics::Meter, prefix: &str) {
+    let _ = meter
+        .u64_observable_gauge(format!("{prefix}_leader"))
+        .with_description("1 when this replica holds the leader lease")
+        .with_callback(|observer| observer.observe(u64::from(is_leader()), &[]))
+        .build();
+}
+
 /// The held lease, renewed in the background.
 pub struct Leadership {
     lease: Arc<LeaseLock>,
@@ -352,5 +370,30 @@ mod tests {
         let why = hold_with(|| async { Ok(false) }, RENEW, TTL).await;
         assert!(why.contains("lost"), "{why}");
         assert!(start.elapsed() <= RENEW);
+    }
+
+    #[test]
+    fn the_leader_gauge_is_named_after_the_prefix() {
+        use opentelemetry::metrics::MeterProvider as _;
+        use opentelemetry_sdk::metrics::SdkMeterProvider;
+        use prometheus::{Encoder, TextEncoder};
+
+        let registry = prometheus::Registry::new();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(
+                opentelemetry_prometheus::exporter()
+                    .with_registry(registry.clone())
+                    .without_target_info()
+                    .build()
+                    .unwrap(),
+            )
+            .build();
+        register_leader_gauge_on(&provider.meter("test"), "weebo_test");
+        let mut out = Vec::new();
+        TextEncoder::new()
+            .encode(&registry.gather(), &mut out)
+            .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("weebo_test_leader "), "{text}");
     }
 }

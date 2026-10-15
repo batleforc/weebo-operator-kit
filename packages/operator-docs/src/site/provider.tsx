@@ -8,7 +8,7 @@ import type { SiteConfig } from "./config";
 export function DocsRootProvider({ children }: { children: ReactNode }) {
   return (
     <RootProvider
-      // `data-theme` is what the BatleHub tokens key off; `class` is what
+      // `data-theme` is what the theme's tokens key off; `class` is what
       // Fumadocs' own `dark:` utilities key off. The stored value is the
       // preference (system|light|dark), resolved before first paint.
       theme={{ attribute: ["class", "data-theme"], defaultTheme: "system", enableSystem: true }}

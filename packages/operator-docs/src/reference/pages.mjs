@@ -289,6 +289,7 @@ Served on every replica, on the admission webhook's HTTPS port
 | Requeue | ${runtime.steady_requeue_secs} s / ${runtime.retry_requeue_secs} s | Next reconcile after a success (drift check) / after a failure, ±20 % so CRs don't move in lockstep. A failure only a change of the CR can clear waits the long delay: the change triggers a reconcile by itself |
 | Status patch | ${runtime.status_retries} retries | A status update the apiserver couldn't take (unavailable, 429, 5xx) is retried before the reconcile fails |
 | \`LEASE_NAME\`, \`POD_NAMESPACE\` | | The leader lease. Only its holder reconciles; it lasts ${runtime.lease_ttl_secs} s, renewed every ${runtime.lease_renew_secs} s, and a leader that may have lost it exits (its pod restarts as a standby) |
+| \`WEEBO_OPERATOR_POD_LABELS\` | set by the chart | The operator pod's own selector labels (a JSON object, \`nameOverride\` applied): what a NetworkPolicy the operator writes selects to let the operator in, when it writes any |
 | \`WEEBO_SHUTDOWN_DRAIN_SECONDS\` | ${runtime.shutdown_drain_secs} | After SIGTERM, how long the webhook keeps answering while endpoints drain; in-flight requests then get ${runtime.graceful_shutdown_secs} s |
 | \`WEBHOOK_TLS_CERT_FILE\`, \`WEBHOOK_TLS_KEY_FILE\` | \`/etc/webhook/certs/tls.{crt,key}\` | The webhook's certificate, re-read every ${runtime.tls_reload_secs} s: a rotation needs no restart |
 `,

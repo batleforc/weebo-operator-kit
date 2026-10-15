@@ -25,4 +25,4 @@ pub use instances::{Instances, Resolved, SharesItself};
 pub use secret_k8s::{K8sSecretStore, MANAGED_BY_LABEL};
 pub use secret_ref::{TokenSecretError, read_local_instance_token, read_secret_key};
 pub use secret_routing::{RoutingSecretStore, VaultResolver};
-pub use secret_vault::{VaultConfig, VaultLogins, VaultSecretStore};
+pub use secret_vault::{CasWrite, PathMetadata, VaultConfig, VaultLogins, VaultSecretStore};

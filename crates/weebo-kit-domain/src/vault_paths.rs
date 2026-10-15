@@ -112,6 +112,11 @@ pub fn normalize(path: &str) -> Result<&str, PathDenied> {
 
 /// `<prefix>/<namespace>/`, or `<namespace>/` with an empty prefix: the
 /// subtree of a namespace's objects.
+///
+/// With an empty prefix every namespace name is a top-level folder of the
+/// mount: a namespace named like a folder holding other values (one a
+/// grant opens, say `shared/`) owns that folder, grant or not. An instance
+/// should only use it on a mount reserved to per-namespace folders.
 pub fn subtree(prefix: &str, namespace: &str) -> String {
     let prefix = prefix.trim_matches('/');
     if prefix.is_empty() {
@@ -268,19 +273,19 @@ mod tests {
     #[test]
     fn patterns_compare_segment_by_segment() {
         let cases = [
-            ("batlehub/auth", "batlehub/auth", true),
-            ("batlehub/auth", "batlehub/auth/x", false),
-            ("batlehub/auth", "batlehub/authx", false),
-            ("+/auth", "batlehub/auth", true),
+            ("shared/auth", "shared/auth", true),
+            ("shared/auth", "shared/auth/x", false),
+            ("shared/auth", "shared/authx", false),
+            ("+/auth", "shared/auth", true),
             ("+/auth", "auth", false),
             ("+/auth", "a/b/auth", false),
-            ("+/auth", "batlehub/auth/x", false),
+            ("+/auth", "shared/auth/x", false),
             ("a/+/c", "a/b/c", true),
             ("a/+/c", "a/b/d", false),
-            ("batlehub/*", "batlehub/auth", true),
-            ("batlehub/*", "batlehub/a/b", true),
-            ("batlehub/*", "batlehub", false),
-            ("batlehub/*", "batlehubx/auth", false),
+            ("shared/*", "shared/auth", true),
+            ("shared/*", "shared/a/b", true),
+            ("shared/*", "shared", false),
+            ("shared/*", "sharedx/auth", false),
             ("+/auth/*", "x/auth/y/z", true),
             ("+/auth/*", "x/auth", false),
         ];
@@ -307,7 +312,7 @@ mod tests {
             };
             assert!(validate(&[grant]).is_err(), "{bad}");
         }
-        let paths = s(&["+/auth", "a/+/c/*", "batlehub/auth"]);
+        let paths = s(&["+/auth", "a/+/c/*", "shared/auth"]);
         let good = PathGrant {
             namespaces: &ns,
             cluster_scoped: false,
@@ -331,7 +336,7 @@ mod tests {
     #[test]
     fn a_namespaced_writer_needs_its_subtree_or_a_grant() {
         let ns = s(&["auth", "team-*"]);
-        let paths = s(&["batlehub/auth", "+/creds"]);
+        let paths = s(&["shared/auth", "+/creds"]);
         let grants = [PathGrant {
             namespaces: &ns,
             cluster_scoped: false,
@@ -344,11 +349,11 @@ mod tests {
         assert!(ok("other", "/weebo/other/ci"));
         assert!(!ok("other", "weebo/other-evil/ci"));
         assert!(!ok("other", "weebo/other/../auth/ci"));
-        assert!(!ok("other", "batlehub/auth"));
-        assert!(ok("auth", "batlehub/auth"));
-        assert!(ok("team-a", "batlehub/auth"));
+        assert!(!ok("other", "shared/auth"));
+        assert!(ok("auth", "shared/auth"));
+        assert!(ok("team-a", "shared/auth"));
         assert!(ok("auth", "x/creds"));
-        assert!(!ok("auth", "batlehub/auth/x"));
+        assert!(!ok("auth", "shared/auth/x"));
         let err = check(
             "weebo",
             &grants,

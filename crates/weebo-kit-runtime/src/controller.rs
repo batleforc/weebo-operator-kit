@@ -169,6 +169,7 @@ pub fn retry_after_error<R: Reason>(
 /// A finalizer's cleanup, unless the CR carries `<domain>/force-orphan:
 /// "true"`; either way the release is announced (`released`, a `Normal`
 /// Event). A failed cleanup is returned: `error_policy` warns on the CR.
+/// [`finalize_with`] with nothing to run on every deletion.
 pub async fn finalize<K, R, E>(
     obj: &K,
     recorder: &Recorder,
@@ -180,18 +181,47 @@ where
     K: Resource<DynamicType = ()>,
     R: Reason,
 {
-    let note = if annotations.force_orphan(obj.meta()) {
+    finalize_with(obj, recorder, annotations, released, cleanup, async {
+        Ok(())
+    })
+    .await
+}
+
+/// [`finalize`], plus `always`: what the operator must undo on every
+/// deletion, force-orphaned or not — what it granted *on the cluster*
+/// for the CR rather than on the remote system (a `ClusterRoleBinding`
+/// given to an instance, a `NetworkPolicy`), which nothing else would
+/// remove once the finalizer is gone. `force-orphan` only means "leave
+/// the remote objects". `always` runs after `cleanup` succeeded (or was
+/// skipped); a failure of either is returned before the release and the
+/// whole finalizer runs again, so both must be idempotent.
+pub async fn finalize_with<K, R, E>(
+    obj: &K,
+    recorder: &Recorder,
+    annotations: &Annotations,
+    released: R,
+    cleanup: impl Future<Output = Result<(), E>>,
+    always: impl Future<Output = Result<(), E>>,
+) -> Result<Action, E>
+where
+    K: Resource<DynamicType = ()>,
+    R: Reason,
+{
+    let orphaned = annotations.force_orphan(obj.meta());
+    if orphaned {
         tracing::warn!(
             kind = %K::kind(&()),
             name = %kube::ResourceExt::name_any(obj),
             "force-orphaned: releasing the finalizer without cleanup"
         );
+    }
+    release(orphaned, cleanup, always).await?;
+    let note = if orphaned {
         format!(
             "force-orphaned ({}): released without cleanup",
             annotations.key(weebo_kit_api::annotations::FORCE_ORPHAN)
         )
     } else {
-        cleanup.await?;
         "cleanup finished, finalizer released".to_string()
     };
     events::announce_change(
@@ -203,6 +233,18 @@ where
     )
     .await;
     Ok(Action::await_change())
+}
+
+/// `cleanup` unless `orphaned`, then `always`.
+async fn release<E>(
+    orphaned: bool,
+    cleanup: impl Future<Output = Result<(), E>>,
+    always: impl Future<Output = Result<(), E>>,
+) -> Result<(), E> {
+    if !orphaned {
+        cleanup.await?;
+    }
+    always.await
 }
 
 #[cfg(test)]
@@ -228,6 +270,60 @@ mod tests {
         // A due time later than the cadence doesn't delay it.
         let steady = requeue_after(true, Some(10_000));
         assert!(!format!("{steady:?}").contains("10000"));
+    }
+
+    #[tokio::test]
+    async fn the_always_hook_runs_even_when_orphaning() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let cleaned = AtomicU32::new(0);
+        let always = AtomicU32::new(0);
+        let run = |orphaned: bool, cleanup_fails: bool| {
+            let (cleaned, always) = (&cleaned, &always);
+            release(
+                orphaned,
+                async move {
+                    cleaned.fetch_add(1, Ordering::SeqCst);
+                    if cleanup_fails {
+                        Err("cleanup")
+                    } else {
+                        Ok(())
+                    }
+                },
+                async move {
+                    always.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+        };
+        run(false, false).await.unwrap();
+        assert_eq!(
+            (
+                cleaned.load(Ordering::SeqCst),
+                always.load(Ordering::SeqCst)
+            ),
+            (1, 1)
+        );
+        // Force-orphaned: no cleanup, the hook still runs.
+        run(true, true).await.unwrap();
+        assert_eq!(
+            (
+                cleaned.load(Ordering::SeqCst),
+                always.load(Ordering::SeqCst)
+            ),
+            (1, 2)
+        );
+        // A failed cleanup stops before the hook (the finalizer runs again).
+        assert_eq!(run(false, true).await, Err("cleanup"));
+        assert_eq!(
+            (
+                cleaned.load(Ordering::SeqCst),
+                always.load(Ordering::SeqCst)
+            ),
+            (2, 2)
+        );
+        // A failed hook is returned too.
+        let failed: Result<(), &str> = release(true, async { Ok(()) }, async { Err("hook") }).await;
+        assert_eq!(failed, Err("hook"));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 import type { ChoiceGroup, Selection } from "./choices";
 
-// A three-or-fewer-way choice drawn the BatleHub way: one 1px bounding box,
+// A three-or-fewer-way choice drawn the design system's way: one 1px bounding box,
 // hairline cell dividers, no gaps, the chosen cell reversed to an ink block,
 // state on `aria-pressed` (DESIGN.md, "Preferences" / segmented groups).
 export function ChoicePicker({

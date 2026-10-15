@@ -175,6 +175,17 @@ par défaut tombent là où une policy templatée sur le namespace les lit.
 C'est une correction de bug : la valeur était acceptée par le schéma mais
 inutilisable.
 
+**Attention (revue du 2026-10-15)** : avec `pathPrefix: ""`, le sous-arbre
+d'un namespace est un dossier de premier niveau du mount. Un namespace qui
+porte le nom d'un dossier existant (`shared`, ou le premier segment d'un
+chemin ouvert par un grant) possède ce dossier : ses objets y écrivent
+sans grant, et peuvent y adopter les valeurs sans owner. Un préfixe vide
+ne convient qu'à un mount réservé aux dossiers par namespace, où personne
+ne peut créer un namespace du nom d'un autre dossier de premier niveau.
+L'avertissement est repris dans la doc de `VaultConfig::path_prefix` et de
+`vault_paths::subtree` ; chaque opérateur le reprend dans la description
+de son champ `pathPrefix`.
+
 ### 3. Owners cluster-scoped
 
 **Constat (kit v0.14.3, authentik 0.17.2, forgejo 0.3.2) :** aucun kind

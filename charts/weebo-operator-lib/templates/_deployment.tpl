@@ -291,6 +291,11 @@ refused by server-side apply).
       fieldPath: metadata.namespace
 - name: LEASE_NAME
   value: {{ include "weebo-operator.leaseName" $ctx | quote }}
+# The operator pod's own selector labels (JSON object, the Deployment's
+# matchLabels): what a NetworkPolicy the operator writes selects to let
+# the operator itself in.
+- name: WEEBO_OPERATOR_POD_LABELS
+  value: {{ include "weebo-operator.selectorLabels" $ctx | fromYaml | toJson | quote }}
 - name: WEBHOOK_PORT
   value: {{ $v.webhook.containerPort | quote }}
 - name: WEEBO_SHUTDOWN_DRAIN_SECONDS
