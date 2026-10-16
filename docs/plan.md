@@ -1450,3 +1450,73 @@ Côté opérateurs (à l'adoption) : remplacer `spawn_reflector` et
 `watchRules` (batlehub : spec §7.1), `record` pour les champs de status
 écrits après un effet distant, `task recu` (description de
 `pathGrants[].paths`), nouvelle somme `sha256` de `tasks/helm.yaml`.
+
+### v0.17.0 — le socle « workload géré » (extrait de weebo-batlehub)
+
+Le quatrième opérateur (weebo-angos) déploie, comme batlehub en mode
+`managed`, le logiciel qu'il pilote. Ce que batlehub portait seul
+(`application::workload`, `pod_safety`, `adapters-outbound::workloads`)
+entre dans le kit, neutre (règle des deux opérateurs : batlehub l'adopte
+dans la même release, angos le prend au M0).
+
+`weebo-kit-application` (pur, types `k8s-openapi` seulement ; nouvelles
+dépendances `serde`, `serde_json`, `sha2`) :
+
+- `workload` : `OwnedObject` (+ `OwnedObject::of(&k8s_obj, create_only)`),
+  `Owner`, `Rollout` (annotations du template au lieu d'un `config_hash`
+  propre à batlehub : `rollout.annotation(KEY)`), `WorkloadError` neutre
+  (`Conflict`, `Kubernetes`, `Refused`, `SecretNotAllowed` : l'opérateur
+  le traduit en ses codes), `Listed`, `PodState`.
+- Ports `OwnedObjects` (`apply`, `remove`, `list`, `secret_text`,
+  `rollout`, `annotate_template` — redémarrage compris —, `pods`,
+  `claim_size`) et `PodLogs` (`read(ns, pod, LogQuery{container, since,
+  limit_bytes})`, lignes horodatées par le kubelet, `parse_timestamped`).
+- Objets nommés par hash : `content_hash`, `hashed_name(base, content)`
+  (`<base>-<8 hex>`), `stale(listed, in_use, keep)` (ce qu'on peut
+  supprimer en gardant les `keep` plus récents pour un `rollout undo`).
+- `OperatorPod` (`named(chart)`, `peer()`), `network_policy(meta,
+  &PolicyRules)` (l'opérateur n'entre que si `operator` est donné et que
+  `ingress_from` n'est pas vide), `restricted_pod_security(uid)`,
+  `restricted_container_security()`.
+- `pod_safety` : allow-list d'images (`parse_allowed_images(setting,
+  defaults)`, `repository`), `violations`, `secret_names`,
+  `pod_templates` (Deployment, StatefulSet, DaemonSet, ReplicaSet, Job,
+  CronJob, Pod), `problems`, `summary`, `secrets_to_check`,
+  `secret_not_labelled(ns, name, label)`. Plus aucun texte ni code propre à
+  un produit : l'opérateur formule le refus.
+- `test_support` : `FakeOwnedObjects`, `FakePodLogs`.
+
+`weebo-kit-adapters` : `KubeOwnedObjects::new(client, WorkloadSettings
+{field_manager, managed_by, owner_api_version, owner_kind,
+credential_label, allowed_images})` (SSA forcé, aucune reprise implicite,
+pods vérifiés avant toute écriture), `is_ours(meta, owner, managed_by)`,
+`kube_error`, `pod_state(&Pod)`, `KubePodLogs` (`pods/log` en `get`).
+Test de contrat `workloads_contract` (wiremock).
+
+`LocalInstances<L>` : l'`InstanceDirectory` d'un opérateur sans kind
+d'instance cluster (le `LocalInstanceDirectory` de batlehub, rendu
+générique) — `resolve` ne partage avec personne, `resolve_with(…,
+sharing)` prend la règle de partage de l'opérateur (le
+`registrySelector` de batlehub, le `repositorySelector` d'angos) ;
+`instances(ns)`, `get(bound)`, `with_store`, `with_scope`. Contrat dans
+`instances_contract`.
+
+`weebo-kit-api` : `AttachNamespaces {from, selector}` et `NamespacesFrom`
+(`Same`/`All`/`Selector`, règle CEL « selector requis avec Selector ») —
+le consentement d'une instance aux objets d'autres namespaces, à la
+manière de `allowedRoutes.namespaces` de la Gateway API ; `shared_with()`
+le traduit en `SharedWith` pour `LocalInstances::resolve_with`. Ajout seul
+(le `RegistryNamespaces` de batlehub en devient un alias, CRD inchangés).
+
+`weebo-kit-runtime` : `pod::operator_pod(chart)` (labels du chart ou
+repli sur `app.kubernetes.io/name=<chart>` avec un avertissement, et
+`POD_NAMESPACE`).
+
+Rien ne casse pour forgejo et authentik (ajouts seulement). Côté batlehub
+(adopté) : `ports` réexporte les types du kit et traduit par
+`workload_reason(&e)` ; `Workloads: OwnedObjects` ne garde que le jeton
+de l'opérateur, la liaison TokenReview et `restart` (par défaut, sur
+`annotate_template`) ; `KubeWorkloads` délègue à `KubeOwnedObjects` ;
+`FakeWorkloads` enveloppe `FakeOwnedObjects` ; `OperatorPod::default()` →
+`OperatorPod::named(OPERATOR_CHART)` ; `LocalInstanceDirectory` enveloppe
+`LocalInstances`.

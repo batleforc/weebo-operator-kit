@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use weebo_kit_application::workload::OperatorPod;
+
 /// The operator pod's selector labels, a JSON object of strings (the
 /// chart's `weebo-operator.selectorLabels`, `nameOverride` applied).
 pub const POD_LABELS_ENV: &str = "WEEBO_OPERATOR_POD_LABELS";
@@ -28,6 +30,23 @@ pub fn own_namespace() -> Option<String> {
     std::env::var(POD_NAMESPACE_ENV)
         .ok()
         .filter(|ns| !ns.is_empty())
+}
+
+/// The operator's own pods ([`own_labels`], [`own_namespace`]). Unset (run
+/// outside the chart), the chart's default selector label for `chart` —
+/// said once, a `nameOverride` would leave the operator out.
+pub fn operator_pod(chart: &str) -> Result<OperatorPod, String> {
+    let mut operator = OperatorPod::named(chart);
+    match own_labels()? {
+        Some(labels) => operator.labels = labels,
+        None => tracing::warn!(
+            fallback = ?operator.labels,
+            "{POD_LABELS_ENV} is unset: a NetworkPolicy the operator writes lets in the \
+             operator pods by this label, which a chart nameOverride would not match"
+        ),
+    }
+    operator.namespace = own_namespace();
+    Ok(operator)
 }
 
 fn parse_labels(raw: &str) -> Result<BTreeMap<String, String>, String> {

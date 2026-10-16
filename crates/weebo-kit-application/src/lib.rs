@@ -1,12 +1,15 @@
-//! Port traits and use-case helpers shared by every weebo operator. Like
+//! Port traits and use-case helpers shared by every weebo operator
+//! (secret stores, instances, the workload of a managed instance). Like
 //! each operator's own `application` crate: no concrete adapter, no
 //! Kubernetes client — adapters live in `weebo-kit-adapters`.
 
 pub mod emit;
 pub mod instances;
+pub mod pod_safety;
 pub mod ports;
 pub mod refs;
 pub mod sharing;
+pub mod workload;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

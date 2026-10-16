@@ -4043,6 +4043,9 @@ version = "0.16.0"
 dependencies = [
  "async-trait",
  "k8s-openapi",
+ "serde",
+ "serde_json",
+ "sha2",
  "thiserror 2.0.21",
  "tokio",
  "weebo-kit-api",
