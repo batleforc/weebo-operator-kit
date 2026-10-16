@@ -4,7 +4,7 @@ description: Library chart shared by the weebo operators' charts (Deployment, RB
 type: library
 # The kit's workspace version (.hooks/bump-versions.sh), published to
 # oci://ghcr.io/batleforc/charts by .github/workflows/release.yml.
-version: 0.16.0
+version: 0.17.0
 home: https://github.com/batleforc/weebo-operator-kit
 sources:
   - https://github.com/batleforc/weebo-operator-kit

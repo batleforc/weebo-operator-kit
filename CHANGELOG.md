@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.17.0](https://github.com/batleforc/weebo-operator-kit/compare/e23c8051aa947ad572e37e950245ea5c769134d4..v0.17.0) - 2026-10-16
+#### Features
+- managed workload core, LocalInstances and AttachNamespaces (v0.17.0) (#6) - ([e23c805](https://github.com/batleforc/weebo-operator-kit/commit/e23c8051aa947ad572e37e950245ea5c769134d4)) - Maxime, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5
+
+- - -
+
 ## [v0.16.0](https://github.com/batleforc/weebo-operator-kit/compare/17205022d8f40d9e01e5600fb7245419613514cd..v0.16.0) - 2026-10-15
 #### Features
 - vault CAS claims, admission parity and shared operator helpers (review 2026-10-15) (#5) - ([1720502](https://github.com/batleforc/weebo-operator-kit/commit/17205022d8f40d9e01e5600fb7245419613514cd)) - Maxime, Claude Opus 5.5
