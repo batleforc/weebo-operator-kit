@@ -136,9 +136,82 @@ pub struct SharedWith {
     pub cluster_scoped: bool,
 }
 
+/// The namespaces whose objects may attach to an instance (with an
+/// `instanceRef` naming it), as the Gateway API's
+/// `allowedRoutes.namespaces`: the consent of the instance's owner. Its own
+/// namespace always.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(extend("x-kubernetes-validations" = [
+    {"rule": "self.from != 'Selector' || has(self.selector)", "message": "namespaces.selector is required with from: Selector"}
+]))]
+pub struct AttachNamespaces {
+    /// `Same` (the instance's namespace), `All`, or `Selector`.
+    #[serde(default)]
+    pub from: NamespacesFrom,
+    /// The labels of the namespaces accepted, with `from: Selector`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<LabelSelector>,
+}
+
+impl AttachNamespaces {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// As a [`SharedWith`] for the kit's resolution: `Same`, none; `All`,
+    /// an empty selector; `Selector`, that one (none without it).
+    pub fn shared_with(&self) -> Option<SharedWith> {
+        let selector = match self.from {
+            NamespacesFrom::Same => return None,
+            NamespacesFrom::All => LabelSelector::default(),
+            NamespacesFrom::Selector => self.selector.clone()?,
+        };
+        Some(SharedWith {
+            namespace_selector: Some(selector),
+            ..Default::default()
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, JsonSchema)]
+pub enum NamespacesFrom {
+    #[default]
+    Same,
+    All,
+    Selector,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attaching_namespaces_is_a_sharing() {
+        let from = |from, selector| AttachNamespaces { from, selector };
+        assert_eq!(from(NamespacesFrom::Same, None).shared_with(), None);
+        assert_eq!(
+            from(NamespacesFrom::All, None)
+                .shared_with()
+                .unwrap()
+                .namespace_selector,
+            Some(LabelSelector::default())
+        );
+        let selector = LabelSelector {
+            match_labels: Some([("team".to_string(), "a".to_string())].into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            from(NamespacesFrom::Selector, Some(selector.clone()))
+                .shared_with()
+                .unwrap()
+                .namespace_selector,
+            Some(selector)
+        );
+        // CEL requires the selector; without it, nothing is shared.
+        assert_eq!(from(NamespacesFrom::Selector, None).shared_with(), None);
+        assert!(AttachNamespaces::default().is_default());
+    }
 
     #[test]
     fn a_name_only_ref_serializes_as_a_name_only_object() {

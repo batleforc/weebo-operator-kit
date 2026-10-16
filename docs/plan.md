@@ -1493,6 +1493,21 @@ pods vérifiés avant toute écriture), `is_ours(meta, owner, managed_by)`,
 `kube_error`, `pod_state(&Pod)`, `KubePodLogs` (`pods/log` en `get`).
 Test de contrat `workloads_contract` (wiremock).
 
+`LocalInstances<L>` : l'`InstanceDirectory` d'un opérateur sans kind
+d'instance cluster (le `LocalInstanceDirectory` de batlehub, rendu
+générique) — `resolve` ne partage avec personne, `resolve_with(…,
+sharing)` prend la règle de partage de l'opérateur (le
+`registrySelector` de batlehub, le `repositorySelector` d'angos) ;
+`instances(ns)`, `get(bound)`, `with_store`, `with_scope`. Contrat dans
+`instances_contract`.
+
+`weebo-kit-api` : `AttachNamespaces {from, selector}` et `NamespacesFrom`
+(`Same`/`All`/`Selector`, règle CEL « selector requis avec Selector ») —
+le consentement d'une instance aux objets d'autres namespaces, à la
+manière de `allowedRoutes.namespaces` de la Gateway API ; `shared_with()`
+le traduit en `SharedWith` pour `LocalInstances::resolve_with`. Ajout seul
+(le `RegistryNamespaces` de batlehub en devient un alias, CRD inchangés).
+
 `weebo-kit-runtime` : `pod::operator_pod(chart)` (labels du chart ou
 repli sur `app.kubernetes.io/name=<chart>` avec un avertissement, et
 `POD_NAMESPACE`).
@@ -1503,4 +1518,5 @@ Rien ne casse pour forgejo et authentik (ajouts seulement). Côté batlehub
 de l'opérateur, la liaison TokenReview et `restart` (par défaut, sur
 `annotate_template`) ; `KubeWorkloads` délègue à `KubeOwnedObjects` ;
 `FakeWorkloads` enveloppe `FakeOwnedObjects` ; `OperatorPod::default()` →
-`OperatorPod::named(OPERATOR_CHART)`.
+`OperatorPod::named(OPERATOR_CHART)` ; `LocalInstanceDirectory` enveloppe
+`LocalInstances`.

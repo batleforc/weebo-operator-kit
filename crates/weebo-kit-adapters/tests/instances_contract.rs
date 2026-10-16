@@ -7,7 +7,7 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use weebo_kit_adapters::{Instances, SharesItself};
+use weebo_kit_adapters::{Instances, LocalInstances, SharesItself};
 use weebo_kit_api::{BoundInstance, InstanceRef, SharedWith};
 use weebo_kit_application::instances::{InstanceDirectory, InstanceError, ResolveError};
 use wiremock::matchers::{method, path};
@@ -196,4 +196,70 @@ async fn an_unreadable_kind_is_a_kubernetes_error() {
         d.resolve(Some("team-a"), None, None).await,
         Err(InstanceError::Kubernetes(_))
     ));
+}
+
+fn local_only(server: &MockServer) -> LocalInstances<ExampleLocalInstance> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let config = kube::Config::new(server.uri().parse().unwrap());
+    LocalInstances::new(kube::Client::try_from(config).unwrap())
+}
+
+#[tokio::test]
+async fn a_local_only_directory_never_reads_a_cluster_kind() {
+    let server = api(&["prod"], &[("team-a", "own", json!(null))]).await;
+    let d = local_only(&server);
+    assert_eq!(
+        d.resolve(Some("team-a"), None, None).await,
+        Ok(BoundInstance::local("team-a", "own"))
+    );
+    assert_eq!(
+        d.get(&BoundInstance::local("team-a", "own"))
+            .await
+            .unwrap()
+            .map(|i| i.spec.url),
+        Some("https://example.test".to_string())
+    );
+    let cluster_reads = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path() == "/apis/example.weebo.io/v1/exampleinstances")
+        .count();
+    assert_eq!(cluster_reads, 0);
+}
+
+#[tokio::test]
+async fn a_local_only_directory_shares_as_the_operator_says() {
+    let server = api(&[], &[("team-b", "shared", json!(null))]).await;
+    let d = local_only(&server);
+    let r = InstanceRef {
+        name: "shared".into(),
+        kind: None,
+        namespace: Some("team-b".into()),
+    };
+    // `resolve` shares with no one.
+    assert!(matches!(
+        d.resolve(Some("team-a"), Some(&r), None).await,
+        Err(InstanceError::Resolve(ResolveError::NotShared { .. }))
+    ));
+    // Shared with every namespace by the operator's own rule.
+    let everyone = |_: &ExampleLocalInstance| {
+        Some(SharedWith {
+            namespace_selector: Some(Default::default()),
+            ..Default::default()
+        })
+    };
+    Mock::given(method("GET"))
+        .and(path("/api/v1/namespaces/team-a"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "team-a"},
+        })))
+        .mount(&server)
+        .await;
+    assert_eq!(
+        d.resolve_with(Some("team-a"), Some(&r), None, everyone)
+            .await,
+        Ok(BoundInstance::local("team-b", "shared"))
+    );
 }
