@@ -1,6 +1,6 @@
 [package]
 name = "weebo-kit-application"
-description = "Port traits and use-case helpers shared by the weebo operators (secret stores)"
+description = "Port traits and use-case helpers shared by the weebo operators (secret stores, managed workloads)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,10 +13,15 @@ weebo-kit-api = { workspace = true }
 k8s-openapi = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+# Owned objects as manifests (`OwnedObject::of`), the hash of a content.
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
 
 [features]
-# Exposes `test_support` (in-memory secret store) to other crates' tests.
+# Exposes `test_support` (in-memory secret store, owned objects, pod logs)
+# to other crates' tests.
 test-support = []
