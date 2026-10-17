@@ -30,9 +30,15 @@ In the operator's `docs/package.json`:
 "@weebo/operator-docs": "https://github.com/batleforc/weebo-operator-kit/releases/download/vX.Y.Z/weebo-operator-docs-X.Y.Z.tgz"
 ```
 
-Its peers are pinned: the site must use the same `fumadocs-core`,
-`fumadocs-ui`, `fumadocs-mdx` and `next` versions (see `peerDependencies`).
-Moving them is a kit release, like moving `kube` for the crates.
+Its `fumadocs-core`, `fumadocs-ui`, `fumadocs-mdx` and `next` peers are
+caret ranges (see `peerDependencies`): a site takes a security fix of Next
+or Fumadocs within the major without waiting for a kit release. Raising a
+range's floor or moving to a new major is a kit release, like moving `kube`
+for the crates; `devDependencies` pin each floor, which `task docs:check`
+type-checks against.
+
+A site managed by pnpm sets `NPM_CLIENT: pnpm` on its `kit:` include, so
+`task kit:sync` refreshes `pnpm-lock.yaml` instead of `package-lock.json`.
 
 To iterate on the package and a site together, point the site at a sibling
 checkout and install it as a copy, not a symlink (a symlinked package would
@@ -302,7 +308,7 @@ already do).
 ## Developing the package
 
 ```bash
-task docs:check   # version in step with the workspace, tsc against the pinned peers, generator tests
+task docs:check   # version in step with the workspace, tsc against the peers' floors, generator tests
 task docs:pack    # dist/weebo-operator-docs-<version>.tgz, what the release attaches
 ```
 

@@ -25,8 +25,9 @@ read it before any non-trivial change.
   docs-site format: CRD page generator, manifest builder, theme, layout,
   routes. Same naming rule (what varies is `defineSite`, the generator's
   config or `CrdChoices`); its version is the workspace's
-  (`.hooks/bump-versions.sh`); its `fumadocs-*`/`next` peers are pinned,
-  moving them is a release. Its reference pages (reason codes, Events,
+  (`.hooks/bump-versions.sh`); its `fumadocs-*`/`next` peers are caret
+  ranges whose floors the `devDependencies` pin; raising a floor or a major
+  is a release. Its reference pages (reason codes, Events,
   metrics, budget) quote kit values from copies in `src/reference/*.json`:
   changing a runtime constant or `Budget::small_cluster()` means updating
   them (tests in `weebo-kit-runtime`/`weebo-kit-perf` fail otherwise). See
