@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.18.0](https://github.com/batleforc/weebo-operator-kit/compare/c335330248add08cfcdd53fdde9e07b46ef90d98..v0.18.0) - 2026-10-18
+#### Features
+- ![BREAKING](https://img.shields.io/badge/BREAKING-red) write only what differs — drift helpers, remote_writes_total, DriftCorrected; RFC 0001 moved here (#7) - ([08b2208](https://github.com/batleforc/weebo-operator-kit/commit/08b220873c72d01738c12a850564c9966b24f480)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+- setup wksa - ([3cbf319](https://github.com/batleforc/weebo-operator-kit/commit/3cbf31983b18af00920214651503f61a624d7877)) - Max Batleforc
+- add devfile - ([2e6a942](https://github.com/batleforc/weebo-operator-kit/commit/2e6a942dc2e5ac229141a6dd9122d1aa43fa15cf)) - Max Batleforc
+- ranged docs peers, NPM_CLIENT for kit:sync, KIT_TAG fallback - ([c335330](https://github.com/batleforc/weebo-operator-kit/commit/c335330248add08cfcdd53fdde9e07b46ef90d98)) - Max Batleforc, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.17.0](https://github.com/batleforc/weebo-operator-kit/compare/e23c8051aa947ad572e37e950245ea5c769134d4..v0.17.0) - 2026-10-16
 #### Features
 - managed workload core, LocalInstances and AttachNamespaces (v0.17.0) (#6) - ([e23c805](https://github.com/batleforc/weebo-operator-kit/commit/e23c8051aa947ad572e37e950245ea5c769134d4)) - Maxime, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5
