@@ -34,7 +34,7 @@ And what the operators kept copying around the code:
 | `tasks/{rust,helm,repo}.yaml`                              | Shared Taskfiles, included remotely and pinned by checksum: lint, audit, coverage, doctor, chart lint/CRDs |
 | `.github/workflows/checks.yml`                             | Reusable CI: lint, test, audit, chart lint (`perf.yml`: the weekly resource budget)        |
 | `templates/operator`                                       | `cargo-generate` template of a new operator, wired on all of the above                     |
-| `templates/{cog.toml,kit.yaml,pin-kit.sh}`                 | `cog.toml`, `task kit:cog` and `task kit:sync TAG=vX.Y.Z` (every pin on a kit release)     |
+| `templates/{cog.toml,kit.yaml,pin-kit.sh}`                 | `cog.toml`, `task kit:cog` and `task kit:sync TAG=vX.Y.Z` (every pin on a kit release; a repository without a kit crate pins `KIT_TAG` in its Taskfile, a pnpm docs site sets `NPM_CLIENT: pnpm`) |
 
 Design, scope rules, versioning and the migration roadmap:
 [`docs/plan.md`](docs/plan.md).

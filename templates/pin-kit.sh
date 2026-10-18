@@ -3,7 +3,8 @@
 # onto one release:
 #   - Cargo.toml: the kit crates' `tag = "vX.Y.Z"`;
 #   - Taskfile.yaml: the remote includes of tasks/ (URL tag and `checksum:`,
-#     the sha256 Task verifies);
+#     the sha256 Task verifies), and its `KIT_TAG:` variable (the pin of a
+#     repository without a kit crate);
 #   - .github/workflows/: the kit's reusable workflows (`@vX.Y.Z`);
 #   - deploy/charts/*/Chart.yaml: the weebo-operator-lib dependency version
 #     (Chart.lock follows with `helm dependency update`);
@@ -51,6 +52,7 @@ fi
 tf="$dir/Taskfile.yaml"
 if [ -f "$tf" ]; then
     sed -i -E "s|($raw/)[^/]+(/tasks/)|\1$tag\2|" "$tf"
+    sed -i -E "s|^( +KIT_TAG: *\"?)v[0-9]+\.[0-9]+\.[0-9]+|\1$tag|" "$tf"
     # name=sha256 of every tasks/ file the Taskfile includes.
     sums=""
     names="$(sed -n -E "s|.*$raw/[^/]+/tasks/([A-Za-z0-9_-]+)\.yaml.*|\1|p" "$tf" | sort -u)"

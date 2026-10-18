@@ -382,8 +382,10 @@ sources TypeScript compilées par le site (`transpilePackages`) :
   restent dans le layout racine de l'opérateur (`next/font`), le thème les
   lit par `--font-silkscreen`/`--font-jetbrains-mono`. Le style des
   diagrammes (`diagram-style`) aussi.
-- Versions alignées sur forgejo : fumadocs-core/ui 16.16.2, fumadocs-mdx
-  15.4.6, next 16.4.0, react 19.3, en `peerDependencies` épinglées.
+- Versions alignées sur forgejo : fumadocs-core/ui ^16.16.2, fumadocs-mdx
+  ^15.4.6, next ^16.4.1, react 19.3, en `peerDependencies` par plages (un
+  correctif de sécurité de Next n'attend pas une release du kit) ; les
+  `devDependencies` épinglent les planchers.
 - `task docs:check` (version = workspace, `tsc` contre les peers, tests du
   générateur, dans la CI) et `task docs:pack` ; `task audit` audite les
   dépendances du paquet.
