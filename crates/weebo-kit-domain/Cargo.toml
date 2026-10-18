@@ -1,6 +1,6 @@
 [package]
 name = "weebo-kit-domain"
-description = "Pure building blocks shared by the weebo operators: reason codes, failures, the namespace allow-list"
+description = "Pure building blocks shared by the weebo operators: reason codes, failures, the namespace allow-list, drift comparison"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

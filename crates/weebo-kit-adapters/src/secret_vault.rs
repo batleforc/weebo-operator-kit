@@ -308,14 +308,14 @@ impl VaultSecretStore {
 
     /// KV v2 `set` creates a new version even for identical data, so the
     /// current document is compared first: steady-state reconciles never
-    /// churn the version history.
+    /// churn the version history. `true` when a new version was written.
     pub async fn write_path(
         &self,
         path: &str,
         data: &BTreeMap<String, String>,
-    ) -> Result<(), SecretStoreError> {
+    ) -> Result<bool, SecretStoreError> {
         if self.read_path(path).await.ok().flatten().as_ref() == Some(data) {
-            return Ok(());
+            return Ok(false);
         }
         // Each guard is scoped to its call: `relogin` takes the write lock.
         self.with_relogin(|| async {
@@ -323,7 +323,7 @@ impl VaultSecretStore {
             kv2::set(&*client, &self.mount, path, data).await
         })
         .await?
-        .map(|_| ())
+        .map(|_| true)
         .map_err(|e| SecretStoreError(format!("Vault write {path}: {e}")))
     }
 

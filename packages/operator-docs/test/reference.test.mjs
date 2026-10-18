@@ -25,6 +25,7 @@ test("the reason_codes! catalog: codes, docs, severities, success", () => {
       "NotAllowed:Blocking",
       "MemberPending:Advisory",
       "Created:Advisory",
+      "DriftCorrected:Advisory",
       "Released:Advisory",
       "KubernetesApiError:Blocking",
     ],
@@ -39,7 +40,10 @@ test("the reason_codes! catalog: codes, docs, severities, success", () => {
 
 test("how the code uses it, tests left out", () => {
   assert.deepEqual([...usage.denials], ["NotAllowed"]);
-  assert.deepEqual([...usage.lifecycle], [["Created", "Reconcile"]]);
+  assert.deepEqual([...usage.lifecycle], [
+    ["Created", "Reconcile"],
+    ["DriftCorrected", "Reconcile"],
+  ]);
   assert.deepEqual([...usage.released], ["Released"]);
   assert.deepEqual([...usage.errors.keys()], ["KubernetesApiError", "Unreachable"]);
   // Unreachable is also a Failure: it reaches a condition.
@@ -121,9 +125,11 @@ test("the four reference pages, from the operator's sources", () => {
   const events = read("events.mdx");
   assert.match(events, /`example\.weebo\.io\/force-orphan: "true"`/);
   assert.match(events, /\| The remote object was created\. \| `Normal` \| `Created` \| `Reconcile` \|/);
+  assert.match(events, /\| `DriftCorrected` \| `Reconcile` \| the fields put back \|/);
   assert.match(events, /`KubernetesApiError`, `Unreachable`/);
   const metrics = read("metrics.mdx");
   assert.match(metrics, /`weebo_example_reconcile_total`/);
+  assert.match(metrics, /`weebo_example_remote_writes_total` \| counter \| `kind`, `cause`/);
   assert.match(metrics, /`weebo_example_leader`/);
   assert.match(metrics, /`weebo_example_remote_calls` \| counter \| `op`/);
   const budget = read("resource-budget.mdx");

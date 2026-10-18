@@ -96,7 +96,10 @@ pub trait SecretStore: Send + Sync {
     /// Backend of the implicit target used when a CR lists none (the
     /// instance's `spec.secretStore.backend`).
     fn default_backend(&self) -> SecretStoreBackend;
-    /// Fails when the target holds a value of another owner.
+    /// Fails when the target holds a value of another owner. A target
+    /// already holding `data` for `owner` is left untouched — no new
+    /// `resourceVersion`, no new KV version: callers may write on every
+    /// reconcile, a credential is only rewritten when it changed.
     async fn write(
         &self,
         target: &SecretTarget,

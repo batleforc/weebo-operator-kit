@@ -71,7 +71,8 @@ spec:
 
 {{/*
 The kit's alerts on the kit's metrics (`<prefix>_reconcile_total`,
-`<prefix>_reconcile_duration_seconds`, `<prefix>_leader`), prefix and
+`<prefix>_reconcile_duration_seconds`, `<prefix>_remote_writes_total`,
+`<prefix>_leader`), prefix and
 alert names from the chart name; params.alerts appends the operator's own
 (a list of rules), before prometheusRule.additionalRules.
 
@@ -98,6 +99,7 @@ alerts would fire forever: refused.
 {{- $reconcile := printf "{__name__=~\"%s_reconcile(_total)*\", %s" $m $sel -}}
 {{- $leader := printf "{__name__=~\"%s_leader(_ratio)?\", %s}" $m $sel -}}
 {{- $duration := printf "{__name__=~\"%s_reconcile_duration(_seconds)*_bucket\", %s}" $m $sel -}}
+{{- $writes := printf "{__name__=~\"%s_remote_writes(_total)*\", %s, cause=\"drift\"}" $m $sel -}}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -159,6 +161,16 @@ spec:
           annotations:
             summary: {{`'p99 reconcile of {{ $labels.kind }} above 60s'`}}
             description: The remote system answers slowly, or reconciles queue up.
+        - alert: {{ $a }}RepeatedDrift
+          # A real drift is corrected in one pass; a field the comparison
+          # gets wrong (a value the remote system stores normalized) is
+          # rewritten on every reconcile, ~6 times in 30 minutes.
+          expr: sum by (kind) (increase({{ $writes }}[30m])) > 3
+          labels:
+            severity: warning
+          annotations:
+            summary: {{`'{{ $labels.kind }} objects rewritten on every reconcile'`}}
+            description: {{`'Look for DriftCorrected Events on {{ $labels.kind }} naming the same field each time: a comparison to fix, not a drift.'`}}
         {{- with $p.alerts }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

@@ -3,7 +3,7 @@
 //! Rewrite it along with the gateway when moving to the real API.
 
 use adapters_outbound::HttpGateway;
-use application::ports::{GatewayError, RemoteGateway, RemoteObject};
+use application::ports::{GatewayError, ObjectPatch, RemoteGateway, RemoteObject};
 use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -37,7 +37,43 @@ async fn ping_sends_the_bearer_token() {
 }
 
 #[tokio::test]
-async fn ensure_puts_the_object_and_returns_its_id() {
+async fn read_returns_the_object_or_none() {
+    let (server, gateway) = setup().await;
+    Mock::given(method("GET"))
+        .and(path("/api/objects/docs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"id": "42", "name": "docs", "description": "example"}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/objects/gone"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let read = gateway.read("docs").await.unwrap().unwrap();
+    assert_eq!((read.id.as_str(), read.object), ("42", object()));
+    assert_eq!(gateway.read("gone").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn update_sends_only_the_fields_of_the_patch() {
+    let (server, gateway) = setup().await;
+    Mock::given(method("PATCH"))
+        .and(path("/api/objects/docs"))
+        .and(body_json(serde_json::json!({"description": "example"})))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let patch = ObjectPatch {
+        description: Some("example".into()),
+    };
+    gateway.update("docs", &patch).await.unwrap();
+}
+
+#[tokio::test]
+async fn create_puts_the_object_and_returns_its_id() {
     let (server, gateway) = setup().await;
     Mock::given(method("PUT"))
         .and(path("/api/objects/docs"))
@@ -48,7 +84,7 @@ async fn ensure_puts_the_object_and_returns_its_id() {
         .expect(1)
         .mount(&server)
         .await;
-    assert_eq!(gateway.ensure(&object()).await.unwrap(), "42");
+    assert_eq!(gateway.create(&object()).await.unwrap(), "42");
 }
 
 #[tokio::test]
@@ -104,7 +140,7 @@ async fn an_unexpected_answer_is_an_api_error() {
         .mount(&server)
         .await;
     assert!(matches!(
-        gateway.ensure(&object()).await,
+        gateway.create(&object()).await,
         Err(GatewayError::Api(_))
     ));
 }

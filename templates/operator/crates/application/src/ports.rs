@@ -37,10 +37,27 @@ impl GatewayError {
     }
 }
 
-/// The desired state of a remote object, as the gateway sends it.
+/// A remote object: the desired state the gateway creates, or the one it
+/// reads back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteObject {
     pub name: String,
+    /// Desired: `None` is no opinion, the remote value is left alone.
+    pub description: Option<String>,
+}
+
+/// A remote object as read: its identifier and its current state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Remote {
+    pub id: String,
+    pub object: RemoteObject,
+}
+
+/// The fields of an update: `None` is not sent. Built from the desired
+/// state with every field already holding its value removed
+/// (`domain::Drift`), so an update only carries what drifted.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ObjectPatch {
     pub description: Option<String>,
 }
 
@@ -53,9 +70,12 @@ pub struct RemoteObject {
 pub trait RemoteGateway: Send + Sync {
     /// Whether the instance answers and accepts the token.
     async fn ping(&self) -> Result<(), GatewayError>;
-    /// Creates the object, or updates the one of that name; returns its
-    /// remote identifier. Idempotent.
-    async fn ensure(&self, object: &RemoteObject) -> Result<String, GatewayError>;
+    /// The object `name`, `None` when there is none.
+    async fn read(&self, name: &str) -> Result<Option<Remote>, GatewayError>;
+    /// Creates the object; returns its remote identifier.
+    async fn create(&self, object: &RemoteObject) -> Result<String, GatewayError>;
+    /// Sends the fields of `patch` (only those) to the object `name`.
+    async fn update(&self, name: &str, patch: &ObjectPatch) -> Result<(), GatewayError>;
     /// Deletes the object `name`; `NotFound` when it is already gone.
     async fn delete(&self, name: &str) -> Result<(), GatewayError>;
 }

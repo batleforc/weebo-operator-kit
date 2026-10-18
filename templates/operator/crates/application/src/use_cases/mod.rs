@@ -5,8 +5,8 @@
 pub mod reconcile_instance;
 pub mod reconcile_object;
 
-use domain::Failure;
 use domain::error::ReasonCode;
+use domain::{Drift, Failure, RemoteWrite};
 
 use crate::ports::{
     BoundInstance, GatewayError, GatewayFactoryError, InstanceError, instance_reason,
@@ -39,6 +39,12 @@ pub struct Outcome {
     pub instance: Option<BoundInstance>,
     /// `Ok(message)` for `Ready: True`.
     pub ready: Result<String, Failure>,
+    /// The write this reconcile made to {{product}}, if any — counted in
+    /// `<prefix>_remote_writes_total`. `None` when everything was in sync.
+    pub write: Option<RemoteWrite>,
+    /// The fields put back in their desired state (a `DriftCorrected`
+    /// Event names them).
+    pub drift: Drift,
 }
 
 impl Outcome {
@@ -47,6 +53,8 @@ impl Outcome {
             remote_id,
             instance: None,
             ready: Ok(message.into()),
+            write: None,
+            drift: Drift::default(),
         }
     }
 
@@ -55,7 +63,22 @@ impl Outcome {
             remote_id: None,
             instance: None,
             ready: Err(failure.into()),
+            write: None,
+            drift: Drift::default(),
         }
+    }
+
+    /// Records a write to {{product}}.
+    pub fn wrote(mut self, write: RemoteWrite) -> Self {
+        self.write = Some(write);
+        self
+    }
+
+    /// Records the fields a drift correction wrote.
+    pub fn corrected(mut self, drift: Drift) -> Self {
+        self.write = Some(RemoteWrite::Drift);
+        self.drift = drift;
+        self
     }
 
     /// Records the instance the CR is bound to.

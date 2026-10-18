@@ -1,11 +1,20 @@
-//! A `{{product}}Object`: the remote object is created or updated on every
-//! reconcile (the gateway's `ensure` is idempotent), and deleted by the
-//! finalizer when this CR created it.
+//! A `{{product}}Object`: the remote object is read, compared with the
+//! spec and written only when it differs — created when missing, updated
+//! with the drifted fields only, left alone when in sync (a remote system
+//! records every write: rewriting an unchanged object on every requeue
+//! floods it for nothing). Deleted by the finalizer when this CR created
+//! it.
+//!
+//! Compare to the form {{product}} **stores**: a server that trims a text
+//! or completes a map with defaults needs the same normalization in the
+//! comparison (`domain::drift::same_trimmed`, `same_subset`, through
+//! `Drift::keep_with`), or the field drifts on every reconcile. Each such
+//! normalization gets its test: the value read back normalized, no write.
 
 use api::Object;
-use domain::Failure;
+use domain::{Drift, Failure, RemoteWrite};
 
-use crate::ports::{GatewayError, RemoteGateway, RemoteObject};
+use crate::ports::{GatewayError, ObjectPatch, RemoteGateway, RemoteObject};
 use crate::use_cases::Outcome;
 
 /// The desired remote state of `object`.
@@ -16,10 +25,38 @@ pub fn desired(object: &Object) -> RemoteObject {
     }
 }
 
+/// The update `remote` needs to reach `desired`: every field already
+/// holding its desired value left out, the drifted ones named.
+pub fn patch(desired: &RemoteObject, remote: &RemoteObject) -> (ObjectPatch, Drift) {
+    let mut patch = ObjectPatch {
+        description: desired.description.clone(),
+    };
+    let mut drift = Drift::default();
+    drift.keep_opt("description", &mut patch.description, &remote.description);
+    (patch, drift)
+}
+
 pub async fn reconcile_object(object: &Object, gateway: &dyn RemoteGateway) -> Outcome {
     let desired = desired(object);
-    match gateway.ensure(&desired).await {
-        Ok(id) => Outcome::synced(Some(id), format!("{:?} synced", desired.name)),
+    let remote = match gateway.read(&desired.name).await {
+        Ok(remote) => remote,
+        Err(e) => return Outcome::failed(e),
+    };
+    let Some(remote) = remote else {
+        return match gateway.create(&desired).await {
+            Ok(id) => Outcome::synced(Some(id), format!("{:?} created", desired.name))
+                .wrote(RemoteWrite::Created),
+            Err(e) => Outcome::failed(e),
+        };
+    };
+    let (patch, drift) = patch(&desired, &remote.object);
+    if drift.is_empty() {
+        return Outcome::synced(Some(remote.id), format!("{:?} in sync", desired.name));
+    }
+    match gateway.update(&desired.name, &patch).await {
+        Ok(()) => {
+            Outcome::synced(Some(remote.id), format!("{:?} synced", desired.name)).corrected(drift)
+        }
         Err(e) => Outcome::failed(e),
     }
 }
@@ -62,21 +99,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reconcile_creates_then_updates_in_place() {
+    async fn creates_then_stays_quiet_until_drift() {
         let gateway = FakeGateway::default();
         let first = reconcile_object(&object("docs"), &gateway).await;
         assert_eq!(first.reason(), ReasonCode::Reconciled);
+        assert_eq!(first.write, Some(RemoteWrite::Created));
         let id = first.remote_id.clone().expect("an id is recorded");
-        assert_eq!(
-            gateway.get("docs").and_then(|o| o.description),
-            Some("example".into())
-        );
+        assert_eq!(gateway.writes(), ["create docs"]);
 
-        let mut changed = object("docs");
-        changed.spec.description = None;
-        let second = reconcile_object(&changed, &gateway).await;
-        assert_eq!(second.remote_id, Some(id));
-        assert_eq!(gateway.get("docs").unwrap().description, None);
+        // Nothing changed: reads only.
+        gateway.clear_writes();
+        let quiet = reconcile_object(&object("docs"), &gateway).await;
+        assert_eq!(quiet.remote_id, Some(id.clone()));
+        assert_eq!((quiet.write, quiet.drift.is_empty()), (None, true));
+        assert!(gateway.writes().is_empty(), "{:?}", gateway.writes());
+
+        // Changed on the remote side: put back, that field only.
+        gateway.edit("docs", |o| o.description = Some("by hand".into()));
+        let corrected = reconcile_object(&object("docs"), &gateway).await;
+        assert_eq!(corrected.write, Some(RemoteWrite::Drift));
+        assert_eq!(corrected.drift.fields(), ["description"]);
+        assert_eq!(corrected.remote_id, Some(id));
+        assert_eq!(gateway.writes(), ["update docs [description]"]);
+        assert_eq!(
+            gateway.get("docs").unwrap().description.as_deref(),
+            Some("example")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_field_the_spec_leaves_unset_is_never_written() {
+        let gateway = FakeGateway::default();
+        reconcile_object(&object("docs"), &gateway).await;
+        gateway.clear_writes();
+        let mut unset = object("docs");
+        unset.spec.description = None;
+        let outcome = reconcile_object(&unset, &gateway).await;
+        assert_eq!(outcome.write, None);
+        assert!(gateway.writes().is_empty());
+        assert_eq!(
+            gateway.get("docs").unwrap().description.as_deref(),
+            Some("example")
+        );
     }
 
     #[tokio::test]

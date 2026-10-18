@@ -147,7 +147,8 @@ export function eventsPage({ catalog, usage, group, runtime }) {
       "`Normal`",
       code(name),
       code(action),
-      "what happened, with the remote object's id",
+      // A drift correction names what it put back, not an id.
+      /\bdrift\b/i.test(docOf(name)) ? "the fields put back" : "what happened, with the remote object's id",
     ]),
     ...(usage.errors.size
       ? [
@@ -224,6 +225,12 @@ export function metricsPage({ prefix, leaderGauge, extraMetrics = [], runtime })
     ],
     [`\`${p}_reconcile_duration_seconds\``, "histogram", "`kind`", `Reconcile run duration; buckets ${buckets} s`],
     [
+      `\`${p}_remote_writes_total\``,
+      "counter",
+      "`kind`, `cause` (`created`/`drift`/`deleted`)",
+      "Writes to the remote system. At rest it stays flat: an object is only written when it differs from its spec",
+    ],
+    [
       `\`${p}_webhook_decisions_total\``,
       "counter",
       "`kind`, `result` (`allow`/`deny`)",
@@ -262,6 +269,10 @@ sum by (kind) (rate(${p}_reconcile_total{result="error"}[15m]))
 
 # Why they fail
 sum by (reason) (rate(${p}_reconcile_total{result="error"}[15m]))
+
+# Objects rewritten at rest: one correction is a drift, a steady rate is
+# a field compared wrong (the RepeatedDrift alert)
+sum by (kind) (increase(${p}_remote_writes_total{cause="drift"}[30m]))
 
 # Reconcile p95, per kind
 histogram_quantile(0.95, sum by (kind, le) (rate(${p}_reconcile_duration_seconds_bucket[5m])))

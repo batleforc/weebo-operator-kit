@@ -1,5 +1,6 @@
-//! `{{product}}Object`: the remote object is ensured on every reconcile
-//! and deleted by the finalizer when this CR created it.
+//! `{{product}}Object`: the remote object is compared with the spec on
+//! every reconcile, written only when it differs, and deleted by the
+//! finalizer when this CR created it.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -91,6 +92,7 @@ async fn cleanup(api: &Api<Object>, object: &Object, ctx: &Ctx) -> Result<(), Er
         .await
         .map_err(Error::Cleanup)?;
     if deleted {
+        super::metrics().record_write(KIND, domain::RemoteWrite::Deleted);
         let name = object.remote_name();
         let note = format!("deleted {name:?} from {{product}}");
         events::announce_change(
