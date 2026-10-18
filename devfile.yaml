@@ -1,0 +1,31 @@
+schemaVersion: 2.3.0
+metadata:
+  name: weebo-operator-kit
+parent:
+  uri: https://raw.githubusercontent.com/batleforc/WeeboDevImage/refs/heads/main/che-min-mise/devfile.yaml
+
+# The kit and every operator built on it, side by side: a kit change is
+# checked against the operators that consume it before it is released.
+# Their own sidecars (Authentik's postgres/redis, Forgejo) stay in each
+# operator's devfile.
+projects:
+  - name: weebo-operator-kit
+    git:
+      remotes:
+        origin: https://github.com/batleforc/weebo-operator-kit.git
+  - name: weebo-authentik
+    git:
+      remotes:
+        origin: https://github.com/batleforc/weebo-authentik.git
+  - name: weebo-forgejo
+    git:
+      remotes:
+        origin: https://github.com/batleforc/weebo-forgejo.git
+  - name: weebo-batlehub
+    git:
+      remotes:
+        origin: https://github.com/batleforc/weebo-batlehub.git
+  - name: weebo-angos
+    git:
+      remotes:
+        origin: https://github.com/batleforc/weebo-angos.git
