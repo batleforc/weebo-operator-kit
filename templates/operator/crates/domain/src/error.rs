@@ -45,6 +45,11 @@ weebo_kit_domain::reason_codes! {
         KubernetesApiError,
         /// The remote object was created for this CR (Event only).
         Created,
+        /// Fields of the remote object no longer held their desired value
+        /// (changed on the remote side) and were put back; the Event names
+        /// them (Event only). Coming back on every reconcile for the same
+        /// field, it is a comparison bug, not a drift.
+        DriftCorrected,
         /// The finalizer deleted the remote object of this CR (Event only).
         Deleted,
         /// The finalizer finished — cleanup done, or the CR force-orphaned
@@ -76,6 +81,7 @@ impl ReasonCode {
         match self {
             ReasonCode::Reconciled
             | ReasonCode::Created
+            | ReasonCode::DriftCorrected
             | ReasonCode::Deleted
             | ReasonCode::Released => Severity::Advisory,
             _ => Severity::Blocking,
@@ -103,6 +109,7 @@ mod tests {
             [
                 &ReasonCode::Reconciled,
                 &ReasonCode::Created,
+                &ReasonCode::DriftCorrected,
                 &ReasonCode::Deleted,
                 &ReasonCode::Released
             ]

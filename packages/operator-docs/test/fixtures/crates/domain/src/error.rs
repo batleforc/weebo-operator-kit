@@ -18,6 +18,8 @@ reason_codes! {
         MemberPending,
         /// The remote object was created (Event only).
         Created,
+        /// A drift of the remote object was corrected (Event only).
+        DriftCorrected,
         /// The finalizer finished (Event only).
         Released,
         /// A Kubernetes API call failed before any status.
@@ -31,6 +33,7 @@ impl ReasonCode {
             ReasonCode::Reconciled
             | ReasonCode::MemberPending
             | ReasonCode::Created
+            | ReasonCode::DriftCorrected
             | ReasonCode::Released => Severity::Advisory,
             _ => Severity::Blocking,
         }

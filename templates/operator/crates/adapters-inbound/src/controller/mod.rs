@@ -116,14 +116,20 @@ pub fn requeue_after(outcome: &Outcome) -> Action {
     weebo_kit_runtime::controller::requeue_after(outcome.ready.is_ok(), None)
 }
 
-/// `<prefix>_reconcile_total` / `_duration_seconds` (the kit's
-/// `ReconcileMetrics`). A no-op until the telemetry installs a real
-/// `MeterProvider`.
-pub fn record_reconcile(kind: &'static str, started: Instant, outcome: &Outcome) {
+/// The kit's `ReconcileMetrics`. A no-op until the telemetry installs a
+/// real `MeterProvider`.
+pub fn metrics() -> &'static ReconcileMetrics {
     static METRICS: OnceLock<ReconcileMetrics> = OnceLock::new();
-    METRICS
-        .get_or_init(|| ReconcileMetrics::new(FIELD_MANAGER, METRIC_PREFIX))
-        .record(kind, outcome.reason(), started.elapsed());
+    METRICS.get_or_init(|| ReconcileMetrics::new(FIELD_MANAGER, METRIC_PREFIX))
+}
+
+/// `<prefix>_reconcile_total` / `_duration_seconds`, and
+/// `<prefix>_remote_writes_total` when the reconcile wrote to {{product}}.
+pub fn record_reconcile(kind: &'static str, started: Instant, outcome: &Outcome) {
+    metrics().record(kind, outcome.reason(), started.elapsed());
+    if let Some(write) = outcome.write {
+        metrics().record_write(kind, write);
+    }
 }
 
 /// The `status` of every CRD here is a [`Status`].
@@ -163,7 +169,8 @@ impl HasStatus for api::Object {
 /// (conditions, `observedGeneration` on success, `remoteId`), retried while
 /// the apiserver is unavailable, then a `Warning` on every failed reconcile
 /// and a `Normal` for every condition change. One more Event when the
-/// remote object was just created.
+/// remote object was just created, or put back after a drift (naming the
+/// fields).
 pub async fn publish<K>(
     api: &Api<K>,
     recorder: &Recorder,
@@ -207,6 +214,18 @@ where
             ReasonCode::Created,
             events::RECONCILE,
             &format!("created in {{product}} as {id}"),
+        )
+        .await;
+    }
+    // A spec change being applied is not a drift: only a remote object
+    // that moved on its own is announced.
+    let spec_changed = obj.meta().generation != obj.status().and_then(|s| s.observed_generation);
+    if !spec_changed {
+        events::announce_drift(
+            recorder,
+            &obj.object_ref(&()),
+            ReasonCode::DriftCorrected,
+            &outcome.drift,
         )
         .await;
     }

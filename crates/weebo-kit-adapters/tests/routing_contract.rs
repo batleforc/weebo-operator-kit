@@ -747,3 +747,71 @@ async fn without_metadata_rights_the_value_is_written_unchecked() {
     let body: serde_json::Value = serde_json::from_slice(&posted.body).unwrap();
     assert!(body.get("options").is_none(), "{body}");
 }
+
+fn stored(data: serde_json::Value) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(envelope(
+        json!({
+            "data": data,
+            "metadata": {"created_time": "2026-10-06T00:00:00Z", "custom_metadata": null,
+                         "deletion_time": "", "destroyed": false, "version": 3}
+        }),
+        serde_json::Value::Null,
+    ))
+}
+
+#[tokio::test]
+async fn its_own_unchanged_value_is_not_rewritten() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/secret/metadata/{P}")))
+        .respond_with(metadata(Some("Token/team-a/ci"), 3))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/secret/data/{P}")))
+        .respond_with(stored(json!({"k": "v"})))
+        .mount(&server)
+        .await;
+    let store = routing(&server).await;
+    for _ in 0..2 {
+        store
+            .write(&vault_target("ci", None), &OWNER, &data("v"))
+            .await
+            .unwrap();
+    }
+    assert_eq!(calls(&server, "POST", "data").await, 0);
+    assert_eq!(calls(&server, "POST", "metadata").await, 0);
+}
+
+#[tokio::test]
+async fn without_metadata_rights_an_unchanged_value_writes_nothing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/auth/token/lookup-self"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(envelope(
+            json!({"id": "vault-token"}),
+            serde_json::Value::Null,
+        )))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/secret/metadata/{P}")))
+        .respond_with(
+            ResponseTemplate::new(403).set_body_json(json!({"errors": ["permission denied"]})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/secret/data/{P}")))
+        .respond_with(stored(json!({"k": "v"})))
+        .mount(&server)
+        .await;
+    routing(&server)
+        .await
+        .write(&vault_target("ci", None), &OWNER, &data("v"))
+        .await
+        .unwrap();
+    // Neither a new version nor the owner recorded again.
+    assert_eq!(calls(&server, "POST", "data").await, 0);
+    assert_eq!(calls(&server, "POST", "metadata").await, 0);
+}

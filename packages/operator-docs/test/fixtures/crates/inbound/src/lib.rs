@@ -31,5 +31,6 @@ async fn created() {
         "created",
     )
     .await;
+    events::announce_drift(recorder, &object, ReasonCode::DriftCorrected, &drift).await;
     weebo_kit_runtime::controller::finalize(obj, recorder, annotations, ReasonCode::Released, cleanup).await;
 }

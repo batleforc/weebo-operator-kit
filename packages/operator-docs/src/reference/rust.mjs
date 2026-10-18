@@ -132,7 +132,7 @@ export function leaderGauge(text, prefix) {
  * under `dir` but `catalogFile`:
  * - `denials`: codes of an admission `Denial` (or `undecidable`);
  * - `lifecycle`: code → action (`Reconcile`/`Cleanup`) of an
- *   `announce_change` Event;
+ *   `announce_change` (or `announce_drift`) Event;
  * - `released`: the code the kit's `controller::finalize` (or
  *   `finalize_with`) announces;
  * - `errors`: code → actions of the `(Code, events::…)` pairs an
@@ -152,6 +152,10 @@ export function scanUsage(dir, enumName, catalogFile) {
   const lifecycle = new Map();
   for (const [, c, a] of all(new RegExp(`announce_change\\([^;]*?${code}\\s*,\\s*${action}`, "g"))) {
     lifecycle.set(c, label[a]);
+  }
+  // The kit's `announce_drift`: always on a reconcile.
+  for (const [, c] of all(new RegExp(`announce_drift\\([^;]*?${code}`, "g"))) {
+    lifecycle.set(c, label.RECONCILE);
   }
   const errors = new Map();
   for (const [, c, a] of all(new RegExp(`\\(\\s*${code}\\s*,\\s*${action}\\s*\\)`, "g"))) {

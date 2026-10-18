@@ -9,6 +9,9 @@
 //! - [`announce_change`]: a lifecycle step the conditions don't show (the
 //!   remote object created, deleted by the finalizer…), under one of the
 //!   operator's reason codes.
+//! - [`announce_drift`]: a remote object put back in its desired state
+//!   (a field the operator owns had been changed on the remote side),
+//!   naming the fields corrected.
 //! - [`announce_error`] / [`spawn_error`]: a reconcile that failed before
 //!   reaching a status (an API call, a finalizer cleanup), typically from
 //!   the controller's `error_policy`.
@@ -25,7 +28,7 @@ use k8s_openapi::api::core::v1::ObjectReference;
 use kube::runtime::events::{Event, EventType, Recorder};
 use weebo_kit_api::Condition;
 use weebo_kit_api::status::ready;
-use weebo_kit_domain::Reason;
+use weebo_kit_domain::{Drift, Reason};
 
 /// `action` of the Events published after a reconcile.
 pub const RECONCILE: &str = "Reconcile";
@@ -128,6 +131,32 @@ pub async fn announce_change<R: Reason>(
         &event(EventType::Normal, reason.as_str(), action, message),
     )
     .await;
+}
+
+/// The note of [`announce_drift`]: the drifted fields, in the order they
+/// were checked.
+pub fn drift_note(drift: &Drift) -> String {
+    format!(
+        "drift corrected on the remote object: {}",
+        drift.fields().join(", ")
+    )
+}
+
+/// A `Normal` Event naming the fields of a remote object put back in their
+/// desired state — one per object and reconcile, nothing when `drift` is
+/// empty. `reason` is the operator's code for it (e.g. `DriftCorrected`).
+/// Without it, a corrected drift hides a manual change on the remote
+/// side, or a field the remote system stores differently than it is sent.
+pub async fn announce_drift<R: Reason>(
+    recorder: &Recorder,
+    object: &ObjectReference,
+    reason: R,
+    drift: &Drift,
+) {
+    if drift.is_empty() {
+        return;
+    }
+    announce_change(recorder, object, reason, RECONCILE, &drift_note(drift)).await;
 }
 
 /// A `Warning` Event for an error that ended a reconcile (or a cleanup:
@@ -250,6 +279,18 @@ mod tests {
                 .as_deref()
                 .unwrap()
                 .contains("no longer applies")
+        );
+    }
+
+    #[test]
+    fn a_drift_note_names_the_fields() {
+        let mut drift = Drift::default();
+        drift.note("name", true);
+        drift.note("slug", false);
+        drift.note("description", true);
+        assert_eq!(
+            drift_note(&drift),
+            "drift corrected on the remote object: name, description"
         );
     }
 

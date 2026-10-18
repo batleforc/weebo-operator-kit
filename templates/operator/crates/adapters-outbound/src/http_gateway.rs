@@ -4,7 +4,9 @@
 //! It speaks a placeholder REST shape, bearer-token authenticated:
 //!
 //! - `GET    {url}/api/health`          → 2xx when up;
-//! - `PUT    {url}/api/objects/{name}`  → create or update, answers `{"id": "…"}`;
+//! - `GET    {url}/api/objects/{name}`  → `{"id", "name", "description"}`, or 404;
+//! - `PUT    {url}/api/objects/{name}`  → create, answers `{"id": "…"}`;
+//! - `PATCH  {url}/api/objects/{name}`  → update of the fields sent only;
 //! - `DELETE {url}/api/objects/{name}`  → 2xx, or 404 when already gone.
 //!
 //! What must survive the rewrite is the mapping of every failure onto a
@@ -12,7 +14,7 @@
 
 use std::time::Duration;
 
-use application::ports::{GatewayError, RemoteGateway, RemoteObject};
+use application::ports::{GatewayError, ObjectPatch, Remote, RemoteGateway, RemoteObject};
 use reqwest::{Client, RequestBuilder, Response, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 
@@ -32,9 +34,23 @@ struct ObjectBody<'a> {
     description: Option<&'a str>,
 }
 
+#[derive(Serialize)]
+struct PatchBody<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<&'a str>,
+}
+
 #[derive(Deserialize)]
 struct Created {
     id: String,
+}
+
+#[derive(Deserialize)]
+struct Read {
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 impl HttpGateway {
@@ -102,7 +118,42 @@ impl RemoteGateway for HttpGateway {
             .map(|_| ())
     }
 
-    async fn ensure(&self, object: &RemoteObject) -> Result<String, GatewayError> {
+    async fn read(&self, name: &str) -> Result<Option<Remote>, GatewayError> {
+        let response = match self
+            .send(self.client.get(self.url(&["api", "objects", name])))
+            .await
+        {
+            Ok(response) => response,
+            Err(GatewayError::NotFound(_)) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let read = response
+            .json::<Read>()
+            .await
+            .map_err(|e| GatewayError::Api(format!("unexpected answer: {e}")))?;
+        Ok(Some(Remote {
+            id: read.id,
+            object: RemoteObject {
+                name: read.name,
+                description: read.description,
+            },
+        }))
+    }
+
+    async fn update(&self, name: &str, patch: &ObjectPatch) -> Result<(), GatewayError> {
+        let body = PatchBody {
+            description: patch.description.as_deref(),
+        };
+        self.send(
+            self.client
+                .patch(self.url(&["api", "objects", name]))
+                .json(&body),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn create(&self, object: &RemoteObject) -> Result<String, GatewayError> {
         let body = ObjectBody {
             name: &object.name,
             description: object.description.as_deref(),

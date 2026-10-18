@@ -154,9 +154,13 @@ impl RoutingSecretStore {
             SecretStoreError(format!("Vault path {path} belongs to {other}, not {id}"))
         };
         let version = match vault.metadata(path).await? {
+            // The owner can't be read back: recorded with each new
+            // version only, an unchanged value writes nothing at all.
             PathMetadata::Unreadable => {
-                vault.write_path(path, data).await?;
-                return vault.set_owner(path, &id).await;
+                if vault.write_path(path, data).await? {
+                    vault.set_owner(path, &id).await?;
+                }
+                return Ok(());
             }
             PathMetadata::Present {
                 owner: Some(other), ..

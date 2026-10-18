@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
-use weebo_kit_domain::{Reason, Severity};
+use weebo_kit_domain::{Reason, RemoteWrite, Severity};
 
 /// Upper bounds of the reconcile-duration buckets, seconds: a reconcile
 /// takes milliseconds to seconds — OTel's default boundaries (0, 5, 10,
@@ -22,10 +22,13 @@ pub const DURATION_BUCKETS: &[f64] = &[
 /// `<prefix>_reconcile_duration` (unit `s`), and the Prometheus exporter
 /// adds `_total` to a counter and the unit to a histogram itself — naming
 /// them with the suffixes exported `…_total_total` and
-/// `…_seconds_seconds`. Build once per process (e.g. in a `OnceLock`).
+/// `…_seconds_seconds`. Plus `<prefix>_remote_writes_total`
+/// ([`ReconcileMetrics::record_write`]). Build once per process (e.g. in a
+/// `OnceLock`).
 pub struct ReconcileMetrics {
     total: Counter<u64>,
     duration: Histogram<f64>,
+    writes: Counter<u64>,
 }
 
 impl ReconcileMetrics {
@@ -48,6 +51,10 @@ impl ReconcileMetrics {
                 .with_unit("s")
                 .with_boundaries(DURATION_BUCKETS.to_vec())
                 .build(),
+            writes: meter
+                .u64_counter(format!("{prefix}_remote_writes"))
+                .with_description("Writes to the remote system, by kind and cause")
+                .build(),
         }
     }
 
@@ -65,6 +72,21 @@ impl ReconcileMetrics {
         ];
         self.total.add(1, &attrs);
         self.duration.record(elapsed.as_secs_f64(), &attrs[..1]);
+    }
+
+    /// Records one write to the remote system (`<prefix>_remote_writes_total`,
+    /// labels `kind` and `cause`): an object created, corrected after a
+    /// drift, or deleted. A reconcile that changes nothing records none, so
+    /// a write at rest shows up here instead of in the remote system's
+    /// database.
+    pub fn record_write(&self, kind: &'static str, cause: RemoteWrite) {
+        self.writes.add(
+            1,
+            &[
+                KeyValue::new("kind", kind),
+                KeyValue::new("cause", cause.as_str()),
+            ],
+        );
     }
 }
 
@@ -104,6 +126,7 @@ mod tests {
             .build();
         let metrics = ReconcileMetrics::with_meter(&provider.meter("test"), "weebo_test");
         metrics.record("Thing", Ok, Duration::from_millis(20));
+        metrics.record_write("Thing", RemoteWrite::Drift);
 
         let mut out = Vec::new();
         TextEncoder::new()
@@ -113,6 +136,10 @@ mod tests {
         assert!(text.contains("weebo_test_reconcile_total{"), "{text}");
         assert!(
             text.contains("weebo_test_reconcile_duration_seconds_bucket{"),
+            "{text}"
+        );
+        assert!(
+            text.contains("weebo_test_remote_writes_total{cause=\"drift\",kind=\"Thing\""),
             "{text}"
         );
         assert!(!text.contains("_total_total") && !text.contains("_seconds_seconds"));

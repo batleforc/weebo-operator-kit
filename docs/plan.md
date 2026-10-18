@@ -33,7 +33,7 @@ métier).
 
 | Crate                   | Couche       | Dépend de                     | Contenu                                                                                         |
 |-------------------------|--------------|-------------------------------|-------------------------------------------------------------------------------------------------|
-| `weebo-kit-domain`      | domain       | rien                          | `Reason`/`Severity`, `reason_codes!`, `Failure<R>`/`Advisory<R>`, moteur d'allow-list générique  |
+| `weebo-kit-domain`      | domain       | rien                          | `Reason`/`Severity`, `reason_codes!`, `Failure<R>`/`Advisory<R>`, moteur d'allow-list générique, comparaison avant écriture (`drift` : `Drift`, `same_set`…, `RemoteWrite`) |
 | `weebo-kit-api`         | api          | serde, schemars, k8s-openapi  | sous-types de CRD : `Condition`, `SecretKeyRef`, `ObjectRef`, `SecretTarget`, `TlsOptions`…     |
 | `weebo-kit-application` | application  | kit-api, k8s-openapi (types)  | ports `SecretStore`/`SecretStoreFactory`, helpers d'émission de secrets, `FakeSecretStore`       |
 | `weebo-kit-adapters`    | outbound     | kit-application, kube, vaultrs| `K8sSecretStore`, `VaultSecretStore` (check-and-set) + `VaultLogins`, `RoutingSecretStore`, `read_secret_key` |
