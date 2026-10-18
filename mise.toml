@@ -20,3 +20,4 @@ shellcheck = "latest"
 helm = "latest"
 # templates/operator (`task template:render`)
 "ubi:cargo-generate/cargo-generate" = "latest"
+"github:batleforc/weebo-skillsagent" = "v0.12.0"
