@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.18.1](https://github.com/batleforc/weebo-operator-kit/compare/c744f17e785bdc2186080bf691ec272144c3dba8..v0.18.1) - 2026-10-19
+#### Features
+- Merge branch 'fix/crd-docs-escape' - ([c4fe3b7](https://github.com/batleforc/weebo-operator-kit/commit/c4fe3b7629da28f63129dda133bd48faa68ba0ee)) - Max Batleforc
+#### Bug Fixes
+- (**ci**) operator-docs jobs install only node and task, mise authenticated (#8) - ([c744f17](https://github.com/batleforc/weebo-operator-kit/commit/c744f17e785bdc2186080bf691ec272144c3dba8)) - Maxime, Claude Opus 5.5 (1M context)
+- (**operator-docs**) escape CRD text before it reaches MDX - ([f9b0729](https://github.com/batleforc/weebo-operator-kit/commit/f9b0729d02209aa4ebb368ffca9f5a422cd99834)) - Max Batleforc, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.18.0](https://github.com/batleforc/weebo-operator-kit/compare/c335330248add08cfcdd53fdde9e07b46ef90d98..v0.18.0) - 2026-10-18
 #### Features
 - ![BREAKING](https://img.shields.io/badge/BREAKING-red) write only what differs — drift helpers, remote_writes_total, DriftCorrected; RFC 0001 moved here (#7) - ([08b2208](https://github.com/batleforc/weebo-operator-kit/commit/08b220873c72d01738c12a850564c9966b24f480)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
