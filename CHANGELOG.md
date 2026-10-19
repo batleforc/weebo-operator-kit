@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.19.1](https://github.com/batleforc/weebo-operator-kit/compare/bfcd7d442a7e5745c21fc752b3830e7273573a4c..v0.19.1) - 2026-10-19
+#### Bug Fixes
+- let the operator choose the k8s-openapi version (RFC 0005) (#13) - ([bfcd7d4](https://github.com/batleforc/weebo-operator-kit/commit/bfcd7d442a7e5745c21fc752b3830e7273573a4c)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.19.0](https://github.com/batleforc/weebo-operator-kit/compare/596c1db866debe1ac02f6c3c8cad8934f8a0a65a..v0.19.0) - 2026-10-19
 #### Features
 - (**operator-docs**) nested CRD fields (RFC 0004 phase 2) (#12) - ([596c1db](https://github.com/batleforc/weebo-operator-kit/commit/596c1db866debe1ac02f6c3c8cad8934f8a0a65a)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
