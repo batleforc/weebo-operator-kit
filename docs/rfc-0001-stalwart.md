@@ -3,12 +3,13 @@
 - **Dépôts :** weebo-si (déploiement), `weebo-stalwart` (nouvel opérateur,
   généré depuis le template de ce kit). La RFC vit ici, dans
   weebo-operator-kit, depuis la revue du 2026-10-18.
-- **Base :** weebo-operator-kit v0.18.x (en cours : `weebo-kit-domain::drift`,
+- **Base :** weebo-operator-kit v0.18.0 (`weebo-kit-domain::drift`,
   `DriftCorrected`, `remote_writes_total`, alerte `RepeatedDrift` du chart),
   Stalwart v0.16.27 (2026-10-18, source `main` `aa47d8e`), weebo-authentik
-  0.18.1, OpenBao (`mv`)
+  0.18.3, OpenBao (`mv`)
 - **Statut :** Draft. Auteurs : batleforc. Créée le 2026-10-18, mise à jour
-  le 2026-10-18 (revue appliquée), non décidée.
+  le 2026-10-19 (spike et implémentation des phases 1 et 2 dans un dépôt
+  local, constats reportés), non décidée.
 - **Release visée :** weebo-stalwart v0.1.0 (comptes d'envoi), v0.2.0
   (boîtes, groupes, listes). Aucun changement du kit n'est requis.
 - **Brique :** `weebo-si:2.argo/helm/mail`, github.com/batleforc/weebo-stalwart
@@ -17,7 +18,7 @@
 ## Résumé
 
 On déploie [Stalwart](https://stalw.art/) v0.16.27 dans le namespace `mail`
-comme seul serveur mail du domaine interne `weebo.poc` : les apps du cluster
+comme seul serveur mail du domaine interne `weebo.internal` (D23) : les apps du cluster
 y soumettent leurs mails, les utilisateurs Authentik y ont une boîte, et rien
 ne sort du cluster. Un nouvel opérateur, `weebo-stalwart`, généré depuis le
 template de weebo-operator-kit, porte le cycle de vie de ce qui vit dans
@@ -29,8 +30,10 @@ Stalwart :
   par CR ;
 - les groupes et les listes.
 
-Les App Passwords restent en libre-service dans la WebUI en v1 (D14) : les
-créer pour autrui exige `impersonate`.
+Les App Passwords des utilisateurs restent en libre-service dans la WebUI
+en v1 (D14). Les comptes d'envoi, eux, s'authentifient par un App Password
+que l'opérateur crée avec une seconde clé, étroite (D24) : la directory
+OIDC refuse les mots de passe.
 
 C'est le même contrat que weebo-forgejo : CR déclaratifs, `Ready` dans
 `status.conditions`, `secretTargets`, allow-list par namespace. Les
@@ -39,7 +42,7 @@ C'est le même contrat que weebo-forgejo : CR déclaratifs, `Ready` dans
 L'opérateur ne connaît que Stalwart. **Le lien avec Authentik** (un
 `AuthentikUser` donne un `StalwartAccount`, son retrait le verrouille) est
 le rôle d'une **autre brique**, qui lie les opérateurs entre eux :
-[RFC 0002](https://github.com/batleforc/weebo-si/blob/develop/0.docs/content/docs/rfc/0002-liaison.md),
+[RFC 0002](rfc-0002-liaison.md),
 par en-têtes `link.weebo.io`, un petit contrôleur `weebo-link` et des
 `ValidatingAdmissionPolicy`. Celle-ci ne fixe que le contrat que cette
 brique consomme : les CR `stalwart.weebo.io`.
@@ -56,7 +59,8 @@ mail, ou écrit un opérateur sur le kit.
   les alertes de monitoring n'ont aucune config SMTP. Un grep `smtp|mailer`
   sur `weebo-si:2.argo`, `weebo-si:2.helm` et `weebo-si:2.terra` ne renvoie
   rien. Les adresses en `@weebo.poc` qui existent (`forgejo-admin@weebo.poc`,
-  les emails des `AuthentikUser`) ne mènent nulle part.
+  les emails des `AuthentikUser`) ne mènent nulle part, et ne pourront pas
+  mener à Stalwart : il refuse `.poc` (D23).
 - **Les brancher sur un SMTP externe** (Gmail, un relais OVH) ferait sortir
   du cluster des mails qui contiennent des liens de reset et des jetons
   d'invitation, vers une infra qu'on ne contrôle pas. C'est contraire à
@@ -67,7 +71,7 @@ mail, ou écrit un opérateur sur le kit.
   limites :
   1. *Pas de compte avant le premier login.* Un compte n'existe qu'après une
      première authentification (JIT). D'ici là, un mail vers
-     `alice@weebo.poc` est rejeté, faute de destinataire local.
+     `alice@weebo.internal` est rejeté, faute de destinataire local.
   2. *Pas de déprovisioning.* Un utilisateur supprimé ou désactivé dans
      Authentik garde sa boîte, qui continue de recevoir.
   3. *Clients lourds.* Thunderbird, Apple Mail et Outlook ne font pas
@@ -98,13 +102,13 @@ C'est ce qu'on vérifiera au passage en `Implemented`.
 
 | Objectif | Non-objectif |
 | --- | --- |
-| Mail interne `weebo.poc`, app → user et user ↔ user | Recevoir du mail d'Internet (MX public) |
+| Mail interne `weebo.internal`, app → user et user ↔ user | Recevoir du mail d'Internet (MX public) |
 | Comptes d'envoi des apps, credentials dans Vault | Envoyer vers Internet (relais sortant) |
 | Boîtes des users (`StalwartAccount`), création et verrouillage | Webmail tiers (Roundcube, SnappyMail…) |
 | Opérateur sur le kit, conventions des autres opérateurs | Déployer Stalwart depuis l'opérateur (mode *managed*) |
 | Un seul nœud, une réplique | Cluster Stalwart multi-nœuds |
 | Un contrat CR stable, consommable par la brique de liaison | Lire les CR d'un autre opérateur (`AuthentikUser`…) : c'est la brique de liaison |
-| N'écrire dans Stalwart que ce qui diffère (RFC 0003) | Créer des App Passwords pour autrui en v1 (D14) |
+| N'écrire dans Stalwart que ce qui diffère (RFC 0003) | Créer des App Passwords pour les utilisateurs en v1 (D14) |
 
 ## Explication pour l'exploitant
 
@@ -124,7 +128,7 @@ en 4, CR en 5) :
 | 3 | StatefulSet `stalwart`, Services, IngressRoute, CiliumNetworkPolicy | le serveur |
 | 3 | Application `weebo-stalwart` | l'opérateur, dans le namespace `weebo-stalwart` |
 | 4 | `StalwartInstance` `default`, `StalwartNamespacePolicy` `weebo-allow` | connexion et allow-list |
-| 5 | `StalwartDomain` `weebo.poc` (cluster) | le domaine |
+| 5 | `StalwartDomain` `weebo.internal` (cluster) | le domaine |
 | PostSync + CronJob | Job `stalwart-bootstrap` | config du serveur, compte et ApiKey de l'opérateur, revalidés chaque jour (D17) |
 
 Tant que le Job n'a pas tourné une fois, la `StalwartInstance` est
@@ -147,9 +151,9 @@ metadata:
     argocd.argoproj.io/sync-wave: "5"
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
-  domainRef: { name: weebo.poc }   # StalwartDomain cluster-scoped
-  name: forgejo                 # forgejo@weebo.poc
-  aliases: [noreply]            # noreply@weebo.poc, utilisable en From
+  domainRef: { name: weebo.internal }   # StalwartDomain cluster-scoped
+  name: forgejo                 # forgejo@weebo.internal
+  aliases: [noreply]            # noreply@weebo.internal, utilisable en From
   receive: false
   secretTargets:
     - backend: vault
@@ -163,16 +167,16 @@ spec:
 | `host` | `stalwart.mail.svc.cluster.local` |
 | `port` | `587` |
 | `security` | `starttls` |
-| `username` | `forgejo@weebo.poc` |
-| `password` | 32 caractères générés par l'opérateur |
-| `from` | `noreply@weebo.poc` (le premier alias, sinon l'adresse) |
+| `username` | `forgejo@weebo.internal` |
+| `password` | un App Password (`app_…`, 40 caractères), généré par Stalwart à la demande de l'opérateur (D24) |
+| `from` | `noreply@weebo.internal` (le premier alias, sinon l'adresse) |
 
 L'ExternalSecret de forgejo les injecte dans `[mailer]`.
 
 ```console
 $ kubectl -n forgejo get stalwartserviceaccount
 NAME      ADDRESS             READY   REASON        AGE
-forgejo   forgejo@weebo.poc   True    Reconciled    3m
+forgejo   forgejo@weebo.internal   True    Reconciled    3m
 ```
 
 Et quand ça ne marche pas :
@@ -180,7 +184,7 @@ Et quand ça ne marche pas :
 ```console
 $ kubectl -n batlehub get stalwartserviceaccount
 NAME       ADDRESS              READY   REASON               AGE
-batlehub   batlehub@weebo.poc   False   NamespaceNotAllowed  10s
+batlehub   batlehub@weebo.internal   False   NamespaceNotAllowed  10s
 ```
 
 L'admission l'aurait déjà refusé, avec le même message. Le reconciler
@@ -199,7 +203,7 @@ metadata:
   name: alice
   namespace: mail
 spec:
-  domainRef: { name: weebo.poc }
+  domainRef: { name: weebo.internal }
   name: alice                  # = preferred_username Authentik
   quota: 2Gi                   # quotas.maxDiskQuota = 2147483648
 ```
@@ -292,11 +296,11 @@ d'abord (règle des deux opérateurs), par une RFC du kit.
 | D7 | Le lien Authentik → Stalwart est hors de l'opérateur, dans une autre brique | Un opérateur par produit : weebo-stalwart ne lit aucun CRD `authentik.weebo.io`, et weebo-authentik n'écrit rien chez Stalwart. La brique de liaison, commune à tous les opérateurs, traduit un objet d'un produit en CR d'un autre. Elle a sa propre RFC. |
 | D8 | Départ d'un user = `state: Locked`, jamais une suppression | Un retrait par erreur ne détruit pas de mail. `deletionPolicy` garde la sémantique du kit. C'est la consigne donnée à la brique de liaison. |
 | D9 | Lecture par `status.remoteId`, jamais par nom ; sans `remoteId`, création, et un nom pris donne `StalwartObjectAlreadyExists` | Écart assumé au template (`gateway.read(&desired.name)`, qui adopte), aligné sur forgejo et sur « jamais d'adoption par nom » du kit. Un compte JIT existant n'est repris que par l'importer, après la garde de revendication unique. |
-| D10 | `tokenSecretRef` = ApiKey Bearer, à permissions `Replace` minimales | Contrat d'instance du kit (un jeton dans un Secret, relu à chaque appel). `stalwart-cli --api-key` (`STALWART_TOKEN`) envoie déjà un Bearer. Repli si le spike l'invalide (Q1) : le même Secret porte `weebo-stalwart:<mot de passe>`, généré et tourné par le même Job (D17), et seule la gateway passe en Basic. Rien dans Vault. |
+| D10 | `tokenSecretRef` = ApiKey Bearer, en permissions `Replace` (la liste de *Sécurité*, 258 entrées) | Contrat d'instance du kit (un jeton dans un Secret, relu à chaque appel). `stalwart-cli --api-key` (`STALWART_TOKEN`) envoie déjà un Bearer, et le spike l'a confirmé (Q1). La liste n'est pas minimale : une clé ne peut accorder une permission qu'elle n'a pas, et créer un compte `User` lui accorde celles du rôle `User`. Rien dans Vault. |
 | D11 | DataStore PostgreSQL (CNPG), BlobStore S3 (RustFS) | Ça reprend les sauvegardes existantes et laisse le StatefulSet jetable. |
 | D12 | Egress de `mail` coupé au niveau Cilium | « Rien ne sort » ne dépend pas de la config Stalwart. |
 | D13 | Version contrôlée par le hash du schéma : `GET /api/schema` redirige vers `/api/schema/<sha256>`, comparé à la liste des hashes testés, constante de l'opérateur | Aucun endpoint ne renvoie la version : elle n'est que dans `stalwart --version` et la télémétrie, et la bannière SMTP par défaut ne la donne pas (« Stalwart ESMTP at your service »). Le hash identifie exactement le contrat que le client parle. Hash inconnu : `UnsupportedStalwartVersion`, bloquant. |
-| D14 | Pas de `StalwartAppPassword` en v1 : App Passwords en libre-service dans la WebUI | Créer un `x:AppPassword` pour un autre compte, c'est poser son `accountId`, donc `impersonate` (`AccessToken::is_member`). Avec `impersonate`, l'opérateur lirait tous les mails. Le libre-service règle aussi la remise du secret : il ne passe ni par Git ni par Vault. Le kind revient en *Travaux futurs*. |
+| D14 | Pas de `StalwartAppPassword` en v1 : les App Passwords des utilisateurs sont en libre-service dans la WebUI | Créer un `x:AppPassword` pour un autre compte, c'est poser son `accountId`, donc `impersonate` (`AccessToken::is_member`). La clé principale de l'opérateur ne l'a jamais : avec ses `jmap*`, elle lirait tous les mails. Le libre-service règle aussi la remise du secret : il ne passe ni par Git ni par Vault. Le kind revient en *Travaux futurs*. Les comptes d'envoi sont l'exception, par une clé à part (D24). |
 | D15 | Policy Vault du rôle `stalwart-operator` limitée à `mv/data/+/smtp` et `mv/metadata/+/smtp` ; une cible Vault d'un `StalwartServiceAccount` s'appelle `smtp`, sans `path` | Avec `pathPrefix: ""`, le kit adopte un chemin sans owner, et tout ce que Terraform écrit n'en a pas (`mv/mail/admin`, `mv/forgejo/admin`…). Voir l'invariant de *Vault*. La cible implicite (`mv/<ns>/<nom du CR>`) serait refusée par la policy : l'admission la refuse avant, avec un message clair. |
 | D16 | Unicité `domainRef + name` entre CR contrôlée au reconcile, comme forgejo | Ni le kit (`weebo-kit-runtime/src/admission.rs`) ni forgejo ne la font à l'admission. Forgejo la fait au reconcile (`ClusterReader::claimants`, `adapters-outbound/src/cluster_reader.rs`) : on reprend ce mécanisme. La porter à l'admission serait une pièce du kit, par sa règle des deux opérateurs. |
 | D17 | Jeton de l'opérateur : schéma du Job token de forgejo | `weebo-si:2.argo/helm/forgejo/templates/operator/token.yaml` : PostSync et CronJob quotidien, revalidation du jeton à chaque passage, suppression de l'ancien du même nom avant recréation, écriture dans un Secret Kubernetes (pas Vault). Une ApiKey révoquée est réparée au plus tard le lendemain, un échec entre création et écriture ne laisse pas de clé orpheline. |
@@ -305,6 +309,8 @@ d'abord (règle des deux opérateurs), par une RFC du kit.
 | D20 | `Locked` appliqué = `Ready: True`, raison `Reconciled` | C'est l'état voulu, atteint. L'expression `safe` de la RFC 0002 exige `Ready == True` sur un compte `Locked`. |
 | D21 | Import d'un compte d'envoi de la phase 0 = rotation forcée | Le mot de passe écrit par Terraform n'a pas d'owner Vault. Le reprendre laisserait deux sources (Terraform et l'opérateur). La ressource Terraform est retirée d'abord, puis l'opérateur régénère et écrit avec son owner. |
 | D22 | Ni port 25, ni sonde blackbox, ni alerte en v1 | Tout passe par 587, et la livraison locale ne passe pas par SMTP. weebo-si n'a ni blackbox exporter ni moteur d'alerte (*Exploitation*) : ce sont des briques à créer, chiffrées à part. |
+| D23 | Domaine mail `weebo.internal`, nom d'hôte du serveur `mail.weebo.internal` ; les noms HTTP (`mail.weebo.poc`, `auth.weebo.poc`, `s3-main.weebo.poc`) restent | Stalwart refuse `weebo.poc`, sans réglage pour l'en empêcher. `is_valid_domain` (`crates/utils/src/lib.rs`, v0.16.27) n'accepte qu'un suffixe de la Public Suffix List compilée dans le binaire (crate `psl`), ou une extension d'une liste figée : `test`, `localhost`, `local`, `internal`, `lan`, `home`, `corp`, `intranet`, `private`, `localdomain`. Le même contrôle (`StringValidator::Domain` / `Hostname`) porte sur `x:Domain.name`, `x:Domain.aliases`, `SystemSettings.defaultHostname`, `Service.hostname` et les `ehloHostname` : `weebo.poc` n'est accepté ni comme domaine, ni comme alias, ni comme nom d'hôte. Les URL (`issuerUrl`, `customEndpoint`) et l'hôte de l'IngressRoute ne sont pas contrôlés. `.internal` est réservé par l'ICANN à l'usage privé (2024) et c'est le domaine des tests live. Conséquence pour weebo-si : les emails des `AuthentikUser` et des comptes d'admin des apps passent en `@weebo.internal`. |
+| D24 | Les comptes d'envoi s'authentifient par un App Password, créé par une **seconde ApiKey** de l'opérateur, limitée à `authenticate`, `impersonate`, `emailSend` et `sysAppPassword{Create,Get,Update,Destroy,Query}` ; aucun `Password` n'est jamais écrit | Les utilisateurs se connectent par OIDC, donc `Authentication.directoryId` pointe la directory `Oidc`. En édition communautaire, la directory par défaut sert tous les domaines (`get_directory_for_cached_domain`, la directory par domaine est Enterprise) : un login Basic par mot de passe part vers OIDC et échoue (`454` sur 587, `401` en JMAP), et Stalwart refuse toute écriture de `Password` (« Cannot set credentials for accounts in an external directory »), même à l'admin de recovery. Les App Passwords, eux, sont vérifiés avant la directory. La clé principale ne peut pas en créer pour un autre compte (`forbidden "not an owner"`) ni en poser par `credentials` (« Secondary credentials cannot be set directly ») ; lui donner `impersonate` lui ferait lire toutes les boîtes. La seconde clé a `impersonate` mais aucune permission `jmap*` ni `sysAccount*` : elle ne lit aucun mail et ne modifie aucun compte (vérifié). Elle permet en revanche de créer un App Password sur n'importe quel compte, donc **d'envoyer au nom de n'importe qui** (*Sécurité*). Vérifié sur l'image sous une directory OIDC par défaut : AUTH `235` sur 587, `MAIL FROM` d'un alias `250`, livraison, rotation, refus une fois verrouillé. |
 
 ### Contrat
 
@@ -328,9 +334,10 @@ Ce sont les specs du template, avec les champs que forgejo y ajoute.
 | --- | --- | --- | --- |
 | `url` | string | — | Base HTTP de Stalwart. La gestion passe par `POST <url>/jmap` (session `GET <url>/jmap/session`). `/api` ne sert qu'à `schema` (D13). |
 | `tokenSecretRef` | `SecretKeyRef` (locale : `LocalSecretKeyRef` + label `instance-token`) | — | ApiKey, relue à chaque appel |
+| `appPasswordTokenSecretRef` | même type que `tokenSecretRef` | — | Spécifique à Stalwart : la seconde ApiKey, qui crée les App Passwords des comptes d'envoi (D24), relue à chaque appel. Sans elle, un `StalwartServiceAccount` échoue en `TokenSecretMissing` ; les autres kinds n'en ont pas besoin |
 | `sharedWith` | `SharedWith` | — | locale seulement, comme le template |
 | `tls` | `TlsOptions` (locale : `LocalTlsOptions`) | — | `caSecretRef`, `insecureSkipVerify` |
-| `secretStore` | `{backend: SecretStoreBackend, vault: {…, pathGrants: []VaultPathGrant}}` | `kubernetes`, `pathPrefix: weebo-stalwart` | backend par défaut des `secretTargets` |
+| `secretStore` | `{backend: SecretStoreBackend, vault: {…, pathGrants: []VaultPathGrant}}` | `kubernetes`, `pathPrefix: weebo-stalwart` | cluster seulement (Q16) : backend par défaut des `secretTargets` |
 | `submission` | `{host, port, security}` | `stalwart.mail.svc.cluster.local`, `587`, `starttls` | Spécifique à Stalwart : ce que les credentials publiés annoncent |
 
 Les hashes de schéma supportés sont une constante de l'opérateur, comme la
@@ -354,18 +361,18 @@ spec:
   rules:
     - namespaces: [mail]
       allowedKinds: [StalwartAccount, StalwartGroup, StalwartMailingList]
-      allowedDomains: [weebo.poc]        # dimension "domains"
+      allowedDomains: [weebo.internal]        # dimension "domains"
     - namespaces: [forgejo]
       allowedKinds: [StalwartServiceAccount]
-      allowedDomains: [weebo.poc]
+      allowedDomains: [weebo.internal]
       allowedNames: [forgejo, noreply]   # dimension "names" : nom et alias
     - namespaces: [auth]
       allowedKinds: [StalwartServiceAccount]
-      allowedDomains: [weebo.poc]
+      allowedDomains: [weebo.internal]
       allowedNames: [authentik]
     - namespaces: [argocd]
       allowedKinds: [StalwartServiceAccount]
-      allowedDomains: [weebo.poc]
+      allowedDomains: [weebo.internal]
       allowedNames: [argocd]
     - effect: Deny                        # noms réservés, partout
       namespaces: ["*"]
@@ -404,9 +411,15 @@ par défaut, `selectorTemplate`, `rotateAfter`, `retireAfter`,
 `deleteAfter`). Sans `dnsManagement` automatique, les clés sont générées et
 actives, sans rotation ni publication (`services/src/task_manager/dkim.rs`) ;
 c'est suffisant pour un domaine interne. Changer `name` est une mise à jour
-disruptive : il faut `allow-disruptive-update: "true"`.
+disruptive : il faut `allow-disruptive-update: "true"`, sinon `InvalidSpec`
+(Q14). Un `catchAll` absent est « pas d'avis » : jamais effacé, jamais
+comparé (Q13).
 
-#### `StalwartServiceAccount` (namespacé) → `x:Account` `@type: User` + credential `Password`
+`name` et chaque alias doivent avoir une extension que Stalwart connaît
+(D23) : un nom refusé revient en `invalidProperties` (« Invalid domain
+name »), rendu `InvalidSpec`.
+
+#### `StalwartServiceAccount` (namespacé) → `x:Account` `@type: User` + un App Password
 
 | Champ | Type | Défaut | Rôle |
 | --- | --- | --- | --- |
@@ -414,18 +427,42 @@ disruptive : il faut `allow-disruptive-update: "true"`.
 | `domainRef` | `ObjectRef` (cluster-scoped) | — | le `StalwartDomain` |
 | `name` | EmailLocalPart | `metadata.name` | `name` (dimension `names`) |
 | `aliases` | []EmailLocalPart | `[]` | `aliases` : `{name, domainId, enabled: true}`, dans le domaine du compte, vérifiés aussi par `names` |
-| `receive` | bool | `false` | `false` : `EmailReceive` dans `disabledPermissions` |
+| `receive` | bool | `false` | `false` : `emailReceive` dans `disabledPermissions` |
 | `secretTargets` | []`SecretTarget` | cible implicite du kit (backend `kubernetes` seulement) | clés `host`, `port`, `security`, `username`, `password`, `from` ; une cible Vault s'appelle `smtp` (D15) |
 | `deletionPolicy` | `Delete` \| `Orphan` | `Delete` | |
 
 À la création, l'opérateur pose les champs que `x:Account` exige :
 `roles: User`, `encryptionAtRest: Disabled`, et `permissions` en `Merge`
-avec `disabledPermissions` : `ImapAuthenticate`, `Pop3Authenticate`,
-`SieveAuthenticate`, plus `EmailReceive` si `receive: false`. Il génère le
-mot de passe, le pose comme credential `Password` et l'écrit par
-`emit::write_all`. Il le régénère sur un nouveau nonce `rotate-secret`
+avec `disabledPermissions` : `imapAuthenticate`, `pop3Authenticate`,
+`sieveAuthenticate`, plus `emailReceive` si `receive: false`. Sur le réseau,
+les noms de permission sont en camelCase. Il n'envoie aucune
+`credentials` : avec la seconde clé (D24), il crée un App Password sur le
+compte, dans un seul `x:AppPassword/set` :
+
+```json
+{ "accountId": "<compte>",
+  "create": { "p": { "description": "weebo-stalwart",
+    "permissions": { "@type": "Replace",
+                     "permissions": { "authenticate": true, "emailSend": true } } } },
+  "destroy": ["<ses App Passwords précédents de description weebo-stalwart>"] }
+```
+
+Stalwart génère le secret (`app_…`), le renvoie une seule fois dans
+`created.p.secret` et n'en garde qu'un hash ; il refuse un secret choisi
+par le client et toute modification en place. L'opérateur l'écrit par
+`emit::write_all` (`password` = le jeton, `username` = l'adresse). Les
+App Passwords précédents de l'opérateur sont retrouvés par
+`x:AppPassword/get` et leur description ; ceux de quelqu'un d'autre ne
+sont pas touchés. `Inherit` est refusé à la seconde clé (il vaudrait les
+permissions de son compte, qu'elle n'a pas) : d'où `Replace` (Q25).
+
+Il crée un App Password à la création du compte, et en recrée un (création
+et destruction de l'ancien dans le même appel) sur un nouveau nonce
+`rotate-secret`
 (`emit::rotation_requested` contre `status.lastRotation`), ou quand
-`emit::any_missing` détecte une cible qui l'a perdu. Une seule cible Vault
+`emit::any_missing` détecte une cible qui l'a perdu, ou après un échec
+d'écriture des cibles (raison précédente `SecretTargetFailed`, Q21). Une
+seule cible Vault
 par namespace : deux comptes d'envoi du même namespace visent le même
 `mv/<ns>/smtp`, et l'owner refuse le second (il publie alors en
 `kubernetes`).
@@ -439,19 +476,25 @@ par namespace : deux comptes d'envoi du même namespace visent le même
 | `name` | EmailLocalPart | `metadata.name` | doit égaler le `preferred_username` Authentik |
 | `aliases` | []EmailLocalPart | `[]` | `aliases`, comme ci-dessus |
 | `quota` | Quantity? | — | `quotas.maxDiskQuota`, en octets |
-| `locale`, `timeZone` | string? | — | |
+| `locale`, `timeZone` | string? | — | énumérations du schéma, sensibles à la casse (`fr-FR`, pas `fr-fr`) |
 | `state` | `Active` \| `Locked` | `Active` | voir *Verrouillage* |
 | `deletionPolicy` | `Delete` \| `Orphan` | `Orphan` | une boîte humaine ne se supprime qu'explicitement |
 
 Création avec `roles: User`, `encryptionAtRest: Disabled`,
 `permissions: Inherit` (ou `Merge` si `Locked`). Pas de credential :
 l'authentification passe par OIDC, et les App Passwords par la WebUI (D14).
-Ni `description` ni `memberGroupIds` (D5, D6).
+Ni `description` ni `memberGroupIds` (D5, D6). Les alias sont des
+local-parts (un `@` est refusé), toujours dans le domaine du compte. Changer
+`name` ou `domainRef` change l'adresse : comme pour un domaine, il faut
+`allow-disruptive-update`.
 
 #### `StalwartGroup` (namespacé) → `x:Account` `@type: Group`
 
 Champs `instanceRef`, `domainRef`, `name`, `aliases`, `quota` et
-`deletionPolicy` (`Orphan` par défaut). Création avec `roles: Default`.
+`deletionPolicy` (`Orphan` par défaut). Création avec `roles: Default`, sans
+`encryptionAtRest` : un `Group` le refuse (`invalidPatch`, Q24). Un groupe
+qui a encore des membres ne se détruit pas (`objectIsLinked`) : la
+suppression rend `ObjectIsLinked` et réessaie, sans forcer.
 `name` égale le nom du groupe Authentik publié dans le claim `groups`.
 
 La JIT crée elle-même un `x:Account` `Group` pour chaque groupe du claim,
@@ -467,7 +510,14 @@ Champs `instanceRef`, `domainRef`, `name`, `aliases`, `deletionPolicy` et
 `recipients`. `recipients` est une liste de `{address}` ou de `{accountRef}`,
 où `accountRef` est un `ObjectRef` vers un `StalwartAccount` du même
 namespace, résolu en son `status.address`. Côté Stalwart, `recipients` est
-un ensemble d'adresses (`Set<EmailAddress>`).
+un ensemble d'adresses (`Set<EmailAddress>`), stocké dans la casse envoyée.
+`deletionPolicy` vaut `Delete` par défaut : une liste ne contient aucun
+mail (Q19). `x:MailingList/query` ne filtre que par `text` (ni `name` ni
+`domainId`) : l'importer filtre lui-même le résultat.
+
+L'adresse est unique entre comptes, groupes, listes et alias, côté Stalwart
+(`primaryKeyViolation` sur `email`, avec l'`objectId` du détenteur) comme à
+la revendication unique (D16), qui couvre les quatre kinds namespacés.
 
 #### Champs comparés et normalisation
 
@@ -482,16 +532,18 @@ comme un ensemble, et chaque normalisation a son test de contrat.
 | Domain | `aliases` | ensemble | |
 | Domain | `subAddressing`, `certificateManagement`, `dnsManagement` | variante (`@type`) | |
 | Domain | `dkimManagement` | variante seule | paramètres de `Automatic` = défauts du serveur, pas d'avis |
+| ServiceAccount, Account, Group | `name`, `domainId` | égalité | changer l'un change l'adresse : `allow-disruptive-update` exigé, sinon `InvalidSpec` |
 | ServiceAccount, Account, Group | `aliases` | ensemble de `(name, domainId)`, `enabled: true` | `description` d'alias ignorée. La JIT OIDC n'ajoute aucun alias (`build_account` passe `email_aliases` vide) ; une directory LDAP ou SQL en ajouterait (`synchronize_account`), et il faudrait alors comparer en sous-ensemble |
 | ServiceAccount, Account | `roles` | variante, `User` | un compte passé `Admin` à la main est remis en `User`, avec un Event |
 | Group | `roles` | variante, `Default` | |
-| tous les comptes | `encryptionAtRest` | non comparé | posé `Disabled` à la création ; un choix fait ensuite dans la WebUI est gardé |
-| ServiceAccount, Account | `permissions` | sous-ensemble : les seules permissions que l'opérateur pose, présentes ou absentes de `disabledPermissions` | les autres entrées sont laissées ; `Inherit` distant = aucune désactivation |
+| ServiceAccount, Account | `encryptionAtRest` | non comparé | posé `Disabled` à la création ; un choix fait ensuite dans la WebUI est gardé. Absent des `Group` (Q24) |
+| ServiceAccount, Account | `permissions` | sous-ensemble : les seules permissions que l'opérateur pose, présentes ou absentes de `disabledPermissions` | les autres entrées sont laissées ; `Inherit` distant = aucune désactivation ; `Replace` distant : seules les désactivations de l'opérateur doivent manquer à `permissions`, pas d'avis sur le reste (Q18). Un patch par chemin (`permissions/disabledPermissions/x`) échoue sur `Inherit` : `permissions` est toujours envoyé en entier |
 | Account, Group | `quotas` | sous-ensemble de la map, clé `maxDiskQuota` | `2Gi` (Quantity) converti en octets (`2147483648`) avant comparaison ; les autres clés sont des défauts du serveur |
-| Account | `locale`, `timeZone` | égalité si renseignés | `locale` vaut `en-US` par défaut côté serveur |
+| Account | `locale`, `timeZone` | égalité si renseignés | `locale` vaut `en-US` par défaut côté serveur ; valeurs sensibles à la casse, refusées par le serveur sinon |
 | Account | `description`, `memberGroupIds` | non comparés | écrits par la JIT (D5, D6) |
-| MailingList | `recipients` | ensemble d'adresses | `accountRef` résolu avant comparaison |
-| ServiceAccount | credential `Password` | jamais relu | écrit à la création et à la rotation seulement |
+| MailingList | `recipients` | ensemble d'adresses, en minuscules | `accountRef` résolu avant comparaison ; le serveur garde la casse envoyée |
+| ServiceAccount | App Password de l'opérateur | jamais relu | créé à la création et à chaque rotation, l'ancien détruit dans le même appel (D24) |
+| tous les comptes | `credentials` | jamais écrit | porte le `Password`, les App Passwords et les ApiKeys ; l'envoyer effacerait les App Passwords, et une directory OIDC refuse toute écriture de `Password` |
 
 Le test « reste silencieux » du template (deux réconciliations, aucune
 écriture au second passage) tourne **contre l'image Stalwart réelle**, pas
@@ -512,7 +564,9 @@ humain dans Git. Ce que cette RFC lui garantit, et ce qu'elle attend d'elle :
 - **Identité :** `spec.name` égale le `preferred_username` Authentik. La JIT
   retombe alors sur le même compte : elle cherche par local-part et domaine
   (`account_id_from_parts`). Changer `spec.name` est une mise à jour
-  disruptive : la brique crée un nouveau CR plutôt que de renommer.
+  disruptive : la brique crée un nouveau CR (nouveau `crName`) plutôt que
+  de renommer ; un `spec.name` changé sous le même `crName` est refusé
+  ([RFC 0002](rfc-0002-liaison.md), `ImmutableFieldChangeNotAllowed`).
 - **Départ :** `spec.state: Locked`, pas une suppression (D8). Une
   suppression applique la `deletionPolicy` du CR, `Orphan` par défaut.
 - **Lecture :** `status.conditions` (`Ready`, raison) et `status.address`,
@@ -520,8 +574,8 @@ humain dans Git. Ce que cette RFC lui garantit, et ce qu'elle attend d'elle :
 - **Compte JIT déjà présent :** le CR échoue en
   `StalwartObjectAlreadyExists`. La reprise passe par
   `weebo-stalwart-importer` (`import-pending`, garde `RemoteObjectClaimed`) ;
-  l'opérateur n'adopte jamais par nom (D9). Que la brique pose elle-même
-  `import-pending` est une question de sa RFC.
+  l'opérateur n'adopte jamais par nom (D9). La brique ne pose jamais
+  `import-pending` elle-même ([RFC 0002](rfc-0002-liaison.md), D19).
 
 La RFC 0002 en tire l'**état sûr** de `StalwartAccount` : `state: Locked`
 et `Ready` à jour. **`Locked` appliqué donne `Ready: True`, raison
@@ -539,7 +593,7 @@ Tant que la brique n'existe pas, ces CR se déclarent à la main dans
 Le schéma `Account` de v0.16 n'a pas de champ `disabled`. `state: Locked`
 fait deux choses :
 
-1. ajoute `Authenticate`, `EmailSend` et `EmailReceive` aux
+1. ajoute `authenticate`, `emailSend` et `emailReceive` aux
    `disabledPermissions` (`permissions: Merge`). C'est le mécanisme du SCIM
    de Stalwart (`scim/src/users/mod.rs`, `set_active`, qui désactive
    `Authenticate`). Toute authentification passe par
@@ -551,7 +605,9 @@ fait deux choses :
 
 `Active` retire les seules désactivations posées par l'opérateur. Les App
 Passwords de l'utilisateur refonctionnent alors : les détruire au
-verrouillage serait redondant et irréversible.
+verrouillage serait redondant et irréversible. Vérifié sur l'image : compte
+verrouillé, le mot de passe et un App Password reçoivent `403` sur
+`/jmap/session` ; déverrouillé, les deux repassent (`200`).
 
 #### Codes de raison (`reason_codes!`)
 
@@ -598,7 +654,8 @@ reconcile, par la revendication unique (D16).
 `weebo_stalwart_remote_writes_total{kind, cause}` (`created`, `drift`,
 `deleted`). En plus :
 
-- `weebo_stalwart_accounts{state}` ;
+- `weebo_stalwart_accounts{state}` : `Active` ou `Locked` quand le dernier
+  reconcile est `Ready`, `NotReady` sinon (Q20) ;
 - `weebo_stalwart_api_requests_total{method,outcome}`.
 
 La page de référence des métriques et des codes vient de `@weebo/operator-docs`.
@@ -621,22 +678,26 @@ par `cargo generate`, plus l'`importer` de forgejo :
 **Réconciliation d'un compte**, sur le modèle de `reconcile_object` du
 template v0.18, à la lecture près (D9) :
 
-1. Résoudre l'instance (`InstanceDirectory`, `status.instance`) et le
-   domaine. Si le domaine n'est pas `Ready`, `DomainNotReady`.
-2. Évaluer la policy (même verdict que le webhook).
-3. Lire. Avec `status.remoteId` : `x:Account/get` par id. Une réponse vide,
-   ou dont l'adresse diffère de `status.address` (D19), vaut objet absent.
-4. Absent : vérifier qu'aucun autre CR ne revendique `domainRef + name`
+1. Résoudre l'instance (`InstanceDirectory`, `status.instance`).
+2. Évaluer la policy (même verdict que le webhook), **avant** de lire le
+   domaine : un namespace refusé n'apprend rien des domaines qui existent
+   (Q23).
+3. Résoudre le domaine. S'il n'est pas `Ready`, `DomainNotReady`.
+4. Lire. Avec `status.remoteId` : `x:Account/get` par id. Une réponse vide,
+   ou dont l'adresse (ou l'`@type`) diffère de `status.address` (D19), vaut
+   objet absent ; un `remoteId` sans `status.address` ne prouve rien non
+   plus (Q15).
+5. Absent : vérifier qu'aucun autre CR ne revendique `domainRef + name`
    (`claimants`), puis `x:Account/set create`. Un nom déjà pris côté
    Stalwart donne `StalwartObjectAlreadyExists` : on n'adopte jamais.
    Écriture comptée `cause="created"`.
-5. Présent : construire l'état voulu, le comparer aux seuls champs possédés
+6. Présent : construire l'état voulu, le comparer aux seuls champs possédés
    (*Champs comparés*), et n'envoyer un `x:Account/set update` que des
    champs qui diffèrent. Une dérive émet un Event `DriftCorrected` qui les
    nomme et compte `cause="drift"`. Sans dérive, aucun appel en écriture.
-6. Secrets : `emit::check_targets`, puis `write_all` à la création, sur un
+7. Secrets : `emit::check_targets`, puis `write_all` à la création, sur un
    nouveau nonce de rotation ou si `any_missing`.
-7. Status (`address`, `lastRotation`), condition, Event.
+8. Status (`address`, `lastRotation`), condition, Event.
 
 La suppression suit le finalizer du runtime : `force-orphan` libère sans
 rien toucher, `deletionPolicy: Orphan` libère en laissant l'objet distant,
@@ -691,9 +752,17 @@ dans le `SecretStore`.
   (`weebo-si:2.argo/helm/forgejo/values.yaml`, `[storage]`). Le nom de
   l'entrée donne le user, le bucket et le chemin `mv/<nom>/s3`.
 - **Listeners :** submission 587 (STARTTLS), IMAPS 993, HTTPS 443 (WebUI
-  et JMAP), management 8080 en interne. Tous en ClusterIP. Pas de SMTP 25
+  et JMAP), management 8080 en interne. L'image n'écoute en SMTP que sur 25
+  et 465 (TLS implicite) : le listener 587 (`x:NetworkListener`, `smtp`,
+  `tlsImplicit: false`, `[::]:587`) est créé par le bootstrap, et Stalwart
+  doit redémarrer pour le prendre (pas de rechargement à chaud). Avant
+  STARTTLS, 587 n'annonce que `XOAUTH2`/`OAUTHBEARER` ; après, `PLAIN` et
+  `LOGIN`. Tous en ClusterIP. Pas de SMTP 25
   (D22). Seul le HTTPS est exposé, par une IngressRoute Traefik
-  `mail.weebo.poc`.
+  `mail.weebo.poc`. Le nom d'hôte de Stalwart lui-même
+  (`SystemSettings.defaultHostname`, EHLO et bannières) est
+  `mail.weebo.internal` : il passe par le même contrôle que les domaines
+  (D23).
 - **TLS :** Certificate cert-manager (CA interne) monté en volume. Un
   `x:Certificate` accepte la variante `File` pour `certificate` et
   `privateKey` (`PublicText`, `SecretText`) : il pointe les fichiers montés,
@@ -719,11 +788,13 @@ dans le `SecretStore`.
   ```json
   { "@type": "Oidc", "issuerUrl": "https://auth.weebo.poc/application/o/stalwart/",
     "requireAudience": "stalwart", "claimUsername": "preferred_username",
-    "usernameDomain": "weebo.poc", "claimName": "name", "claimGroups": "groups" }
+    "usernameDomain": "weebo.internal", "claimName": "name", "claimGroups": "groups" }
   ```
 
-  Un `preferred_username` sans `@` devient `<valeur>@weebo.poc`
-  (`resolve_email`), et chaque groupe du claim `<groupe>@weebo.poc`.
+  Un `preferred_username` sans `@` devient `<valeur>@weebo.internal`
+  (`resolve_email`), et chaque groupe du claim `<groupe>@weebo.internal`.
+  `usernameDomain` n'est pas contrôlé à l'écriture, mais il doit nommer un
+  `x:Domain` existant : `weebo.poc` y ferait échouer chaque login JIT.
 - **Bootstrap** (D17), sur le modèle de
   `weebo-si:2.argo/helm/forgejo/templates/operator/token.yaml` : un même pod
   lancé en Job PostSync `stalwart-bootstrap` (après chaque sync) et en
@@ -732,21 +803,34 @@ dans le `SecretStore`.
   1. attend `/healthz/ready` ;
   2. avec l'admin de recovery (`STALWART_RECOVERY_ADMIN`, lu dans
      `mv/mail/admin`), lance `stalwart-cli apply` sur un plan d'`upsert`
-     (BlobStore, Directory `Oidc`, `Authentication.directoryId`, compte
-     `weebo-stalwart`) ;
+     (BlobStore, Directory `Oidc`, `Authentication.directoryId`, listener
+     587, compte `weebo-stalwart`) ; si le plan vient de créer le listener,
+     le Job redémarre le StatefulSet `stalwart`, une fois : aux passages
+     suivants, l'`upsert` ne change rien ;
   3. lit le jeton dans le Secret `stalwart-operator-token` (namespace
      `mail`, clé `token`) et s'arrête là si Stalwart l'accepte
      (`GET /jmap/session` en Bearer) : le cas courant ;
   4. sinon, détruit toute ApiKey du même nom sur le compte `weebo-stalwart`
      (un passage interrompu, un Secret supprimé à la main), crée l'ApiKey
-     `weebo-stalwart` (permissions `Replace`, voir *Sécurité*), dont
+     `weebo-stalwart` (permissions `Replace` avec la liste de
+     `weebo-stalwart:deploy/stalwart/operator-api-key-permissions.json`,
+     voir *Sécurité*), dont
      `x:ApiKey/set` renvoie le secret une seule fois dans `created`, et
-     l'écrit dans le Secret.
+     l'écrit dans le Secret ;
+  5. fait de même pour la seconde clé (D24), clé `appPasswordToken` du même
+     Secret, avec `app-password-key-permissions.json`.
+
+  Les deux clés sont créées par l'admin de recovery, avec
+  `x:ApiKey/set {"accountId": <compte weebo-stalwart>, …}` : le compte de
+  l'opérateur n'a pas de mot de passe (une directory OIDC le refuserait),
+  et le plan n'envoie jamais ses `credentials`, qui porteraient ses clés.
 
   La `StalwartInstance` pose `tokenSecretRef: {name: stalwart-operator-token,
-  namespace: mail, key: token}`, comme la `ForgejoInstance` lit son jeton
+  namespace: mail, key: token}` et `appPasswordTokenSecretRef` sur la clé
+  `appPasswordToken` du même Secret, comme la `ForgejoInstance` lit son jeton
   dans le namespace `forgejo`. Le ServiceAccount du Job n'a que `create`
-  sur les Secrets et `get`/`update` sur ce Secret-là, dans `mail`. Il n'a
+  sur les Secrets, `get`/`update` sur ce Secret-là et `patch` sur le
+  StatefulSet `stalwart` (redémarrage pour le listener 587), dans `mail`. Il n'a
   aucun droit Vault en écriture : `mail-read` lui suffit. Le Secret est créé
   à l'exécution, hors de l'Application : Argo ne le diffe ni ne le prune.
   L'admin de recovery reste en place comme break-glass, son mot de passe
@@ -796,21 +880,36 @@ dans le `SecretStore`.
 
 ## Sécurité
 
-- **Privilèges dans Stalwart :** l'ApiKey de l'opérateur est en
-  `permissions: Replace` avec seulement :
+- **Privilèges dans Stalwart :** l'opérateur a deux ApiKeys. La
+  principale est en
+  `permissions: Replace`, avec 258 permissions
+  (`weebo-stalwart:deploy/stalwart/operator-api-key-permissions.json`) :
   - `sysDomain{Get,Query,Create,Update}` (pas `sysDomainDestroy`, D18) ;
   - `sysAccount{Get,Query,Create,Update,Destroy}` ;
   - `sysMailingList{Get,Query,Create,Update,Destroy}` ;
-  - ce qu'exigent la session JMAP et `/api/schema` (Q1).
+  - **toutes les permissions du rôle `User`**, dont `sysApiKey*`,
+    `sysAppPassword*` (sur son propre compte) et `jmap*`, `jmapEmail*`
+    compris.
 
-  Pas d'`impersonate` (D14), aucun `sysApiKey*` ni `sysAppPassword*`, aucun
-  `jmapEmail*`, aucun singleton de settings. `sysApiKey*` existe : seul le
-  bootstrap s'en sert, avec l'admin de recovery. Le bootstrap seul touche
-  aux singletons.
+  La session JMAP, `POST /jmap` et `/api/schema` ne demandent que
+  `authenticate` (Q1). Mais une clé ne peut pas accorder une permission
+  qu'elle n'a pas, et créer un compte `User` accorde au compte celles du
+  rôle `User` : sans elles, `x:Account/set create` est refusé. Le spike le
+  vérifie (`spike_the_operator_key_permissions`). Restent exclus :
+  `impersonate` (D14), `sysDomainDestroy` (D18), le rôle `Admin` (un
+  passage en `Admin` est refusé `forbidden`) et les singletons de
+  settings, que seul le bootstrap touche avec l'admin de recovery.
+
+  La seconde (D24) est en `permissions: Replace` avec `authenticate`,
+  `impersonate`, `emailSend` et `sysAppPassword{Create,Get,Update,Destroy,Query}`
+  (`weebo-stalwart:deploy/stalwart/app-password-key-permissions.json`).
+  Elle ne sert qu'à créer, lister et détruire les App Passwords des comptes
+  d'envoi. Vérifié : `Email/query` et `x:Account/set` lui sont refusés, et
+  elle ne peut accorder à un App Password que ce qu'elle a elle-même.
 - **Privilèges Kubernetes :**
   - CRUD sur ses CRDs, et aucun droit sur les CRD d'un autre opérateur ;
-  - lecture du Secret `stalwart-operator-token` dans `mail` (jeton de
-    l'instance), Secrets des cibles `kubernetes` ;
+  - lecture du Secret `stalwart-operator-token` dans `mail` (les deux
+    jetons de l'instance), Secrets des cibles `kubernetes` ;
   - Events et Lease.
 - **Vault :** le rôle `stalwart-operator`, sur `mv/data/+/smtp` et
   `mv/metadata/+/smtp` seulement (D15, et l'invariant de *Vault*). La règle
@@ -822,7 +921,7 @@ dans le `SecretStore`.
     `StalwartNamespacePolicy` (kind, domaine, noms), et les alias restent
     dans le domaine du compte. Chaque namespace d'app a une règle `Allow`
     qui liste ses noms et alias (`forgejo: [forgejo, noreply]`), comme
-    `allowedUsers` chez forgejo : il ne peut prendre ni `admin@weebo.poc`
+    `allowedUsers` chez forgejo : il ne peut prendre ni `admin@weebo.internal`
     ni le nom d'un futur utilisateur. La règle `Deny` réserve les noms
     d'infra pour tous les kinds de compte, `mail` compris. La revendication
     unique fait le reste : un nom déjà possédé par un CR ne peut pas être
@@ -843,20 +942,32 @@ dans le `SecretStore`.
     revendication unique.
   - Usurpation de `From` : `MtaStageAuth.mustMatchSender` vaut `true` par
     défaut, donc le `MAIL FROM` doit appartenir au compte authentifié. Que
-    ses alias comptent (`From: noreply@…` pour `forgejo`) se vérifie au
-    spike (Q8).
+    ses alias comptent (`From: noreply@…` pour `forgejo`) est vérifié :
+    adresse et alias passent, tout le reste est refusé en `501` (Q8).
 - **Rayon d'impact :** un opérateur compromis peut créer, modifier,
-  verrouiller ou supprimer des comptes, des groupes et des listes, poser
-  le mot de passe des comptes d'envoi, et lire et écrire les secrets
-  `mv/+/smtp`. Il ne peut ni changer la config du serveur, ni créer d'ApiKey
-  ou d'App Password, ni rien envoyer hors du cluster (D12). **Sans
-  `impersonate`, il ne lit aucun mail par JMAP.** Une réserve, à lever au
-  spike (Q1) : si `sysAccountUpdate` permet de poser une credential
-  `Password` sur n'importe quel compte, il peut s'authentifier comme un
-  utilisateur et lire sa boîte. Si c'est le cas, le rayon d'impact inclut
-  la lecture des boîtes, et il faudra le dire. Un Stalwart compromis reste
-  enfermé dans le namespace `mail` par l'egress.
-- **Secrets :** les mots de passe ne sont jamais logués, ni mis dans le
+  verrouiller ou supprimer des comptes, des groupes et des listes, et lire
+  et écrire les secrets `mv/+/smtp`. Il ne peut ni changer la config du
+  serveur, ni rendre un compte administrateur, ni rien envoyer hors du
+  cluster (D12).
+  - **Il ne lit aucune boîte.** Sous la directory OIDC, Stalwart refuse
+    toute écriture de `Password`, même à `sysAccountUpdate` : la prise de
+    contrôle d'un compte par son mot de passe, possible sans OIDC (Q1),
+    disparaît. La clé principale n'a pas `impersonate`, la seconde n'a
+    aucune permission `jmap*`.
+  - **Il peut envoyer au nom de n'importe qui.** La seconde clé crée un
+    App Password sur n'importe quel compte, administrateurs compris, avec
+    au plus `authenticate` et `emailSend` utiles : de quoi soumettre un mail
+    sur 587 sous cette identité, pas lire ses mails. C'est accepté pour la
+    v1 : le mail ne sort pas du cluster (D12), et chaque App Password créé
+    porte la description `weebo-stalwart`, visible dans la WebUI du compte.
+  - Une configuration sans OIDC (directory par défaut interne) rouvrirait
+    la lecture des boîtes par `sysAccountUpdate` : `Authentication.directoryId`
+    sur `Oidc` fait donc partie du modèle de sécurité, pas seulement du
+    login.
+
+  Un Stalwart compromis reste enfermé dans le namespace `mail` par
+  l'egress.
+- **Secrets :** les App Passwords et les jetons ne sont jamais logués, ni mis dans le
   status ou les Events. Le status ne porte que `lastRotation` (le nonce
   consommé) et `address`. Le client JMAP masque le header `Authorization`
   dans ses traces OTLP.
@@ -880,13 +991,19 @@ dans le `SecretStore`.
     resync de l'Application `mail`.
 - **Rollout :**
   1. Phase 0 : Stalwart, bootstrap et domaine par un plan `apply`, sans
-     opérateur. Envoi de test depuis un pod.
+     opérateur, directory `Oidc` créée mais pas encore par défaut : les
+     comptes d'envoi du plan utilisent les mots de passe de Terraform.
+     Envoi de test depuis un pod.
   2. Opérateur avec `StalwartInstance`, puis `weebo-stalwart-importer` pour
      relier le domaine et les comptes créés par le plan à leurs CR
      (`import-pending`). C'est le chemin de migration du kit, jamais une
      adoption par nom. Pour un compte d'envoi, la ressource Terraform de
      `mv/<app>/smtp` est retirée d'abord, puis l'import force une rotation
-     (D21).
+     (D21) : le compte reçoit son App Password (D24), publié dans
+     `mv/<app>/smtp`. Ce n'est qu'ensuite que `Authentication.directoryId`
+     passe sur la directory `Oidc` (`oidc.default: true` dans le chart) :
+     les mots de passe de la phase 0 deviennent inutilisables, sans effet
+     sur les apps qui ont déjà leur App Password.
   3. `StalwartServiceAccount` forgejo, test de reset de mot de passe de bout
      en bout, puis Authentik, puis Argo CD.
   4. `StalwartAccount` d'un seul user déclaré à la main, verrouillage et
@@ -973,7 +1090,14 @@ dans le `SecretStore`.
    cette RFC). Ça donnerait des App Passwords déclaratifs, publiés dans
    Vault, mais l'opérateur pourrait lire toutes les boîtes, et il faudrait
    décider qui lit le secret et comment il arrive à l'utilisateur. Écarté
-   pour la v1 (D14).
+   pour la v1 (D14). D24 n'en reprend que le mécanisme, pour les comptes
+   d'envoi et avec une clé sans `jmap*`.
+9. **Comptes d'envoi par mot de passe** (version précédente de cette RFC).
+   Incompatible avec une directory OIDC par défaut en édition
+   communautaire (D24). Les garder imposerait de renoncer à OIDC pour les
+   utilisateurs, ou l'édition Enterprise (directory par domaine).
+10. **`impersonate` sur la clé principale.** Une seule clé, mais qui lirait
+    toutes les boîtes avec ses `jmap*`. Écarté au profit de D24.
 
 ## Inconvénients et risques
 
@@ -990,7 +1114,9 @@ dans le `SecretStore`.
   visible tout de suite.
 - **Le verrouillage n'est pas un état natif.** Il repose sur des permissions
   désactivées : si l'opérateur part, l'état `Locked` reste dans Stalwart,
-  mais personne ne le surveille.
+  mais personne ne le surveille. Une boîte verrouillée reste visible de
+  l'extérieur : le `RCPT` est accepté, puis un DSN revient à l'expéditeur
+  (Q4). Sans MX public (D12), le risque de backscatter reste interne.
 - **Pas d'App Password déclaratif.** Un utilisateur doit créer le sien dans
   la WebUI, et l'opérateur ne les voit pas.
 - **Pas de garantie de délivrance hors du cluster.** C'est voulu, mais une
@@ -1011,17 +1137,37 @@ notées ; le spike les confirme sur l'image.
 
 | # | Question | Bloquant |
 | --- | --- | --- |
-| Q1 | Le Bearer est acquis (`stalwart-cli --api-key`, `STALWART_TOKEN`). Reste : avec `Replace`, quelles permissions faut-il en plus des `sys*` pour `GET /jmap/session`, `POST /jmap` et `GET /api/schema` ? Et `sysAccountUpdate` permet-il de poser une credential `Password` sur un compte utilisateur (rayon d'impact) ? Si oui, peut-on l'interdire sans perdre les comptes d'envoi ? | oui |
+| Q1 | ~~Avec `Replace`, quelles permissions en plus des `sys*` ? `sysAccountUpdate` peut-il poser un `Password` ?~~ **Tranchée au spike :** `authenticate` suffit à la session, à `POST /jmap` et à `/api/schema`, mais la clé doit porter les 258 permissions du rôle `User` pour créer des comptes (*Sécurité*). `sysAccountUpdate` pose le mot de passe de n'importe quel compte : le rayon d'impact inclut la lecture des boîtes, sans permission plus fine pour l'éviter. | ~~oui~~ |
 | Q2 | ~~`x:AppPassword/set` renvoie-t-il `secret` ? Peut-on en créer pour autrui ?~~ **Lu dans le source :** `{id, secret}` dans `created`, une seule fois ; pour un autre compte, il faut `impersonate` (D14). Reste : un utilisateur OIDC peut-il créer son App Password dans la WebUI, et avec quelles permissions (`Inherit` par défaut) ? | non (v1 sans `StalwartAppPassword`) |
 | Q3 | ~~La JIT rattache-t-elle le compte pré-créé ? Quels champs écrit-elle ?~~ **Lu dans le source :** elle reprend le compte de même local-part et domaine, réécrit `description` (claim `name`), remplace `memberGroupIds`, crée un `Group` par groupe du claim, n'ajoute aucun alias en OIDC. Reste : un nom de groupe qui n'est pas un local-part valide (`authentik Admins`) fait-il échouer le login, ou est-il ignoré ? | non |
-| Q4 | ~~Forme de `Account.permissions` ?~~ **Lu dans le source :** `Merge` avec `disabledPermissions`, qui priment ; `EmailSend` vérifié à l'AUTH SMTP, `EmailReceive` à la livraison. Reste : un destinataire verrouillé est-il refusé au `RCPT` ou accepté puis rejeté par un DSN ? Un App Password en permissions `Replace` contourne-t-il le `Authenticate` désactivé du compte ? | non |
+| Q4 | ~~Forme de `Account.permissions` ? Destinataire verrouillé ? App Password en `Replace` ?~~ **Tranchée au spike (SMTP) :** `Merge` avec `disabledPermissions`, qui priment. Un destinataire verrouillé (ou un compte d'envoi sans `receive`) est **accepté au `RCPT`** (`250`), puis rejeté à la livraison locale par un DSN (`550 5.5.0 This account is not authorized to receive email`) ; un destinataire inconnu est refusé au `RCPT` (`550 5.1.2`). Un App Password en `Replace` ne garde que les permissions que le compte a encore (`access_token.rs`) : verrouillé, mot de passe et App Password reçoivent `550 5.7.1` à l'AUTH sur 587 et `403` en JMAP. | ~~non~~ |
 | Q5 | ~~Un `x:Certificate` doit-il porter le PEM ?~~ **Tranchée :** variante `File` pour le certificat et la clé. Reste : Stalwart relit-il les fichiers quand cert-manager les renouvelle ? | non (contournement : redémarrage au renouvellement) |
 | Q6 | ~~Faut-il `sysDomainDestroy` ?~~ **Tranchée :** non, `StalwartDomain` n'accepte que `Orphan` (D18). | ~~non~~ |
 | Q7 | Faut-il faire passer le pull de l'image Stalwart par angos ? | non |
-| Q8 | ~~Stalwart refuse-t-il un `MAIL FROM` hors du compte ?~~ **Lu dans le source :** `MtaStageAuth.mustMatchSender` vaut `true` par défaut. Reste : les alias du compte sont-ils acceptés comme expéditeur ? | non |
+| Q8 | ~~Les alias du compte sont-ils acceptés comme expéditeur ?~~ **Tranchée au spike (SMTP) :** oui. Avec `mustMatchSender` par défaut, l'adresse du compte et ses alias passent (`250`, toute casse) ; l'adresse d'un autre compte, une adresse étrangère et une sous-adresse (`svc+tag@`) sont refusées (`501 5.5.4`). Les credentials publiés (`host`, `port`, `username`, `password`, `from`) envoient de bout en bout. | ~~non~~ |
 | Q9 | ~~`dkimManagement: Automatic` sans DNS génère-t-il une clé ?~~ **Tranchée :** oui, clés générées et actives, sans rotation ni publication. | ~~non~~ |
-| Q10 | Le hash de `/api/schema` change-t-il à chaque patch, ou seulement quand le schéma change ? Si c'est à chaque patch, D13 coûte une release par semaine : on garderait alors le seul test de contrat, sans contrôle à l'exécution. | non |
+| Q10 | ~~Le hash de `/api/schema` change-t-il à chaque patch ?~~ **Tranchée au spike :** non, c'est le hash du schéma. v0.16.25, .26 et .27 servent le même (`Pzykh-dZ4p6qVJ7wVulQvyF7-1aRB8fI6GcjdJMWK2Q`), v0.16.0 un autre. D13 ne coûte une release que quand le schéma bouge. | ~~non~~ |
 | Q11 | Quel moteur d'alerte pour weebo-si : alertes ClickStack (HyperDX), ou un Prometheus pour les `PrometheusRule` du kit ? Commun à tous les opérateurs, donc à trancher hors de cette RFC. | non |
+
+**Points tranchés à l'implémentation.** Le code les cite
+(`// RFC 0001 Qn:`), et ils restent à valider avec la RFC :
+
+| # | Point | Choix |
+| --- | --- | --- |
+| Q12 | Quand lire la session et le hash de schéma ? | Une fois par gateway, donc par reconcile (deux GET avant le premier appel), sans cache entre reconciles. `accountId` = le compte `urn:stalwart:jmap` de la session. |
+| Q13 | `catchAll` absent de la spec | « Pas d'avis » (RFC 0003) : jamais effacé, jamais comparé. |
+| Q14 | Renommage refusé (domaine, adresse d'un compte) | `InvalidSpec`, le CR garde son id et son adresse confirmée. |
+| Q15 | `remoteId` sans `status.address` (status édité à la main) | Ne prouve rien : création, qui échoue en `StalwartObjectAlreadyExists` si l'objet existe. |
+| Q16 | `secretStore` sur `StalwartLocalInstance` ? | Non, comme forgejo : ses CR n'écrivent que des Secrets Kubernetes, l'identité Vault de l'opérateur étant commune à tous les namespaces. |
+| Q17 | Où refuser `Delete` sur `StalwartDomain` (D18) ? | Trois fois : règle CEL du schéma, webhook, reconcile (`InvalidSpec`). Tient sans webhook. |
+| Q18 | `permissions: Replace` posé à la main sur un compte | Seules les désactivations de l'opérateur doivent manquer à `permissions` ; pas d'avis sur les permissions accordées. |
+| Q19 | `deletionPolicy` par défaut d'une liste | `Delete` : une liste ne contient aucun mail. |
+| Q20 | Labels de `weebo_stalwart_accounts{state}` | `Active`, `Locked` (dernier reconcile `Ready`), `NotReady`. |
+| Q21 | « Mot de passe pas écrit partout » | Raison `Ready` précédente `SecretTargetFailed`, sans champ `secretPending` (forgejo en a un) : rotation au passage suivant. |
+| Q22 | Mécanique de D21 | L'importer pose un nonce `rotate-secret` neuf (`import-<secondes unix>`) et `status.instance`. |
+| Q23 | Ordre policy / domaine | La policy d'abord (*Architecture*). |
+| Q24 | `encryptionAtRest` | Sur les comptes `User` seulement : un `Group` le refuse. |
+| Q25 | Écriture du secret d'un compte d'envoi | Remplacé par D24 : un App Password en `Replace{authenticate, emailSend}`, créé et tourné par `x:AppPassword/set`, jamais par `credentials`. |
 
 ## Travaux futurs
 
@@ -1044,7 +1190,7 @@ notées ; le spike les confirme sur l'image.
 - **`StalwartSieveScript`** (filtres par compte) et boîtes partagées avec
   ACL.
 - **La brique de liaison entre opérateurs**
-  ([RFC 0002](https://github.com/batleforc/weebo-si/blob/develop/0.docs/content/docs/rfc/0002-liaison.md)) :
+  ([RFC 0002](rfc-0002-liaison.md)) :
   `AuthentikUser` → `StalwartAccount`, départ → `state: Locked`, groupes
   Authentik → `StalwartGroup`. Elle consomme le contrat de *Ce que la
   brique de liaison consomme*.
@@ -1064,12 +1210,15 @@ Chaque case est une PR qu'on peut merger seule.
 
 **Spike (avant `Accepted`)**
 
-- [ ] Stalwart v0.16.27 en podman, avec un Authentik de test ou un IdP
-      mock : réponse à Q1, et confirmation sur l'image de ce qui est lu
-      dans le source (Q2–Q5, Q8–Q10), consignées dans le changelog de cette
-      RFC
+- [x] Stalwart v0.16.27 en podman (`weebo-stalwart:.tasks/stalwart.yaml`) :
+      Q1, Q4, Q8 et Q10 tranchées, D18, D19, D20 et D23 vérifiées,
+      constats consignés dans le changelog. Restent, avec un IdP : Q2, Q3 ;
+      sur un renouvellement cert-manager : Q5
 
 **Phase 0 — weebo-si, sans opérateur**
+
+Le domaine du plan est `weebo.internal` (D23), et le bootstrap crée la clé
+avec la liste de 258 permissions (*Sécurité*).
 
 - [ ] `weebo-si:2.terra` : `mail.tf` (`mv/mail/{pg,admin}`, rôles
       `mail-read` et `stalwart-operator` avec la policy de D15), `s3.tf`
@@ -1093,6 +1242,11 @@ Chaque case est une PR qu'on peut merger seule.
       testé de bout en bout
 
 **Phase 1 — weebo-stalwart v0.1.0**
+
+Phases 1 et 2 implémentées le 2026-10-19 dans un dépôt local, sans commit
+(migration des dépôts vers une organisation en cours) : `task test:all`,
+`task audit` et la suite live contre l'image verts. Les cases se cochent à
+la publication.
 
 - [ ] Dépôt rendu par `task template:render` /
       `cargo generate --tag v0.18.x templates/operator` (`product = Stalwart`),
@@ -1184,7 +1338,7 @@ Chaque case est une PR qu'on peut merger seule.
   `2.terra/vault/terra-map/{forgejo,s3}.tf`, `1.pulu-conf/main.go`
   (Argo CD), `2.argo/helm/monitoring/dashboards/README.md`
 - RFC de weebo-si :
-  [0002 — brique de liaison](https://github.com/batleforc/weebo-si/blob/develop/0.docs/content/docs/rfc/0002-liaison.md),
+  [0002 — brique de liaison](rfc-0002-liaison.md),
   [0003 — n'écrire que ce qui diffère](https://github.com/batleforc/weebo-si/blob/develop/0.docs/content/docs/rfc/0003-authentik-ecritures.md)
 - weebo-si-hardening : gabarit RFC (`docs/rfc/0000-template.md`)
 
@@ -1196,3 +1350,5 @@ Chaque case est une PR qu'on peut merger seule.
 | 2026-10-18 | Alignement strict sur weebo-operator-kit v0.17.0 : `LocalInstance` gardée, `StalwartDomain` cluster-scoped (`ObjectRef` sans namespace), dimensions d'allow-list `domains`/`names` au lieu de `reservedNames`, plus d'adoption par nom (importer + `import-pending`), `deletionPolicy` limitée à `Delete`/`Orphan`, `rotate-secret` en nonce, `Status` et codes du template, plus de `basicAuthSecretRef` ni de `versionRange`, `pathPrefix: ""` sans `pathGrants` |
 | 2026-10-18 | Lien Authentik → Stalwart sorti de l'opérateur : `StalwartAccountSource`, reflector `AuthentikUser`, RBAC sur `authentik.weebo.io` et codes `SourceOutsideScope`/`ChildrenNotReady` retirés. Une autre brique, qui lie les opérateurs entre eux, consomme les `StalwartAccount` (D7, alternative 5) |
 | 2026-10-18 | Revue du 2026-10-18 appliquée ; RFC déplacée dans weebo-operator-kit. Kit v0.18.x et modèle de la RFC 0003 (*Champs comparés*, « reste silencieux » contre l'image) ; API par `POST /jmap` ; version par hash de schéma (D13) ; `StalwartAppPassword` repoussé, App Passwords en libre-service (D14) ; policy Vault `mv/{data,metadata}/+/smtp` et invariant sur les chemins sans owner (D15) ; unicité au reconcile (D16) ; jeton par Secret Kubernetes revalidé chaque jour (D17) ; `StalwartDomain` en `Orphan` seul (D18) ; garde d'identité sur `remoteId` (D19) ; `Locked` = `Ready: True` et App Passwords gardés (D20) ; rotation à l'import (D21) ; port 25, sonde et alertes retirés de la v1 (D22) ; types Stalwart corrigés (`roles`, `encryptionAtRest`, alias, quotas, `subAddressing`, DKIM, BlobStore, `recipients`) ; allow-list par namespace et `Deny` sur tous les kinds ; Q2–Q6, Q8, Q9 tranchées ou réduites, Q10–Q11 ajoutées ; plan Argo, Vault, bucket et Argo CD corrigés |
+| 2026-10-19 | Spike et implémentation : domaine `weebo.internal` (D23, Stalwart refuse `.poc`) ; clé de l'opérateur à 258 permissions et lecture des boîtes dans le rayon d'impact (Q1, D10, *Sécurité*) ; Q10 tranchée (hash stable de v0.16.25 à .27) ; noms de permission en camelCase ; `encryptionAtRest` absent des groupes ; `credentials` jamais envoyé en entier ; `locale`/`timeZone` sensibles à la casse ; `x:MailingList/query` par `text` seulement ; policy évaluée avant le domaine ; `name`/`domainId` des comptes comparés ; défaut `Delete` des listes ; labels de `weebo_stalwart_accounts` ; points Q12–Q25 tranchés à l'implémentation ; Q4 et Q8 tranchées en SMTP (verrouillé = DSN après `RCPT`, alias acceptés en expéditeur) ; listener 587 à créer au bootstrap |
+| 2026-10-19 | Comptes d'envoi par App Password et seconde clé à `impersonate` (D24, vérifiée sous une directory OIDC par défaut) : la directory OIDC refuse les mots de passe en édition communautaire ; D14, *Sécurité* (plus de lecture des boîtes, envoi au nom de tous accepté), bootstrap (deux clés par l'admin, compte opérateur sans mot de passe), rollout (OIDC par défaut après l'import), `appPasswordTokenSecretRef` sur les instances, Q25 remplacée |
