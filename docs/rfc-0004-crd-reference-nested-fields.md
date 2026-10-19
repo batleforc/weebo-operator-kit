@@ -2,7 +2,7 @@
 
 | Field       | Value                                                                                  |
 | ----------- | -------------------------------------------------------------------------------------- |
-| Status      | Accepted (2026-10-19, après grill) ; revue appliquée le 2026-10-19. Phase 1 livrée en **v0.18.1** (`f9b0729`), phase 2 à faire |
+| Status      | Accepted (2026-10-19, après grill) ; revue appliquée le 2026-10-19. Phase 1 livrée en **v0.18.1** (`f9b0729`), phase 2 écrite (§17), à publier |
 | Short       | Référence CRD complète                                                                 |
 | Settles     | Ce que `weebo-crd-docs` écrit sous le tableau des champs de `spec`, et comment il échappe le texte des CRD |
 | Author      | Max Batleforc <maxleriche.60@gmail.com>                                                |
@@ -818,6 +818,63 @@ Aucune.
 
 ---
 
+## 17. Revision against the tree (2026-10-19)
+
+La phase 2 est écrite sur la branche `feat/crd-nested-fields`. Ce qui diffère
+du texte, avec la raison :
+
+- **Règles hors objet.** §4.2 ne rend que les règles d'un objet. Or 39 des
+  180 règles des six dépôts sont posées sur une chaîne (`prefix`,
+  `allowed_ports[]`) ou une liste (`verbs`, `exec.commands[]`,
+  `auth.webhooks`) : elles auraient manqué à la page, contre le goal 3. Elles
+  sont listées dans les **Rules** de l'objet qui porte le champ, précédées de
+  son nom et de son suffixe (`` `verbs`: … ``, `` `allowed_ports[]`: … ``).
+- **Backticks orphelins échappés.** Découper en paragraphes ne suffit pas en
+  cellule : les paragraphes y finissent sur une seule ligne, où un ` ``` `
+  orphelin du premier s'apparie avec celui d'un paragraphe suivant, et le
+  `<br /><br />` atterrit dans le span (le cas `Quantity`). `mdxText` écrit
+  donc chaque backtick d'une séquence orpheline `` \` ``. Le test l'a trouvé.
+- **Écriture différée.** Pour le point 8 (« aucune page n'est écrite »), le
+  générateur construit toutes les pages avant de nettoyer et d'écrire les
+  dossiers de sortie. Un exemple faux ou un nom refusé laisse aussi les pages
+  précédentes en place.
+- **Table des matières.** `tableOfContent={{ enabled: true }}` est passé à
+  toutes les pages, pas seulement aux pages `full` : c'est déjà la valeur par
+  défaut des autres (`tocEnabled = !full`).
+- **Valeurs d'enum et tableaux.** `Values:` lit l'enum du champ, ou celui des
+  éléments d'un tableau (`verbs`). Les contraintes ne lisent que le champ.
+- `bin/weebo-crd-docs.mjs` n'est pas touché : le compte passe par le
+  `console.warn` du générateur (§6.1).
+
+**Ce que la preuve a observé** (weebo-forgejo v0.5.0, Next 16.4.1, tarball
+de `task docs:pack` installée par `npm install --install-links`) :
+
+1. `gen:crds` affiche le compte par kind (`ForgejoRepository: 46 fields
+   without a description`). `next build` à froid : 12 s avec la v0.18.1, 12 s
+   avec la branche.
+2. `forgejorepository/index.html` porte `id="spec.fromTemplate"` et trois
+   `href="#spec.fromTemplate"`. À 1440 px (Chromium 1248, Playwright 1.64.1),
+   la table latérale `#nd-toc` est visible avec ses 13 sections, et le
+   formulaire et l'aperçu tiennent côte à côte dans la colonne, sans
+   défilement horizontal (`scrollWidth` 1434).
+3. ProxyAuthK8S : à faire sur la branche de sa phase 3. Hors site, la page
+   générée a 48 sections (la page crdoc en compte 53 ; l'écart n'est pas
+   encore expliqué), `Exactly one of` et ses cinq
+   variantes sous `spec.cert`, et se compile.
+4. L'index `/api/search` contient « a path pattern has no » (règle de
+   `pathGrants[].paths[]`), absent de l'index v0.18.1, avec des URL vers
+   `#spec.…`. Taille : 1 947 319 → 2 796 275 octets (+44 %, budget +100 %).
+5. `llms-full.txt` contient `` `paths[]`: a path pattern has no "." or ".."
+   segment — `!self.matches('(^|/)\\.\\.?(/|$)')` ``.
+7. et 8. : dans le test du kit (`crd text never reaches MDX as code`,
+   `duplicate anchors are refused, and no page is written`).
+
+Les six dépôts passent par le générateur et le compilateur MDX
+(`remark-gfm`, `remarkHeading`) sans erreur : 48, 59, 20, 90, 96 et 30
+sections ; aucune ancre sans titre, aucun lien mort, aucun `<script>`, `<img>`
+ni `<br />` affiché dans du code. Page la plus lourde : 83 Ko
+(`BatleHubLocalInstance`), sous les 150 Ko de §7.5.
+
 ## Références
 
 - weebo-operator-kit : `packages/operator-docs/src/crd-docs/generate.mjs`
@@ -851,3 +908,4 @@ Aucune.
 | 2026-10-19 | Grill : acceptée, deux releases (correctif seul en v0.18.1) |
 | 2026-10-19 | Phase 1 livrée : `mdxText` en v0.18.1 (`f9b0729`), synchronisée dans weebo-forgejo v0.5.0 et weebo-authentik v0.19.0 |
 | 2026-10-19 | Revue appliquée : table des matières coupée par `full: true` (§6.2) ; invariant de §5.2 étendu à `codeSpan` (noms, défauts, enums, short names, `apiVersion`, `kind`) ; T1 réécrit (job de build en lecture seule, enjeu = robustesse du build et intégrité du site) et T6 (images) ajouté ; preuve 6 par `globalThis.process.getBuiltinModule` ; paragraphes découpés avant le code (`Quantity`) ; goal 2 en « Markdown inline, sans JSX ni image » ; harnais avec `remark-gfm`, `remarkHeading` et `CrdForm` factice ; §8 corrigé (audit des devDependencies, pas de Dependabot, épinglage) ; `x-kubernetes-int-or-string`, enums avec `null`, union d'une branche, contraintes de schéma, jeu de caractères des ancres et `customId`, tableaux de tableaux ; `llms-full.txt` et noms des routes ; budget d'index de recherche ; chiffres mis à jour (weebo-stalwart 8 kinds, 842 descriptions, 180 règles, 117 enums) ; « exactement la page d'aujourd'hui » retiré ; migration (`regen-and-diff`, ProxyAuthK8S en pnpm) ; *Touches*, *Références* et *Changelog* complétés |
+| 2026-10-19 | Phase 2 écrite, §17 : règles hors objet, backticks orphelins échappés, écriture différée ; preuve sur weebo-forgejo |

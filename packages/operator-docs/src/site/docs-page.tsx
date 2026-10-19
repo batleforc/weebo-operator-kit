@@ -58,7 +58,9 @@ export function createDocsPage<C extends MdxLoaderConfig>({
     const { user, repo, branch, contentDir } = site.git;
 
     return (
-      <DocsPage toc={page.data.toc} full={page.data.full}>
+      // `full` turns the side TOC off in fumadocs-ui; a CRD page is full for its
+      // form, and long enough to need the TOC.
+      <DocsPage toc={page.data.toc} full={page.data.full} tableOfContent={{ enabled: true }}>
         <DocsTitle>{page.data.title}</DocsTitle>
         <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
         <div className="flex flex-row gap-2 items-center border-b pb-6">
