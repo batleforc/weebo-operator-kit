@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.19.0](https://github.com/batleforc/weebo-operator-kit/compare/596c1db866debe1ac02f6c3c8cad8934f8a0a65a..v0.19.0) - 2026-10-19
+#### Features
+- (**operator-docs**) nested CRD fields (RFC 0004 phase 2) (#12) - ([596c1db](https://github.com/batleforc/weebo-operator-kit/commit/596c1db866debe1ac02f6c3c8cad8934f8a0a65a)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.18.2](https://github.com/batleforc/weebo-operator-kit/compare/05a8bd46b8ba9df278388ba19762fe862c62dbb5..v0.18.2) - 2026-10-19
 #### Features
 - (**runtime**) WEEBO_WORKER_THREADS, 4 tokio workers by default (#11) - ([9a9f585](https://github.com/batleforc/weebo-operator-kit/commit/9a9f585f151eb1233416bc566c241eaa9d5b688d)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
