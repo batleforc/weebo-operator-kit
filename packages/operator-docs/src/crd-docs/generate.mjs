@@ -366,8 +366,10 @@ export function generateCrdDocs(config, { root }) {
   // pages in place, not half of a new set.
   const writes = [];
 
-  const files = fs
-    .readdirSync(crdDir)
+  const group = config.reference?.group;
+  // A component without CRDs (only config and admission policies) may have
+  // no CRD directory at all, as long as it names its group for the reference.
+  const files = (group && !fs.existsSync(crdDir) ? [] : fs.readdirSync(crdDir))
     .filter((f) => f.endsWith(".yaml"))
     .sort();
   const index = [];
@@ -470,16 +472,28 @@ ${rows.map((r) => `| ${r} |`).join("\n")}
     `${JSON.stringify(index.map(({ kind, singular, scope }) => ({ kind, singular, scope })), null, 2)}\n`,
   ]);
 
-  fs.mkdirSync(mdxOutDir, { recursive: true });
-  fs.mkdirSync(schemaOutDir, { recursive: true });
-  clean(mdxOutDir, [".mdx", "meta.json"]);
-  clean(schemaOutDir, [".json"]);
-  for (const [file, content] of writes) fs.writeFileSync(file, content);
-
   if (config.reference) {
-    if (groups.size !== 1) throw new Error(`the CRDs span ${groups.size} API groups, the reference needs one`);
-    generateReference(config.reference, { root, group: [...groups][0] });
+    if (groups.size > 1) throw new Error(`the CRDs span ${groups.size} API groups, the reference needs one`);
+    const [crdGroup] = groups;
+    if (!crdGroup && !group) {
+      throw new Error(`no CRD in ${crdDir}: set reference.group, the API group the reference pages name`);
+    }
+    if (crdGroup && group && crdGroup !== group) {
+      throw new Error(`reference.group is ${group}, but the CRDs' group is ${crdGroup}`);
+    }
   }
+
+  // With no CRD and a reference group, the component has no CRD section:
+  // nothing is written there.
+  if (files.length || !group) {
+    fs.mkdirSync(mdxOutDir, { recursive: true });
+    fs.mkdirSync(schemaOutDir, { recursive: true });
+    clean(mdxOutDir, [".mdx", "meta.json"]);
+    clean(schemaOutDir, [".json"]);
+    for (const [file, content] of writes) fs.writeFileSync(file, content);
+  }
+
+  if (config.reference) generateReference(config.reference, { root, group: group ?? [...groups][0] });
 
   return files.length;
 }

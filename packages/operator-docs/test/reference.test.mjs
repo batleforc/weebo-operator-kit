@@ -148,3 +148,34 @@ test("names that don't match the sources fail generation", () => {
   assert.throws(() => run({ budget: { idle_ram: 1 } }), /not a budget field/);
   fs.rmSync(root, { recursive: true });
 });
+
+test("reference.group: the reference pages without any CRD", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "reference-"));
+  const config = { crdDir: path.join(fixtures, "crd-none"), reference: { ...reference, group: "link.weebo.io" } };
+  assert.equal(generateCrdDocs(config, { root }), 0);
+  const events = fs.readFileSync(path.join(root, "content/docs/reference/events.mdx"), "utf8");
+  assert.match(events, /`link\.weebo\.io\/force-orphan: "true"`/);
+  // No CRD section at all.
+  assert.equal(fs.existsSync(path.join(root, "content/docs/crds")), false);
+  assert.equal(fs.existsSync(path.join(root, "public/crd-schemas")), false);
+  // A missing CRD directory is the same.
+  assert.equal(generateCrdDocs({ ...config, crdDir: path.join(root, "no-crd") }, { root }), 0);
+  fs.rmSync(root, { recursive: true });
+});
+
+test("reference.group: required without CRD, checked against the CRDs", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "reference-"));
+  assert.throws(
+    () => generateCrdDocs({ crdDir: path.join(fixtures, "crd-none"), reference }, { root }),
+    /no CRD in .*crd-none: set reference\.group/,
+  );
+  assert.throws(
+    () => generateCrdDocs({ ...crdConfig, reference: { ...reference, group: "other.weebo.io" } }, { root }),
+    /reference\.group is other\.weebo\.io, but the CRDs' group is example\.weebo\.io/,
+  );
+  // Nothing written by a refused run.
+  assert.equal(fs.existsSync(path.join(root, "content")), false);
+  generateCrdDocs({ ...crdConfig, reference: { ...reference, group: "example.weebo.io" } }, { root });
+  assert.ok(fs.existsSync(path.join(root, "content/docs/crds/examplewidget.mdx")));
+  fs.rmSync(root, { recursive: true });
+});

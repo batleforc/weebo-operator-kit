@@ -274,6 +274,7 @@ reference: {
   // required; checked against the sources
   metricsPrefix: 'weebo_<product>',
   // optional, defaults shown
+  group: '<the CRDs' group>',                              // required without CRDs
   dir: 'content/docs/reference',
   reasonCodes: '../crates/domain/src/error.rs',
   sources: '../crates',
@@ -287,6 +288,12 @@ reference: {
   perfNote: 'kit vX.Y.Z, <date>',
 },
 ```
+
+`group` is the API group the pages name (the `force-orphan` annotation).
+It defaults to the CRDs' group, and a value that differs from it fails the
+run. A component without CRDs (only configuration and admission policies)
+sets it: the reference pages are written, the CRD section is not (no
+`crds/` page, no schema), and `crdDir` may be absent.
 
 The Rust sources are scanned as text, not compiled: the catalog must be
 declared with the kit's `reason_codes!` and its severities in a `match`;
