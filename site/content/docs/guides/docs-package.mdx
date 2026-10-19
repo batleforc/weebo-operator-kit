@@ -1,0 +1,72 @@
+---
+title: The docs package
+description: '@weebo/operator-docs: the operators'' documentation-site format, its CRD and reference generator, and reference.group.'
+---
+
+`packages/operator-docs` (`@weebo/operator-docs`) is the shared format of
+the operators' documentation sites — Fumadocs on Next.js, exported as a
+static site to GitHub Pages. Each site keeps its content and its own
+diagrams; the rest comes from the package. Its
+[README](https://github.com/batleforc/weebo-operator-kit/blob/main/packages/operator-docs/README.md)
+is the full reference.
+
+| Entry point | What it gives a site |
+| ----------- | -------------------- |
+| `weebo-crd-docs` (bin) | CRD YAML → `content/docs/crds/*.mdx` and `public/crd-schemas/*.json`; with a `reference` section, the reference pages too |
+| `@weebo/operator-docs/site` | `defineSite`, `baseOptions`, `DocsRootProvider`, `siteMetadata`, `createDocsPage`, `OperatorHome`, `docsMdxComponents`, `withBasePath` |
+| `@weebo/operator-docs/routes` | search, `llms.txt`, `llms-full.txt`, per-page Markdown and OG image routes |
+| `@weebo/operator-docs/crd-form` | the manifest builder (`CrdForm`, `CrdBuilder`, guided choices) |
+| `@weebo/operator-docs/next` | `withOperatorDocs`, the whole `next.config.mjs` |
+| `@weebo/operator-docs/css/theme.css` | the BatleHub theme |
+
+## Installing it
+
+Every kit tag attaches `weebo-operator-docs-X.Y.Z.tgz` to its GitHub
+release; a site depends on it by URL, and `task kit:sync` moves that URL:
+
+```json
+"@weebo/operator-docs": "https://github.com/batleforc/weebo-operator-kit/releases/download/vX.Y.Z/weebo-operator-docs-X.Y.Z.tgz"
+```
+
+Its `fumadocs-*`/`next` peers are caret ranges: a site takes a security
+fix within the major without waiting for a kit release. The package's
+version is the workspace's; `task docs:check` fails when they differ.
+
+This site is the exception: it depends on the package from the tree
+(`file:../packages/operator-docs`, installed as a copy through
+`install-links`), so it always shows what the next release will ship.
+
+## CRD reference pages
+
+`npm run gen:crds` (`weebo-crd-docs`, run by the operator's `task recu`)
+reads `crd-docs.config.mjs`: one example spec per kind (checked against
+the schema), the guides linked from each page, the sidebar order. Each
+kind gets a page with its facts, the spec field table, one section per
+nested object (RFC 0004) and the manifest builder. CRD text is escaped
+before it reaches MDX. The `crds/` section is entirely generated: never
+edit it by hand.
+
+## Reference pages and `reference.group`
+
+With a `reference` section in the config, the same run writes four pages
+whose text is the kit's and whose data is the operator's, read from its
+sources: **reason codes** (its `reason_codes!` catalog and where each
+code shows), **Events**, **metrics** (with its prefix; `remote_writes_total`
+only when it calls `record_write`) and **resource budget**
+(`Budget::small_cluster()`, its overrides, its last `task perf` report).
+
+```js
+reference: {
+  metricsPrefix: 'weebo_<product>', // required, checked against the sources
+  group: '<the CRDs’ group>',        // required without CRDs
+},
+```
+
+`group` is the API group the pages name (the `force-orphan`
+annotation). It defaults to the CRDs' group, and a different value fails
+the run. A component without CRDs (only configuration and admission
+policies) sets it: the reference pages are written, the CRD section is
+not, and `crdDir` may be absent.
+
+This site uses neither: the kit has no CRD, and its reason codes are
+each operator's.

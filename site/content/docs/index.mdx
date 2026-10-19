@@ -1,0 +1,111 @@
+---
+title: Overview
+description: What weebo-operator-kit is, what goes in it, how it is versioned and how an operator consumes it.
+---
+
+weebo-operator-kit is the shared core of the weebo Kubernetes operators
+(weebo-forgejo, weebo-authentik, weebo-batlehub, weebo-angos,
+weebo-stalwart). The operators share one hexagonal architecture and most
+of their plumbing: stable reason codes, status conditions, a namespace
+allow-list, secret stores (Kubernetes and Vault), leader election, the
+TLS admission webhook, telemetry, an envtest harness. Before the kit,
+each operator carried its own copy and the copies drifted apart. The kit
+holds **one** implementation of that plumbing; an operator keeps only
+what is specific to its remote system: its CRDs, its gateway and its
+business use cases.
+
+Besides the Rust crates, the kit ships what the operators used to copy
+around the code: a Helm library chart, shared Taskfiles, reusable GitHub
+workflows, a `cargo-generate` template of a new operator, and
+`@weebo/operator-docs`, the format of their documentation sites (this
+site is built on it).
+
+The authoritative design document is
+[`docs/plan.md`](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/plan.md)
+(in French). This site summarizes it and points at the code.
+
+## What goes in the kit
+
+A module enters the kit when both hold:
+
+1. **It names no product** (Forgejo, Authentik…) and no concrete CRD.
+   What varies between operators is a parameter (a field manager, a
+   metric prefix, a lease name, the policy CRD's name) or a generic type
+   (`R: Reason`, `K` for the kinds).
+2. **At least two operators use it**, or will use it without a rewrite.
+
+What stays in each operator:
+
+- the `#[derive(CustomResource)]` types (their group, kind and status);
+- the reason-code catalog (`reason_codes!` is the kit's, the codes are
+  the operator's);
+- the gateways to the remote system and their ports;
+- the `reconcile_*` use cases;
+- the factory that reads the operator's instance CR and builds the kit's
+  secret store from it (e.g. a `RoutingSecretStore` from the instance's
+  `secretStore` field).
+
+Cases settled by the plan:
+
+- **CRD types with an operator-specific default** (a Vault `pathPrefix`
+  defaulting to the operator's name) stay in the operator: the default
+  is part of its published schema. The kit's adapter takes a neutral
+  config (`VaultConfig`).
+- **Doc comments of shared types** become schema descriptions in every
+  operator's CRDs: they talk about "the instance" and "the remote
+  object", never a product. Changing one changes every operator's
+  generated CRDs (`task recu` on the operator side).
+- **Reason codes**: the kit defines none. Generic code (metrics,
+  conditions, Events) goes through the `Reason` trait; code that must
+  produce a precise reason returns a neutral error (`SecretStoreError`,
+  `RefError`, `ResolveError`…) that the operator maps onto its own code.
+- **Allow-list**: the engine is generic over the kinds and over named
+  "dimensions" of references; an operator with no dimension keeps the
+  "namespace + kind" semantics.
+
+## Versioning
+
+- **One version for the whole workspace**, one tag `vX.Y.Z`, cut with
+  cocogitto. The crates, the library chart (`Chart.yaml`), the template's
+  pins and `@weebo/operator-docs` all carry it
+  (`.hooks/bump-versions.sh`).
+- **0.x: a minor bump may break the API.** A change that breaks an
+  operator's build is a breaking release (minor bump). The same rule
+  covers everything consumed by tag: the library chart, `tasks/*.yaml`,
+  `checks.yml`/`publish.yml`, the template, and the docs package (raising
+  a floor of its `fumadocs-*`/`next` peer ranges is a release).
+- **`kube` and `k8s-openapi` match the operators'.** Two versions would
+  link two copies of `kube` whose types don't line up: moving `kube` is a
+  kit release, then one per operator. The Kubernetes version itself is
+  the operator's choice — see [Kubernetes version](/docs/guides/kubernetes-version).
+
+## How an operator consumes it
+
+| What | How it is pinned |
+| ---- | ---------------- |
+| Crates `weebo-kit-*` | git dependency on a tag in `[workspace.dependencies]`: `{ git = "https://github.com/batleforc/weebo-operator-kit", tag = "vX.Y.Z" }`; the operator's `deny.toml` allows that git source |
+| Library chart `weebo-operator-lib` | Helm dependency on `oci://ghcr.io/batleforc/charts`, version `X.Y.Z` (pushed and cosign-signed by `release.yml`) |
+| `tasks/rust.yaml`, `tasks/helm.yaml`, `tasks/repo.yaml` | remote Taskfile includes from `raw.githubusercontent.com/…/vX.Y.Z/tasks/…`, pinned by `checksum:` (sha256, verified by Task) |
+| `checks.yml`, `publish.yml`, `perf.yml` | reusable workflows: `uses: batleforc/weebo-operator-kit/.github/workflows/checks.yml@vX.Y.Z` |
+| `@weebo/operator-docs` | the release tarball in the site's `package.json`: `https://github.com/batleforc/weebo-operator-kit/releases/download/vX.Y.Z/weebo-operator-docs-X.Y.Z.tgz` |
+| `templates/operator` | `cargo generate --git https://github.com/batleforc/weebo-operator-kit --tag vX.Y.Z templates/operator`, once, to start |
+| `templates/cog.toml`, `templates/kit.yaml` | copied into the operator (`.tasks/kit.yaml`, included as `kit:`); `task kit:cog` renders `cog.toml` |
+
+All of these move together with one command,
+`task kit:sync TAG=vX.Y.Z` — see [Sync to a new kit release](/docs/guides/kit-sync).
+
+For local iteration on the kit and an operator at once, an operator may
+point at a sibling checkout (`path = "../weebo-operator-kit/crates/<crate>"`,
+`file:` for the docs package installed with `npm install --install-links`).
+**Never push an operator with a `path` or `file:` dependency**: its CI
+and image builds don't see the kit.
+
+## Where to go next
+
+- [Architecture](/docs/architecture): the crates, their layering and
+  their main pieces.
+- [Guides](/docs/guides/new-operator): start an operator, move to a new
+  release, drift, shared watches, the docs package.
+- [Library chart](/docs/chart): the values contract.
+- [Operators using the kit](/docs/operators).
+- [RFCs](/docs/rfcs): the design records.

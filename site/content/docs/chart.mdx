@@ -1,0 +1,94 @@
+---
+title: Library chart
+description: charts/weebo-operator-lib — every resource of an operator chart but the CRDs, and its values contract.
+---
+
+`charts/weebo-operator-lib` is a Helm **library chart**: every resource
+an operator chart deploys except its CRDs. It is pushed to
+`oci://ghcr.io/batleforc/charts` at every kit release, under the kit's
+version, and cosign-signed (the reusable `publish.yml` verifies that
+signature before packaging an operator chart on it). Nothing in it names
+a product: names come from the operator chart's `Chart.yaml`, what varies
+is a parameter set. Its
+[README](https://github.com/batleforc/weebo-operator-kit/blob/main/charts/weebo-operator-lib/README.md)
+is the reference.
+
+## An operator chart on it
+
+```yaml
+# Chart.yaml
+dependencies:
+  - name: weebo-operator-lib
+    version: X.Y.Z # the kit's, moved by task kit:sync
+    repository: oci://ghcr.io/batleforc/charts
+```
+
+The chart's templates shrink to two files:
+
+- `templates/operator.yaml` includes `weebo-operator.all` with the
+  operator's parameters;
+- `templates/_params.tpl` defines them: `group`, `versions`, `kinds`
+  (everything watched), `namespacedKinds`, `admitted` (kinds sent to
+  `/validate`), `env`, `egress`, `clusterRules`, `watchRules`,
+  `clusterSecrets`, `alerts`.
+
+The CRDs ship as templates under `crds.install`, with
+`helm.sh/resource-policy: keep`; the shared `helm:crds` task wraps
+`crdgen`'s output.
+
+## What it renders
+
+Deployment (probes, drain, the kit's environment), ServiceAccount,
+ClusterRole(+Binding), the watch Role of `watch.namespace`, the leader
+election Role, an optional namespaced example Role, the webhook Service,
+cert-manager Issuer and Certificate, `ValidatingWebhookConfiguration`
+(`validate.<group>`, and `scope.<group>` with a label selector),
+PodDisruptionBudget (only with more than one replica), metrics Service,
+ServiceMonitor, PrometheusRule, NetworkPolicy and the Argo CD health check
+(a Lua check on the `Ready` condition).
+
+## Values contract
+
+The contract is the one of the template's chart
+(`deploy/charts/<operator>/values.yaml` and `values.schema.json`); an
+operator adds its own keys next to these.
+
+| Value | What it controls |
+| ----- | ---------------- |
+| `replicaCount` | 2 by default: one leader, one warm standby |
+| `image`, `imagePullSecrets`, `nameOverride`, `fullnameOverride` | the usual |
+| `serviceAccount` | create / name / annotations |
+| `crds.install` | install the CRDs with the chart (kept on uninstall) |
+| `watch.namespace` | only the namespaced kinds of that namespace (`WEEBO_WATCH_NAMESPACE`); they move from the ClusterRole to a Role there |
+| `watch.labelSelector` | a `LabelSelector` for every kind (`WEEBO_WATCH_LABEL_SELECTOR`): splits work between releases, not a security boundary |
+| `watch.clusterKinds` | `false`: full namespaced — no cluster kind, ClusterRole or webhook configuration; needs `watch.namespace` and `crds.install: false` |
+| `references.crossNamespace` | allow references to CRs of other namespaces that share themselves (`WEEBO_CROSS_NAMESPACE_REFS`) |
+| `reconcileConcurrency`, `workerThreads` | `WEEBO_RECONCILE_CONCURRENCY`, `WEEBO_WORKER_THREADS` (4 each) |
+| `logFormat` | `text` or `json` |
+| `leaderElection.leaseName` | the Lease name (`<chart>-operator-leader` by default) |
+| `webhook` | `enabled`, ports, `failurePolicy` (`Fail`), selectors, `certManager.enabled`, or your own `tls.secretName` + `caBundle` |
+| `certManager` | self-signed Issuer or an existing `issuerRef`, certificate duration |
+| `metrics.prometheus` | `/metrics` on port 9090 (`WEEBO_METRICS_ADDR`) |
+| `serviceMonitor`, `prometheusRule` | prometheus-operator objects; `prometheusRule.repeatedDrift.enabled` turns off `RepeatedDrift` for an operator that counts no remote write |
+| `probes`, `shutdown` | startup/readiness/liveness, `drainSeconds`, `preStopSleepSeconds`, `terminationGracePeriodSeconds` |
+| `podDisruptionBudget`, `rbac.namespacedExample` | PDB, an example Role letting a team manage the namespaced kinds |
+| `resources`, scheduling, security contexts | requests (no CPU limit on purpose), topology spread, restricted contexts |
+| `networkPolicy`, `extraEnv` | egress rules (plus the operator's `params.egress`), extra variables |
+
+Kept from weebo-forgejo's chart, where the contract comes from: resource
+names (`<fullname>`, `-webhook`, `-webhook-tls`, `-leader-election`,
+`-metrics`, `-argocd-health`), the Lease name and the webhook name.
+
+## Alerts
+
+With `prometheusRule.enabled` (and the metrics scraped), the kit's
+alerts, named after the chart: `OperatorDown`, `NoLeader`,
+`MultipleLeaders`, `ReconcileErrors`, `ReconcileSlow` and
+`RepeatedDrift` (see [Drift and remote writes](/docs/guides/drift)),
+then the operator's `params.alerts` and `additionalRules`.
+
+## Checks
+
+`task chart:check` (in the kit's `task lint`) lints the library chart
+through the template's chart and runs the shared smoke renders of
+`tasks/helm.yaml`, which every operator runs too (`helm:lint`).

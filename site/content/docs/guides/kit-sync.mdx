@@ -1,0 +1,53 @@
+---
+title: Sync to a new kit release
+description: Move an operator onto a new kit tag with task kit:sync, and what changes when the release is breaking.
+---
+
+Every reference an operator makes to the kit is pinned on one tag.
+`task kit:sync` moves all of them at once:
+
+```bash
+task kit:sync TAG=vX.Y.Z
+```
+
+It comes from `templates/kit.yaml`, which each operator copies into its
+task directory and includes as `kit:` (`task kit:cog` keeps the copy in
+step with the kit). It runs `templates/pin-kit.sh`, fetched from the tag,
+which rewrites:
+
+- `Cargo.toml`: the `tag = "vX.Y.Z"` of every `weebo-kit-*` dependency
+  (`Cargo.lock` follows through `cargo metadata`);
+- `Taskfile.yaml`: the tag in each remote `tasks/*.yaml` include URL and
+  its `checksum:` (sha256 of the file at that tag), and `KIT_TAG:` for a
+  repository without a kit crate;
+- `.github/workflows/*`: every `uses: batleforc/weebo-operator-kit/.github/workflows/…@vX.Y.Z`;
+- `deploy/charts/*/Chart.yaml`: the `weebo-operator-lib` dependency
+  version, then `helm dependency update` (`Chart.lock`);
+- `docs/package.json`: the `@weebo/operator-docs` tarball URL, then
+  `npm install` (or `pnpm install` with `NPM_CLIENT: pnpm`) so the
+  lockfile and `node_modules` follow;
+
+then `task kit:cog` re-renders `cog.toml` from the tag's template and
+reinstalls the git hooks.
+
+## Which tag
+
+`TAG=vX.Y.Z` wins; without it, the tag already in `Cargo.toml` (or the
+Taskfile's `KIT_TAG`) is used — useful to re-pin checksums. To try a kit
+change before it is tagged, render from a sibling checkout instead:
+`KIT_DIR=../weebo-operator-kit`.
+
+## After the sync
+
+1. Read the kit's [CHANGELOG](https://github.com/batleforc/weebo-operator-kit/blob/main/CHANGELOG.md)
+   between the two tags. A minor bump of `0.x` may break: the
+   `BREAKING` entries, and the matching section of `docs/plan.md`, say
+   what each operator has to change.
+2. `task recu`: the kit's doc comments are CRD descriptions, and the docs
+   package regenerates the CRD and reference pages.
+3. `task lint`, `task test:all`, `task audit`, as the cog hooks do before
+   the commit.
+
+`kube`/`k8s-openapi` must stay on the kit's versions; the Kubernetes
+version feature stays the operator's
+([Kubernetes version](/docs/guides/kubernetes-version)).

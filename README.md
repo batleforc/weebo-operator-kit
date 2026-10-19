@@ -39,6 +39,13 @@ And what the operators kept copying around the code:
 Design, scope rules, versioning and the migration roadmap:
 [`docs/plan.md`](docs/plan.md).
 
+**Documentation site: <https://batleforc.github.io/weebo-operator-kit/>**
+— how the kit works (crates, library chart, tooling, guides) and which
+operators use it. Its sources are in [`site/`](site/), built on
+`@weebo/operator-docs` from this tree (`file:../packages/operator-docs`),
+and published to GitHub Pages by `.github/workflows/site-pages.yml` on
+every push to `main` touching `site/` or `packages/operator-docs/`.
+
 ## Using it
 
 ```toml
@@ -84,11 +91,17 @@ task doctor   # envtest prerequisites (Go, libclang, etcd, kube-apiserver)
 task lint     # fmt --check, clippy -D warnings, actionlint, library chart (chart:check)
 task test     # unit + contract tests + doctests
 task test:all # + the operator template rendered, built and tested (template:check)
-task audit    # cargo-deny + trivy + npm audit (operator-docs)
+task audit    # cargo-deny + trivy + npm audit (operator-docs, site)
 task doc      # rustdoc
 task docs:check  # operator-docs: version sync, tsc, generator tests
 task docs:pack   # dist/weebo-operator-docs-<version>.tgz
+task site        # the documentation site (site/) on http://localhost:3000
+task site:build  # lint + static export into site/out/
 ```
+
+`task site:deps` reinstalls the site's dependencies whenever
+`packages/operator-docs` changes (the package is installed as a copy);
+restart `task site` to see a package change.
 
 To iterate on the kit and an operator together, point the operator at a
 sibling checkout with `path = "../weebo-operator-kit/crates/<crate>"` —

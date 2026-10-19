@@ -51,10 +51,11 @@ task lint    # fmt --check, clippy -D warnings, actionlint, chart:check
 task test    # unit + contract + doctests
 task test:all       # + template:check (the operator template, built and tested)
 task template:render  # the template rendered for "Example" in target/template/
-task audit   # cargo-deny + trivy + npm audit (operator-docs)
+task audit   # cargo-deny + trivy + npm audit (operator-docs, site)
 task doctor  # envtest prerequisites
 task docs:check  # operator-docs: version sync, tsc, generator tests
 task docs:pack   # dist/weebo-operator-docs-<version>.tgz (release asset)
+task site:build  # the kit's own docs site (site/, on the package from this tree)
 ```
 
 Commits follow Conventional Commits (cocogitto). `cog.toml` is rendered

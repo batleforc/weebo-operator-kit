@@ -1,0 +1,74 @@
+---
+title: Drift and remote writes
+description: Write only what differs with Drift, count every write in remote_writes_total, and what RepeatedDrift means.
+---
+
+A remote system records every write (audit events, tasks, reloads):
+rewriting an unchanged object on every requeue floods it for nothing. The
+kit's rule (`weebo-kit-domain::drift`, since v0.18.0): **read the remote
+object, compare, and write only the fields that differ.**
+
+## Comparing: `Drift`
+
+`Drift` works on the PATCH the operator would send, a struct of
+`Option` fields:
+
+```rust
+let mut drift = Drift::default();
+drift.keep_opt("description", &mut patch.description, &remote.description);
+if drift.is_empty() {
+    // in sync: no call at all
+}
+```
+
+- `keep` / `keep_opt` / `keep_with`: a field already holding the desired
+  value is cleared (`None`, left out of the request); one that differs
+  stays, and its name is recorded (`drift.fields()`). A field the spec
+  doesn't set is "no opinion", never compared nor written.
+- `note(field, differs)` for a caller sending a full update rather than a
+  PATCH of options.
+- Compare with the form the remote system **stores**: `same_set` (a list
+  treated as a set), `same_subset` (a map the server fills with
+  defaults), `same_trimmed` (text the server trims), or your own
+  equality in `keep_with`. Each normalization deserves a contract test
+  (the remote value returned normalized, no write expected).
+
+The template's `reconcile_object` use case does exactly this.
+
+## Announcing: `DriftCorrected`
+
+`weebo_kit_runtime::events::announce_drift(recorder, object, reason, &drift)`
+publishes one `Normal` Event naming the corrected fields
+(`drift corrected on the remote object: …`), nothing when `drift` is
+empty. The reason is the operator's code (the template's
+`DriftCorrected`). The template announces it only when
+`metadata.generation` equals `status.observedGeneration`: a spec change
+being applied is not a drift.
+
+## Counting: `remote_writes_total`
+
+`ReconcileMetrics::record_write(kind, cause)` increments
+`<prefix>_remote_writes_total{kind, cause}`, `cause` being a
+`RemoteWrite`: `created`, `drift` or `deleted`. At rest, an operator that
+compares before writing counts none.
+
+The library chart's PrometheusRule ships
+`<Chart>RepeatedDrift`: more than 3 writes with `cause="drift"` for one
+kind within 30 minutes. A real drift is corrected in one pass; a field
+the comparison gets wrong is rewritten on every reconcile. Look for
+`DriftCorrected` Events naming the same field each time — that is a
+normalization to add to the comparison, not a drift.
+
+An operator that writes to no remote system never calls `record_write`:
+the metric doesn't exist, so it sets
+`prometheusRule.repeatedDrift.enabled: false`. The docs package's metrics
+page lists `remote_writes_total` only for operators whose sources call
+`record_write`.
+
+## Known gap
+
+`RemoteWrite` has no cause for applying a spec change: such a write is
+counted `cause="drift"`, so a burst of spec edits within 30 minutes can
+fire `RepeatedDrift` although nothing drifted (seen on weebo-batlehub).
+The plan proposes a `RemoteWrite::Spec` (`cause="spec"`), chosen by the
+same "generation not yet observed" rule as the Event; it is still to do.

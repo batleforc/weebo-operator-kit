@@ -1,0 +1,13 @@
+{
+  "title": "weebo-operator-kit",
+  "pages": [
+    "index",
+    "architecture",
+    "---Guides---",
+    "...guides",
+    "---Reference---",
+    "chart",
+    "operators",
+    "rfcs"
+  ]
+}

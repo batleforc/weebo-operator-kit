@@ -1,0 +1,59 @@
+---
+title: Shared watches
+description: One watch per kind and label selector, shared by every controller and store read (weebo-kit-runtime::shared).
+---
+
+Without them, each controller's `Controller::watches` opens its own
+watch of a referenced kind, and every one of them LISTs when the
+controllers start, right after the lease is taken. `weebo_kit_runtime::shared`
+(v0.20.0, label selectors in v0.21.0) opens **one watch per kind and label
+selector** for the whole binary. Measured in the five operators: forgejo
+went from 37 watches to 15, batlehub 16 → 9, angos 12 → 7, stalwart
+15 → 8, authentik 15 → 12.
+
+## The pieces
+
+- `SharedWatch<K>`: a reflector whose changes are broadcast to
+  subscribers. `store()` for reads, `controller()` for the primary kind
+  (same triggers and concurrency as `controller::controller`),
+  `touched()` for a referenced kind. A subscriber gets the whole store
+  once listed, then every change, and re-reads the store if it lagged.
+- `SharedWatches`: the binary's watches, indexed by type and selector.
+  `spawn(api, &scope, &health, name)` opens the watch of a kind through
+  `scope`'s selector unless it exists (through
+  `scope.without_selector()`: every object); `get::<K>()` (the first
+  opened), `get_in::<K>(&scope)` (the one of a selector),
+  `controller(api, &scope)`, `touched::<K>(&scope, &client)`,
+  `wait_listed(timeout)`.
+- `WatchesIn::watches_in(&watches, &scope, &client, map)` on a
+  `Controller`: watch a referenced kind through the shared watch of the
+  scope's selector, else the one of every object, else its own watch;
+  skipped for a cluster-scoped kind when the operator watches none.
+  `watches_in_filtered(…, predicate, map)` re-triggers only on the
+  changes a kube `Predicate` sees.
+- `LISTED_TIMEOUT` (30 s).
+
+`controller(api, &scope)` of `SharedWatches` only reuses the watch of
+the scope's own selector — never a wider one, which would reconcile
+objects outside the scope.
+
+## Wiring it (as the template does)
+
+1. Spawn the watches **before** campaigning for the lease (the
+   template's `controller::spawn_watches`): a standby replica keeps its
+   stores warm.
+2. Hand their stores to `Instances` and the other readers.
+3. Wait for them to list, bounded, then campaign:
+
+   ```rust
+   ctx.watches.wait_listed(LISTED_TIMEOUT).await;
+   leader::acquire_leadership(&client, holder_id, DEFAULT_LEASE_NAME).await
+   ```
+
+   A watch that can't list is reported by `/livez`, not waited for.
+4. Build each controller with `ctx.watches.controller(api, &ctx.scope)`
+   and its referenced kinds with `watches_in`.
+
+`controller::controller` stays as it was: an operator adopts shared
+watches when it wants. `task perf` validates the move (idle requests per
+minute within `Budget::small_cluster()`).
