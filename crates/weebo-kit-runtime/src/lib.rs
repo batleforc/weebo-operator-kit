@@ -4,7 +4,8 @@
 //! admission webhook runs on, reconcile metrics, the condition list a
 //! status carries and the Events announcing every error — and the
 //! skeleton every controller shares (triggers, concurrency, requeue,
-//! finalizer, status publishing, reflector stores) and the `/validate`
+//! finalizer, status publishing, reflector stores, watches shared by every
+//! controller) and the `/validate`
 //! endpoint.
 
 pub mod admission;
@@ -17,6 +18,7 @@ pub mod metrics;
 pub mod pod;
 pub mod runtime;
 pub mod scope;
+pub mod shared;
 pub mod shutdown;
 pub mod status;
 pub mod store;

@@ -32,6 +32,7 @@ use kube::runtime::events::{Recorder, Reporter};
 use testkit::envtest::EnvTestCluster;
 use testkit::{FakeGateway, StaticGatewayFactory};
 use weebo_kit_api::InstanceKind;
+use weebo_kit_runtime::shared::SharedWatch;
 use weebo_kit_runtime::{Health, WatchScope};
 
 const TIMEOUT: Duration = Duration::from_secs(15);
@@ -206,11 +207,19 @@ fn local_instance(name: &str) -> LocalInstance {
 /// the operator's own (RBAC-limited) client.
 fn ctx(operator: &Client, scope: WatchScope) -> (Arc<Ctx>, Arc<Health>) {
     let health = Arc::new(Health::default());
-    let instances = Arc::new(OperatorInstances::new(operator.clone()).with_scope(
-        scope.watched_namespace().map(String::from),
-        scope.selector().cloned(),
-        scope.cluster_kinds(),
-    ));
+    let watches = controller::spawn_watches(operator, &scope, &health);
+    let instances = Arc::new(
+        OperatorInstances::new(operator.clone())
+            .with_scope(
+                scope.watched_namespace().map(String::from),
+                scope.selector().cloned(),
+                scope.cluster_kinds(),
+            )
+            .with_stores(
+                watches.get::<Instance>().map(SharedWatch::store),
+                watches.get::<LocalInstance>().map(SharedWatch::store),
+            ),
+    );
     let ctx = Arc::new(Ctx {
         client: operator.clone(),
         gateways: Arc::new(StaticGatewayFactory::new(Arc::new(FakeGateway::default()))),
@@ -225,6 +234,7 @@ fn ctx(operator: &Client, scope: WatchScope) -> (Arc<Ctx>, Arc<Health>) {
         shutdown: Shutdown::never(),
         health: health.clone(),
         scope,
+        watches,
     });
     (ctx, health)
 }

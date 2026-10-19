@@ -22,7 +22,7 @@ pub mod secret_vault;
 pub mod workloads;
 
 pub use adopt::{Adopter, Adoption, Summary};
-pub use instance::{InstanceResolver, SelectError, select};
+pub use instance::{InstanceResolver, SelectError, select, wait_synced};
 pub use instances::{Instances, Resolved, SharesItself};
 pub use local_instances::LocalInstances;
 pub use secret_k8s::{K8sSecretStore, MANAGED_BY_LABEL};

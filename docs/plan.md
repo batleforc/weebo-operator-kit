@@ -1524,3 +1524,46 @@ de l'opérateur, la liaison TokenReview et `restart` (par défaut, sur
 `FakeWorkloads` enveloppe `FakeOwnedObjects` ; `OperatorPod::default()` →
 `OperatorPod::named(OPERATOR_CHART)` ; `LocalInstanceDirectory` enveloppe
 `LocalInstances`.
+
+### Lectures des stores sans attente de 10 s (correctif, non cassant)
+
+`Store::wait_until_ready` de kube ne réveille que la dernière tâche qui
+l'a interrogé (un seul oneshot) : quand plusieurs reconciles attendaient
+le même store pas encore listé, un seul était réveillé, les autres
+attendaient les 10 s de `STORE_READY_TIMEOUT` puis listaient l'API.
+`weebo_kit_adapters::wait_synced(&store, timeout) -> bool` (repris de
+weebo-forgejo) revérifie toutes les 50 ms (`STORE_POLL`) ; `Instances`,
+`LocalInstances` et `InstanceResolver` s'en servent. Dans
+`weebo-kit-adapters` et non dans le runtime : un adaptateur sortant ne
+dépend pas du runtime.
+
+### Une watch par kind, partagée par tous les contrôleurs (ajout, non cassant)
+
+Repris de weebo-forgejo (`controller/shared.rs`), rendu générique :
+chaque `Controller::watches` ouvrait sa propre watch, et toutes listaient
+au démarrage des contrôleurs, juste après la prise du lease.
+
+`weebo_kit_runtime::shared` :
+
+- `SharedWatch<K>` : un reflector dont les changements sont diffusés aux
+  abonnés (`touched()` pour une watch de kind référencé, `controller()`
+  pour le kind principal — mêmes déclencheurs et même concurrence que
+  `controller::controller`) ; un abonné reçoit tout le store une fois listé,
+  puis chaque changement, et relit tout le store s'il a pris du retard.
+- `SharedWatches` : les watches du binaire, une par kind (indexées par
+  type, aucun champ nommé) — `spawn(api, &scope, &health, name) -> Store<K>`,
+  `get::<K>()`, `controller(api, &scope)` (la watch partagée, sinon le
+  contrôleur du kit sur sa propre watch), `listed()`,
+  `wait_listed(LISTED_TIMEOUT)`.
+- `WatchesIn::watches_in(&watches, &scope, &client, map)` : la watch d'un
+  kind référencé, partagée si possible, ignorée pour un kind cluster
+  quand l'opérateur n'en surveille aucun.
+- `LISTED_TIMEOUT` (30 s) : le réplica ne fait campagne pour le lease
+  qu'une fois ses watches listées, au plus 30 s.
+
+Le template : `controller::spawn_watches` (instances, instances locales,
+objets) ; les contrôleurs passent par `ctx.watches.controller(…)`, les
+stores de `Instances` sont ceux des watches partagées, `main` attend
+`wait_listed` avant `acquire_leadership`. `controller::controller` reste
+tel quel : un opérateur l'adopte quand il veut (`Ctx.watches` est un
+champ de plus côté template, pas dans le kit).

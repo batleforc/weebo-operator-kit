@@ -12,7 +12,7 @@ use api::{Instance, LocalInstance, Object};
 use kube::Client;
 use kube::api::ApiResource;
 use kube::runtime::events::{Recorder, Reporter};
-use weebo_kit_runtime::store::spawn_reflector;
+use weebo_kit_runtime::shared::{LISTED_TIMEOUT, SharedWatch};
 use weebo_kit_runtime::{Health, WatchScope, leader, telemetry, webhook_server};
 
 /// Default `LEASE_NAME`. Keep it across releases: old and new pods of a
@@ -109,22 +109,14 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     let shutdown = Shutdown::on_termination()?;
     let health = Arc::new(Health::default());
 
-    // Every resolution reads the instances: one reflector per kind (no
-    // {{product}}Instance without cluster-scoped kinds).
-    let cluster_store = scope.cluster_kinds().then(|| {
-        spawn_reflector(
-            scope.api::<Instance>(client.clone()),
-            &scope,
-            health.clone(),
-            "{{product}}Instance reflector",
-        )
-    });
-    let local_store = spawn_reflector(
-        scope.api::<LocalInstance>(client.clone()),
-        &scope,
-        health.clone(),
-        "{{product}}LocalInstance reflector",
-    );
+    // One watch per kind, shared by every controller and by the instance
+    // reads (every resolution reads the instances: from memory, not a LIST
+    // per reconcile). Started before campaigning for the lease: a standby
+    // keeps them warm, and the controllers start from stores that already
+    // listed.
+    let watches = controller::spawn_watches(&client, &scope, &health);
+    let cluster_store = watches.get::<Instance>().map(SharedWatch::store);
+    let local_store = watches.get::<LocalInstance>().map(SharedWatch::store);
     let instances = Arc::new(
         OperatorInstances::new(client.clone())
             .with_scope(
@@ -132,7 +124,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
                 scope.selector().cloned(),
                 scope.cluster_kinds(),
             )
-            .with_stores(cluster_store, Some(local_store)),
+            .with_stores(cluster_store, local_store),
     );
 
     let holder_id = std::env::var("HOSTNAME").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
@@ -150,6 +142,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         shutdown: shutdown.clone(),
         health: health.clone(),
         scope: scope.clone(),
+        watches,
     });
 
     // The HTTPS server (probes, the scope guard, and an admission webhook
@@ -165,9 +158,17 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     .await?;
 
     // The controllers, in contrast, run on one replica at a time: two
-    // active reconcilers could both create the same remote object.
+    // active reconcilers could both create the same remote object. The
+    // replica campaigns once its shared watches listed (their LISTs done
+    // before the lease, not in the leader's first minute), or after
+    // LISTED_TIMEOUT: a watch that can't list is reported by /livez, not
+    // waited for.
+    let campaign = async {
+        ctx.watches.wait_listed(LISTED_TIMEOUT).await;
+        leader::acquire_leadership(&client, holder_id, DEFAULT_LEASE_NAME).await
+    };
     let leadership = tokio::select! {
-        leadership = leader::acquire_leadership(&client, holder_id, DEFAULT_LEASE_NAME) => leadership,
+        leadership = campaign => leadership,
         () = shutdown.wait() => {
             server.stopped().await;
             return Ok(());

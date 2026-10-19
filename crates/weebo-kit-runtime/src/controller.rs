@@ -54,6 +54,16 @@ fn deletion<K: Resource>(obj: &K) -> Option<u64> {
     })
 }
 
+/// What re-triggers a reconcile: spec (`generation`), annotations, labels,
+/// finalizers, deletion — never the CR's own status patches.
+pub(crate) fn reconcile_triggers<K: Resource + 'static>() -> impl Predicate<K> + 'static {
+    predicates::generation
+        .combine(predicates::annotations)
+        .combine(predicates::labels)
+        .combine(predicates::finalizers)
+        .combine(deletion)
+}
+
 /// The controller of `api`'s kind. Its primary watch only fires on what
 /// reconciling acts on — spec (`generation`), annotations, labels,
 /// finalizers, deletion — never on the CR's own status patches, which
@@ -63,7 +73,9 @@ fn deletion<K: Resource>(obj: &K) -> Option<u64> {
 ///
 /// `api` comes from `scope.api::<K>()`; `scope` adds its label selector to
 /// the watch. The `watches` on referenced kinds go through the same scope
-/// (`scope.api()`, `scope.watcher_config()`).
+/// (`scope.api()`, `scope.watcher_config()`). The binary's
+/// [`crate::shared::SharedWatches`] give the same controller on one watch
+/// per kind shared by every controller.
 pub fn controller<K>(api: Api<K>, scope: &WatchScope) -> Controller<K>
 where
     K: Resource<DynamicType = ()>
@@ -79,14 +91,7 @@ where
         .default_backoff()
         .reflect(writer)
         .applied_objects()
-        .predicate_filter(
-            predicates::generation
-                .combine(predicates::annotations)
-                .combine(predicates::labels)
-                .combine(predicates::finalizers)
-                .combine(deletion),
-            Default::default(),
-        );
+        .predicate_filter(reconcile_triggers(), Default::default());
     Controller::for_stream(trigger, reader)
         .with_config(runtime_controller::Config::default().concurrency(concurrency()))
 }

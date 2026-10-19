@@ -18,8 +18,9 @@ use crate::{Health, WatchScope};
 /// selector, run in the background: the store serves every read from
 /// memory, watch errors back off exponentially instead of spinning and are
 /// reported to `health` under `name` (a watch erroring in a loop fails
-/// `/livez`; any event received clears it). Wait for it with
-/// `store.wait_until_ready()` before trusting an empty store.
+/// `/livez`; any event received clears it). Wait for it before trusting an
+/// empty store with `weebo_kit_adapters::wait_synced`, not a bare
+/// `store.wait_until_ready()`: kube's readiness wakes one waiter only.
 pub fn spawn_reflector<K>(
     api: Api<K>,
     scope: &WatchScope,
