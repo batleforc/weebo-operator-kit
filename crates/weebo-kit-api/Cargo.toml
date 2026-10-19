@@ -13,4 +13,6 @@ schemars = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
+# The version the kit is tested with (RFC 0005).
+k8s-openapi = { workspace = true, features = ["v1_36"] }
 serde_json = { workspace = true }

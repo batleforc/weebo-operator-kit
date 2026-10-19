@@ -51,6 +51,20 @@ weebo-kit-runtime = { git = "https://github.com/batleforc/weebo-operator-kit", t
 
 Keep `kube` and `k8s-openapi` on the kit's versions.
 
+### Kubernetes version
+
+The kit's libraries enable no `v1_*` feature of `k8s-openapi`: the operator
+picks its Kubernetes version, as `k8s-openapi` requires of an application.
+Enable the feature in the operator's workspace, at the oldest apiserver it
+supports (the template uses `v1_36`):
+
+```toml
+k8s-openapi = { version = "0.28", features = ["v1_36", "schemars"] }
+```
+
+The kit is tested against 1.36 and compiles for 1.32 to 1.36, each version
+checked in CI (`k8s-versions` job). RFC 0005 (`docs/rfc-0005-k8s-openapi-version.md`).
+
 A new operator starts from the template:
 
 ```bash

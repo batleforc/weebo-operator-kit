@@ -40,6 +40,41 @@ jobs:
       - run: mise install node task
       - run: mise exec -- task docs:check
 
+  # RFC 0005: the libraries an operator links compile for every Kubernetes
+  # version k8s-openapi 0.28 has (its `earliest` to `latest`), the version
+  # being the operator's choice. `--lib` only: the tests' dev-dependency
+  # pins v1_36. testkit and perf (envtest, Go bindings) stay test tooling.
+  # `env` after `mise exec`: mise.toml's K8S_OPENAPI_ENABLED_VERSION would
+  # win otherwise.
+  k8s-versions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        kubernetes: ["1.32", "1.33", "1.34", "1.35", "1.36"]
+    env:
+      MISE_EXEC_AUTO_INSTALL: "false"
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      - name: Cache cargo registry
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-k8s-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      - run: mise install rust
+      - run: >-
+          mise exec -- env K8S_OPENAPI_ENABLED_VERSION=${{ matrix.kubernetes }}
+          cargo check --locked --lib -p weebo-kit-domain -p weebo-kit-api
+          -p weebo-kit-application -p weebo-kit-adapters -p weebo-kit-runtime
+
   # A new operator, rendered from templates/operator on this tree, builds,
   # lints and passes its tests (envtest included).
   template:

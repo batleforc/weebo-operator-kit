@@ -26,6 +26,8 @@ tracing = { workspace = true }
 vaultrs = { workspace = true }
 
 [dev-dependencies]
+# The version the kit is tested with (RFC 0005).
+k8s-openapi = { workspace = true, features = ["v1_36"] }
 rcgen = "0.14.10"
 # The grant schema's `pattern` and CEL regexes, checked against the domain.
 regex = "1"

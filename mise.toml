@@ -1,3 +1,9 @@
+# The Kubernetes version `cargo check`/`doc` compile k8s-openapi for: the
+# kit's libraries enable no `v1_*` feature (RFC 0005). The same version as
+# the tests' dev-dependency, so the two never conflict.
+[env]
+K8S_OPENAPI_ENABLED_VERSION = "1.36"
+
 [tools]
 cocogitto = "latest"
 rust = { version = "latest", components = ["rust-src", "rustfmt", "llvm-tools", "clippy"], profile = "default" }

@@ -857,15 +857,27 @@ de `task docs:pack` installée par `npm install --install-links`) :
    la table latérale `#nd-toc` est visible avec ses 13 sections, et le
    formulaire et l'aperçu tiennent côte à côte dans la colonne, sans
    défilement horizontal (`scrollWidth` 1434).
-3. ProxyAuthK8S : à faire sur la branche de sa phase 3. Hors site, la page
-   générée a 48 sections (la page crdoc en compte 53 ; l'écart n'est pas
-   encore expliqué), `Exactly one of` et ses cinq
-   variantes sous `spec.cert`, et se compile.
+3. ProxyAuthK8S, sur la branche de la phase 3 de sa RFC 0005 (v0.19.0, pnpm,
+   Next 16.4.2, export statique `DOCS_BASE_PATH=/ProxyAuthK8S`, 111 pages en
+   18 s) : `out/docs/crds/proxykubeapi/index.html` porte
+   `id="spec.security_config.allowed_resources"`, lié trois fois depuis la
+   ligne du parent ; `/apis/{group}/{version}/namespaces/{namespace}/` y est
+   littéral (18 fois, aucun `\{`) ; « Exactly one of Secret, Cert, ConfigMap,
+   SystemRoots, Insecure. » est sous `spec.cert`. À 1248–1440 px (Chromium
+   1248), `#nd-toc` est visible, sans erreur JS ni 404 (accueil, page CRD,
+   page Mermaid, page API). La page a 48 sections, contre 53 chez crdoc :
+   l'écart n'est toujours pas expliqué. ProxyAuthK8S remplace `CrdForm` par
+   son propre générateur pour `ProxyKubeApi` (unions `oneOf` de serde), dans
+   son `mdx.tsx` : rien à changer côté kit.
 4. L'index `/api/search` contient « a path pattern has no » (règle de
    `pathGrants[].paths[]`), absent de l'index v0.18.1, avec des URL vers
    `#spec.…`. Taille : 1 947 319 → 2 796 275 octets (+44 %, budget +100 %).
+   Chez ProxyAuthK8S, `out/api/search` contient `allowed_ressources`
+   (202 fois) ; pas de comparaison, le paquet n'y était pas encore.
 5. `llms-full.txt` contient `` `paths[]`: a path pattern has no "." or ".."
    segment — `!self.matches('(^|/)\\.\\.?(/|$)')` ``.
+   Chez ProxyAuthK8S : « dashboard_group must not be empty when it is set —
+   `!has(self.dashboard_group) || self.dashboard_group != ''` ».
 7. et 8. : dans le test du kit (`crd text never reaches MDX as code`,
    `duplicate anchors are refused, and no page is written`).
 
@@ -909,3 +921,4 @@ ni `<br />` affiché dans du code. Page la plus lourde : 83 Ko
 | 2026-10-19 | Phase 1 livrée : `mdxText` en v0.18.1 (`f9b0729`), synchronisée dans weebo-forgejo v0.5.0 et weebo-authentik v0.19.0 |
 | 2026-10-19 | Revue appliquée : table des matières coupée par `full: true` (§6.2) ; invariant de §5.2 étendu à `codeSpan` (noms, défauts, enums, short names, `apiVersion`, `kind`) ; T1 réécrit (job de build en lecture seule, enjeu = robustesse du build et intégrité du site) et T6 (images) ajouté ; preuve 6 par `globalThis.process.getBuiltinModule` ; paragraphes découpés avant le code (`Quantity`) ; goal 2 en « Markdown inline, sans JSX ni image » ; harnais avec `remark-gfm`, `remarkHeading` et `CrdForm` factice ; §8 corrigé (audit des devDependencies, pas de Dependabot, épinglage) ; `x-kubernetes-int-or-string`, enums avec `null`, union d'une branche, contraintes de schéma, jeu de caractères des ancres et `customId`, tableaux de tableaux ; `llms-full.txt` et noms des routes ; budget d'index de recherche ; chiffres mis à jour (weebo-stalwart 8 kinds, 842 descriptions, 180 règles, 117 enums) ; « exactement la page d'aujourd'hui » retiré ; migration (`regen-and-diff`, ProxyAuthK8S en pnpm) ; *Touches*, *Références* et *Changelog* complétés |
 | 2026-10-19 | Phase 2 écrite, §17 : règles hors objet, backticks orphelins échappés, écriture différée ; preuve sur weebo-forgejo |
+| 2026-10-19 | Preuves 3 à 5 sur ProxyAuthK8S (v0.19.0, sa RFC 0005 phase 3) ; écart de sections avec crdoc (48 contre 53) toujours ouvert |
