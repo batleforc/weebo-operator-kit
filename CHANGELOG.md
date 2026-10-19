@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.19.2](https://github.com/batleforc/weebo-operator-kit/compare/5b29508f4ad8897bd7269534e61efcfce0bc8e88..v0.19.2) - 2026-10-19
+#### Bug Fixes
+- (**kit-sync**) install the docs dependencies, not only their lockfile (#14) - ([5b29508](https://github.com/batleforc/weebo-operator-kit/commit/5b29508f4ad8897bd7269534e61efcfce0bc8e88)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.19.1](https://github.com/batleforc/weebo-operator-kit/compare/bfcd7d442a7e5745c21fc752b3830e7273573a4c..v0.19.1) - 2026-10-19
 #### Bug Fixes
 - let the operator choose the k8s-openapi version (RFC 0005) (#13) - ([bfcd7d4](https://github.com/batleforc/weebo-operator-kit/commit/bfcd7d442a7e5745c21fc752b3830e7273573a4c)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
