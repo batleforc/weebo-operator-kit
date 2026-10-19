@@ -1524,3 +1524,15 @@ de l'opérateur, la liaison TokenReview et `restart` (par défaut, sur
 `FakeWorkloads` enveloppe `FakeOwnedObjects` ; `OperatorPod::default()` →
 `OperatorPod::named(OPERATOR_CHART)` ; `LocalInstanceDirectory` enveloppe
 `LocalInstances`.
+
+### Lectures des stores sans attente de 10 s (correctif, non cassant)
+
+`Store::wait_until_ready` de kube ne réveille que la dernière tâche qui
+l'a interrogé (un seul oneshot) : quand plusieurs reconciles attendaient
+le même store pas encore listé, un seul était réveillé, les autres
+attendaient les 10 s de `STORE_READY_TIMEOUT` puis listaient l'API.
+`weebo_kit_adapters::wait_synced(&store, timeout) -> bool` (repris de
+weebo-forgejo) revérifie toutes les 50 ms (`STORE_POLL`) ; `Instances`,
+`LocalInstances` et `InstanceResolver` s'en servent. Dans
+`weebo-kit-adapters` et non dans le runtime : un adaptateur sortant ne
+dépend pas du runtime.

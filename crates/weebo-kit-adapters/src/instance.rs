@@ -16,22 +16,43 @@ use serde::de::DeserializeOwned;
 /// list before reading from the API instead.
 pub const STORE_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Whether `store` has listed: `false` when its writer is gone (shutdown)
-/// or after [`STORE_READY_TIMEOUT`] (a watch that can't list must not
-/// hang every reconcile).
+/// How often [`wait_synced`] re-checks a store that hasn't listed.
+pub const STORE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Whether `store` has listed within `timeout`: `false` when its writer is
+/// gone (shutdown) or the time is up — the caller then reads the API: a
+/// store that hasn't listed is never trusted empty, and a watch that can't
+/// list doesn't hang every reconcile.
+///
+/// Re-checks every [`STORE_POLL`] instead of awaiting
+/// `Store::wait_until_ready` once: kube's readiness wakes only the last
+/// task that polled it (a single oneshot), so every other concurrent
+/// waiter would sit out the whole `timeout`.
+pub async fn wait_synced<K: Resource<DynamicType = ()> + Clone + 'static>(
+    store: &Store<K>,
+    timeout: std::time::Duration,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        match tokio::time::timeout(STORE_POLL, store.wait_until_ready()).await {
+            Ok(ready) => return ready.is_ok(),
+            Err(_) if tokio::time::Instant::now() >= deadline => {
+                tracing::warn!(
+                    kind = %K::kind(&()),
+                    "the watch has not listed yet: reading from the API"
+                );
+                return false;
+            }
+            Err(_) => {}
+        }
+    }
+}
+
+/// [`wait_synced`] within [`STORE_READY_TIMEOUT`].
 pub(crate) async fn wait_ready<K: Resource<DynamicType = ()> + Clone + 'static>(
     store: &Store<K>,
 ) -> bool {
-    match tokio::time::timeout(STORE_READY_TIMEOUT, store.wait_until_ready()).await {
-        Ok(ready) => ready.is_ok(),
-        Err(_) => {
-            tracing::warn!(
-                kind = %K::kind(&()),
-                "the watch has not listed yet: reading from the API"
-            );
-            false
-        }
-    }
+    wait_synced(store, STORE_READY_TIMEOUT).await
 }
 
 pub struct InstanceResolver<I: Resource<DynamicType = ()> + 'static> {
@@ -176,6 +197,27 @@ mod tests {
         let (store, writer) = kube::runtime::reflector::store::<Namespace>();
         drop(writer);
         assert!(!wait_ready(&store).await);
+    }
+
+    #[tokio::test]
+    async fn every_concurrent_waiter_is_answered_once_the_store_lists() {
+        let (store, mut writer) = kube::runtime::reflector::store::<Namespace>();
+        let waiters: Vec<_> = (0..8)
+            .map(|_| {
+                let store = store.clone();
+                tokio::spawn(async move { wait_ready(&store).await })
+            })
+            .collect();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        writer.apply_watcher_event(&kube::runtime::watcher::Event::Init);
+        writer.apply_watcher_event(&kube::runtime::watcher::Event::InitDone);
+        for waiter in waiters {
+            let ready = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+                .await
+                .expect("a waiter was never woken")
+                .unwrap();
+            assert!(ready);
+        }
     }
 
     #[test]
