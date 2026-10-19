@@ -19,7 +19,13 @@ use weebo_kit_runtime::{Health, WatchScope, leader, telemetry, webhook_server};
 /// rollout must compete for the same lease.
 const DEFAULT_LEASE_NAME: &str = "{{project-name}}-operator-leader";
 
-#[tokio::main]
+// Four workers, whatever the node: tokio's default is one per core, and the
+// chart sets no CPU limit (which the default would follow). Each worker
+// gets its own allocator arena, so on a 16-core node the same load left
+// the idle RSS 14-15% higher after every create/churn/delete cycle, over
+// `Budget::small_cluster()`'s 10%, which was measured with 4 workers.
+// Reconciles wait on the apiserver and the remote API, not on CPU.
+#[tokio::main(worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
     let telemetry = telemetry::init(controller::FIELD_MANAGER)?;
     let result = match std::env::args().nth(1).as_deref() {
