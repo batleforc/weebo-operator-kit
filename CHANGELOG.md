@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.18.2](https://github.com/batleforc/weebo-operator-kit/compare/05a8bd46b8ba9df278388ba19762fe862c62dbb5..v0.18.2) - 2026-10-19
+#### Features
+- (**runtime**) WEEBO_WORKER_THREADS, 4 tokio workers by default (#11) - ([9a9f585](https://github.com/batleforc/weebo-operator-kit/commit/9a9f585f151eb1233416bc566c241eaa9d5b688d)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+#### Documentation
+- (**rfc**) RFC 0004 — review applied (#10) - ([23ae883](https://github.com/batleforc/weebo-operator-kit/commit/23ae883384c5243dd3eb8ad41a931cfc8119ef15)) - Maxime, Claude Opus 5.5 (1M context)
+- (**rfc**) RFC 0001 spike findings and D24, RFC 0002 moved here (#9) - ([05a8bd4](https://github.com/batleforc/weebo-operator-kit/commit/05a8bd46b8ba9df278388ba19762fe862c62dbb5)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.18.1](https://github.com/batleforc/weebo-operator-kit/compare/c744f17e785bdc2186080bf691ec272144c3dba8..v0.18.1) - 2026-10-19
 #### Features
 - Merge branch 'fix/crd-docs-escape' - ([c4fe3b7](https://github.com/batleforc/weebo-operator-kit/commit/c4fe3b7629da28f63129dda133bd48faa68ba0ee)) - Max Batleforc
