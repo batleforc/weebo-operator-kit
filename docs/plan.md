@@ -1577,3 +1577,23 @@ celle du kit. C'est un changement de code par opérateur, après le
 `kit:sync` v0.20.0 ; `task perf` le valide (requêtes/min au repos sous
 `Budget::small_cluster()` avec 4 workers : forgejo est passé de 37 watches
 à 15). Le correctif `wait_synced` arrive, lui, avec le seul `kit:sync`.
+
+Fait le 2026-10-19 dans les cinq opérateurs (forgejo 15 watches, authentik
+15 → 12, batlehub 16 → 9, angos 12 → 7, stalwart 15 → 8), budget tenu. Trois
+manques de l'API relevés en route, à corriger dans le kit :
+
+1. **Une seule config de watch par kind.** `SharedWatches` indexe par type,
+   `insert` est privé, et `spawn` applique toujours le sélecteur de labels
+   de l'opérateur. Un kind ne peut pas avoir à la fois une watch sans
+   sélecteur (les policies, qu'une policy hors sélecteur refuse toujours)
+   et une watch filtrée (son propre contrôleur) : authentik paie une watch
+   de plus. Piste : `spawn_with(api, watcher::Config, …)`, ou une clé
+   (type, sélecteur).
+2. **Pas de `WatchScope::without_selector()`.** forgejo et authentik
+   définissent chacun leur `unselected`, qui perd au passage le drapeau des
+   kinds cluster : l'appelant doit le revérifier avant `watches_in`.
+3. **`watches_in` ne prend pas de filtre de changement.** angos ne
+   redéclenche ses contrôleurs que sur certains changements d'un kind
+   référencé ; il a ajouté un `controller::touched` local qui branche le
+   flux partagé sur `watches_stream`. Piste : `watches_in_filtered(…,
+   predicate)`, ou exposer le flux `touched()` filtré.
