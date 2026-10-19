@@ -14,17 +14,23 @@ function DotMark() {
   );
 }
 
+// The display face is wide: past this many characters the name at 16px
+// overflows the sidebar header and pushes its collapse button over the page.
+const LONG_NAME = 15;
+
 /** Options shared by the home and docs layouts: the wordmark, the repo link, the theme switch. */
 export function baseOptions(site: SiteConfig): BaseLayoutProps {
+  const size = site.name.length > LONG_NAME ? "text-[12px]" : "text-[16px]";
   return {
     nav: {
       title: (
         <span
-          className="inline-flex items-center gap-2 whitespace-nowrap text-[16px] font-bold uppercase tracking-[0.04em]"
+          className={`inline-flex min-w-0 items-center gap-2 whitespace-nowrap ${size} font-bold uppercase tracking-[0.04em]`}
           style={{ fontFamily: "var(--face-display)", color: "var(--ink)" }}
+          title={site.name}
         >
           <DotMark />
-          {site.name}
+          <span className="truncate">{site.name}</span>
         </span>
       ),
     },
