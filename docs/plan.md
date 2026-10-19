@@ -1550,14 +1550,16 @@ au démarrage des contrôleurs, juste après la prise du lease.
   pour le kind principal — mêmes déclencheurs et même concurrence que
   `controller::controller`) ; un abonné reçoit tout le store une fois listé,
   puis chaque changement, et relit tout le store s'il a pris du retard.
-- `SharedWatches` : les watches du binaire, une par kind (indexées par
-  type, aucun champ nommé) — `spawn(api, &scope, &health, name) -> Store<K>`,
-  `get::<K>()`, `controller(api, &scope)` (la watch partagée, sinon le
+- `SharedWatches` : les watches du binaire, une par kind et sélecteur de
+  labels (indexées par type, aucun champ nommé) — `spawn(api, &scope,
+  &health, name) -> Store<K>`, `get::<K>()`, `get_in::<K>(&scope)`,
+  `touched::<K>(&scope, &client)`, `controller(api, &scope)` (la watch partagée, sinon le
   contrôleur du kit sur sa propre watch), `listed()`,
   `wait_listed(LISTED_TIMEOUT)`.
-- `WatchesIn::watches_in(&watches, &scope, &client, map)` : la watch d'un
-  kind référencé, partagée si possible, ignorée pour un kind cluster
-  quand l'opérateur n'en surveille aucun.
+- `WatchesIn::watches_in(&watches, &scope, &client, map)` (et
+  `watches_in_filtered(…, predicate, map)`) : la watch d'un kind
+  référencé, partagée si possible, ignorée pour un kind cluster quand
+  l'opérateur n'en surveille aucun.
 - `LISTED_TIMEOUT` (30 s) : le réplica ne fait campagne pour le lease
   qu'une fois ses watches listées, au plus 30 s.
 
@@ -1580,20 +1582,43 @@ celle du kit. C'est un changement de code par opérateur, après le
 
 Fait le 2026-10-19 dans les cinq opérateurs (forgejo 15 watches, authentik
 15 → 12, batlehub 16 → 9, angos 12 → 7, stalwart 15 → 8), budget tenu. Trois
-manques de l'API relevés en route, à corriger dans le kit :
+manques de l'API relevés en route, corrigés dans le kit (ajouts, non
+cassants : aucun opérateur ne casse à la compilation ni ne change de
+comportement tant qu'il ne s'en sert pas) :
 
-1. **Une seule config de watch par kind.** `SharedWatches` indexe par type,
-   `insert` est privé, et `spawn` applique toujours le sélecteur de labels
-   de l'opérateur. Un kind ne peut pas avoir à la fois une watch sans
-   sélecteur (les policies, qu'une policy hors sélecteur refuse toujours)
-   et une watch filtrée (son propre contrôleur) : authentik paie une watch
-   de plus. Piste : `spawn_with(api, watcher::Config, …)`, ou une clé
-   (type, sélecteur).
-2. **Pas de `WatchScope::without_selector()`.** forgejo et authentik
-   définissent chacun leur `unselected`, qui perd au passage le drapeau des
-   kinds cluster : l'appelant doit le revérifier avant `watches_in`.
-3. **`watches_in` ne prend pas de filtre de changement.** angos ne
-   redéclenche ses contrôleurs que sur certains changements d'un kind
-   référencé ; il a ajouté un `controller::touched` local qui branche le
-   flux partagé sur `watches_stream`. Piste : `watches_in_filtered(…,
-   predicate)`, ou exposer le flux `touched()` filtré.
+1. **Une seule config de watch par kind** — corrigé. `SharedWatches`
+   indexe par (type, sélecteur de labels) : `spawn(api, &scope, …)` ouvre
+   la watch du kind à travers le sélecteur de `scope`, sauf si elle
+   existe ; à travers `scope.without_selector()`, celle de tous les objets
+   (la même watch quand l'opérateur n'a pas de sélecteur). `get_in::<K>
+   (&scope)` rend la watch d'un sélecteur ; `get::<K>()` reste « la
+   première ouverte ». `controller(api, &scope)` ne prend que la watch du
+   sélecteur de `scope` (jamais une watch plus large : il réconcilierait
+   hors du scope), sinon sa propre watch ; `watches_in` prend celle du
+   sélecteur, sinon celle de tous les objets (plus d'objets, jamais
+   moins), sinon sa propre watch — le comportement d'avant pour forgejo,
+   qui lit ses policies sans sélecteur à travers `ctx.scope`. authentik
+   partage alors les deux watches de `AuthentikNamespacePolicy` (sans
+   sélecteur pour les policies, avec pour son contrôleur), attendues
+   toutes deux par `wait_listed`.
+2. **Pas de `WatchScope::without_selector()`** — corrigé.
+   `scope.without_selector()` garde le namespace, le drapeau des kinds
+   cluster et les références inter-namespaces : plus besoin de revérifier
+   `cluster_kinds()` avant `watches_in`.
+3. **`watches_in` ne prend pas de filtre de changement** — corrigé.
+   `WatchesIn::watches_in_filtered(&watches, &scope, &client, predicate,
+   map)` (un `Predicate` de kube, p. ex. le hash du champ de statut rendu)
+   et `SharedWatches::touched::<K>(&scope, &client)` (le flux que
+   `watches_stream` prend, `None` pour un kind cluster quand l'opérateur
+   n'en surveille aucun) ; même choix de watch que `watches_in`.
+
+Ce que chaque opérateur peut alors retirer, au `kit:sync` suivant :
+weebo-forgejo et weebo-authentik leur `controller::unselected`
+(`scope.without_selector()`), authentik aussi la revérification de
+`cluster_kinds()` de `on_policy_change` et la watch propre du contrôleur de
+`AuthentikNamespacePolicy` (`spawn` à travers `ctx.scope` en plus de celle
+sans sélecteur, puis `ctx.watches.controller(…)`, et `get_in` au lieu de
+`get` pour le store des policies) ; forgejo peut de même partager la watch
+de son contrôleur de `ForgejoNamespacePolicy` et passer ses reflectors
+d'instances sans sélecteur sur `spawn(…, &scope.without_selector(), …)` ;
+weebo-angos son `controller::touched` (`watches_in_filtered`).

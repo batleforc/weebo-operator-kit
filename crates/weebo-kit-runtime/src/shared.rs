@@ -17,11 +17,13 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use kube::api::Api;
 use kube::runtime::Controller;
 use kube::runtime::controller::Config;
 use kube::runtime::reflector::{self, ObjectRef, Store};
+use kube::runtime::utils::Predicate;
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Client, Resource};
 use serde::de::DeserializeOwned;
@@ -199,20 +201,35 @@ where
     }
 }
 
-/// The binary's shared watches, one per kind. A kind without one (a
-/// test's context built with `SharedWatches::default()`) is watched by
-/// each controller on its own.
+/// The binary's shared watches: one per kind and label selector (a kind
+/// may have one through the operator's selector and one without it,
+/// [`WatchScope::without_selector`]). A kind without one (a test's context
+/// built with `SharedWatches::default()`) is watched by each controller on
+/// its own.
 #[derive(Clone, Default)]
 pub struct SharedWatches {
-    /// `SharedWatch<K>` by `TypeId::of::<K>()`.
-    kinds: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
+    /// The `SharedWatch<K>`s by `TypeId::of::<K>()`, in spawn order, each
+    /// with the label selector it watches through (`None`: every object).
+    kinds: HashMap<TypeId, Vec<(Option<String>, AnyWatch)>>,
     listed: Vec<watch::Receiver<bool>>,
 }
 
+/// A `SharedWatch<K>` of some kind `K`.
+type AnyWatch = Arc<dyn Any + Send + Sync>;
+
+/// The label selector `scope` watches through: what tells two watches of
+/// a kind apart.
+fn selector_of(scope: &WatchScope) -> Option<String> {
+    scope.watcher_config().label_selector
+}
+
 impl SharedWatches {
-    /// The shared watch of `api`'s kind, through `scope`'s label selector
-    /// (`scope.watcher_config()`), spawned unless the kind already has one;
-    /// its store. Errors are reported to `health` under `name`.
+    /// The shared watch of `api`'s kind through `scope`'s label selector
+    /// (`scope.watcher_config()`), spawned unless the kind already has one
+    /// through that selector; its store. Errors are reported to `health`
+    /// under `name`. Through `scope.without_selector()`, the kind's watch
+    /// of every object — the same watch as through `scope` when the
+    /// operator has no selector.
     pub fn spawn<K>(
         &mut self,
         api: Api<K>,
@@ -223,41 +240,111 @@ impl SharedWatches {
     where
         K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Send + Sync + 'static,
     {
-        if let Some(shared) = self.get::<K>() {
+        let selector = selector_of(scope);
+        if let Some(shared) = self.find::<K>(selector.as_deref()) {
             return shared.store();
         }
         let shared = SharedWatch::spawn(api, scope.watcher_config(), health.clone(), name);
         let store = shared.store();
-        self.insert(shared);
+        self.insert(selector, shared);
         store
     }
 
-    fn insert<K>(&mut self, shared: SharedWatch<K>)
+    fn insert<K>(&mut self, selector: Option<String>, shared: SharedWatch<K>)
     where
         K: Resource<DynamicType = ()> + Send + Sync + 'static,
     {
         self.listed.push(shared.listed.clone());
-        self.kinds.insert(TypeId::of::<K>(), Arc::new(shared));
+        self.kinds
+            .entry(TypeId::of::<K>())
+            .or_default()
+            .push((selector, Arc::new(shared)));
     }
 
-    /// The shared watch of `K`, if the binary spawned one.
+    /// The shared watch of `K` through exactly `selector`.
+    fn find<K>(&self, selector: Option<&str>) -> Option<&SharedWatch<K>>
+    where
+        K: Resource<DynamicType = ()> + 'static,
+    {
+        self.kinds
+            .get(&TypeId::of::<K>())?
+            .iter()
+            .find(|(s, _)| s.as_deref() == selector)?
+            .1
+            .downcast_ref()
+    }
+
+    /// The shared watch of `K`, if the binary spawned one — the first
+    /// spawned when it has several ([`Self::get_in`] tells them apart).
     pub fn get<K>(&self) -> Option<&SharedWatch<K>>
     where
         K: Resource<DynamicType = ()> + 'static,
     {
-        self.kinds.get(&TypeId::of::<K>())?.downcast_ref()
+        self.kinds
+            .get(&TypeId::of::<K>())?
+            .first()?
+            .1
+            .downcast_ref()
     }
 
-    /// The controller of `K`: on its shared watch when there is one, else
-    /// the kit's [`controller`] on its own watch of `api` through `scope`.
+    /// The shared watch of `K` through `scope`'s label selector, if the
+    /// binary spawned one (`scope.without_selector()`: its watch of every
+    /// object).
+    pub fn get_in<K>(&self, scope: &WatchScope) -> Option<&SharedWatch<K>>
+    where
+        K: Resource<DynamicType = ()> + 'static,
+    {
+        self.find(selector_of(scope).as_deref())
+    }
+
+    /// A shared watch of `K` that sees at least what `scope` does: its
+    /// watch through `scope`'s selector, else its watch of every object.
+    fn covering<K>(&self, scope: &WatchScope) -> Option<&SharedWatch<K>>
+    where
+        K: Resource<DynamicType = ()> + 'static,
+    {
+        self.get_in(scope).or_else(|| self.find(None))
+    }
+
+    /// The controller of `K`: on its shared watch through `scope`'s label
+    /// selector when there is one, else the kit's [`controller`] on its own
+    /// watch of `api` through `scope` (never on a watch through another
+    /// selector: it would reconcile objects outside the scope).
     pub fn controller<K>(&self, api: Api<K>, scope: &WatchScope) -> Controller<K>
     where
         K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Send + Sync + 'static,
     {
-        match self.get::<K>() {
+        match self.get_in::<K>(scope) {
             Some(shared) => shared.controller(),
             None => controller(api, scope),
         }
+    }
+
+    /// Every object of `K` touched (deleted ones included), as a
+    /// `Controller::watches_stream` takes it: from its shared watch through
+    /// `scope`'s selector, else its shared watch of every object (more
+    /// objects, never fewer), else a watch of its own through `scope`.
+    /// `None` for a cluster-scoped kind when the operator watches none
+    /// (`scope.cluster_kinds()` false).
+    pub fn touched<K>(
+        &self,
+        scope: &WatchScope,
+        client: &Client,
+    ) -> Option<BoxStream<'static, Result<K, watcher::Error>>>
+    where
+        K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Send + Sync + 'static,
+        K::Scope: KindScope,
+    {
+        if skipped::<K>(scope) {
+            return None;
+        }
+        Some(match self.covering::<K>(scope) {
+            Some(shared) => shared.touched().boxed(),
+            None => watcher(scope.api::<K>(client.clone()), scope.watcher_config())
+                .default_backoff()
+                .touched_objects()
+                .boxed(),
+        })
     }
 
     /// Resolves once every shared watch has listed (or is gone).
@@ -278,10 +365,21 @@ impl SharedWatches {
     }
 }
 
+/// Whether `K` is left unwatched: cluster-scoped, and `scope` watches no
+/// cluster-scoped kind.
+fn skipped<K>(scope: &WatchScope) -> bool
+where
+    K: Resource,
+    K::Scope: KindScope,
+{
+    !<K::Scope as KindScope>::NAMESPACED && !scope.cluster_kinds()
+}
+
 /// A watch on a kind the CRs reference, re-triggering the CRs `map`
-/// returns: on the kind's shared watch when there is one, else its own
-/// watch through `scope` — and skipped for a cluster-scoped kind when the
-/// operator watches none (`scope.cluster_kinds()` false).
+/// returns: on the kind's shared watch through `scope`'s selector, else
+/// its shared watch of every object, else its own watch through `scope` —
+/// and skipped for a cluster-scoped kind when the operator watches none
+/// (`scope.cluster_kinds()` false). Implemented by `Controller` only.
 pub trait WatchesIn<C>: Sized
 where
     C: Resource<DynamicType = ()> + Clone + Debug + Send + Sync + 'static,
@@ -296,6 +394,25 @@ where
     where
         K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Send + Sync + 'static,
         K::Scope: KindScope,
+        I: IntoIterator<Item = ObjectRef<C>> + 'static,
+        I::IntoIter: Send;
+
+    /// [`Self::watches_in`], re-triggering only on the changes `predicate`
+    /// sees (`predicate_filter`: an object whose hash didn't change since
+    /// its last change is dropped, e.g. a hash of the status field the CRs
+    /// render).
+    fn watches_in_filtered<K, I, P>(
+        self,
+        watches: &SharedWatches,
+        scope: &WatchScope,
+        client: &Client,
+        predicate: P,
+        map: impl Fn(K) -> I + Send + Sync + 'static,
+    ) -> Self
+    where
+        K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Send + Sync + 'static,
+        K::Scope: KindScope,
+        P: Predicate<K> + Send + 'static,
         I: IntoIterator<Item = ObjectRef<C>> + 'static,
         I::IntoIter: Send;
 }
@@ -317,13 +434,36 @@ where
         I: IntoIterator<Item = ObjectRef<C>> + 'static,
         I::IntoIter: Send,
     {
-        if !<K::Scope as KindScope>::NAMESPACED && !scope.cluster_kinds() {
+        if skipped::<K>(scope) {
             return self;
         }
-        if let Some(shared) = watches.get::<K>() {
+        if let Some(shared) = watches.covering::<K>(scope) {
             return self.watches_stream(shared.touched(), map);
         }
         self.watches(scope.api::<K>(client.clone()), scope.watcher_config(), map)
+    }
+
+    fn watches_in_filtered<K, I, P>(
+        self,
+        watches: &SharedWatches,
+        scope: &WatchScope,
+        client: &Client,
+        predicate: P,
+        map: impl Fn(K) -> I + Send + Sync + 'static,
+    ) -> Self
+    where
+        K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Send + Sync + 'static,
+        K::Scope: KindScope,
+        P: Predicate<K> + Send + 'static,
+        I: IntoIterator<Item = ObjectRef<C>> + 'static,
+        I::IntoIter: Send,
+    {
+        match watches.touched::<K>(scope, client) {
+            Some(touched) => {
+                self.watches_stream(touched.predicate_filter(predicate, Default::default()), map)
+            }
+            None => self,
+        }
     }
 }
 
@@ -469,8 +609,8 @@ mod tests {
         let maps = fed::<ConfigMap>();
         let secrets = fed::<Secret>();
         let mut watches = SharedWatches::default();
-        watches.insert(maps.shared.clone());
-        watches.insert(secrets.shared.clone());
+        watches.insert(None, maps.shared.clone());
+        watches.insert(None, secrets.shared.clone());
         assert!(!watches.wait_listed(Duration::from_millis(50)).await);
         maps.listed.send_replace(true);
         assert!(!watches.wait_listed(Duration::from_millis(50)).await);
@@ -483,9 +623,145 @@ mod tests {
         let maps = fed::<ConfigMap>();
         let mut watches = SharedWatches::default();
         assert!(watches.get::<ConfigMap>().is_none());
-        watches.insert(maps.shared.clone());
+        watches.insert(None, maps.shared.clone());
         assert!(watches.get::<ConfigMap>().is_some());
         assert!(watches.get::<Secret>().is_none());
+    }
+
+    fn selected() -> WatchScope {
+        let labels = [("weebo.io/shard".to_string(), "a".to_string())];
+        WatchScope::namespace("ns")
+            .with_labels(
+                k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector {
+                    match_labels: Some(labels.into_iter().collect()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+    }
+
+    /// A client that never connects: building streams and controllers only.
+    fn offline() -> Client {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        Client::try_from(kube::Config::new("http://127.0.0.1:1".parse().unwrap())).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_kind_has_one_watch_per_selector() {
+        let scope = selected();
+        let all = scope.without_selector();
+        let (every, only) = (fed::<ConfigMap>(), fed::<ConfigMap>());
+        let mut watches = SharedWatches::default();
+        assert!(watches.get_in::<ConfigMap>(&scope).is_none());
+        watches.insert(selector_of(&all), every.shared.clone());
+        // Only the watch of every object: what `scope` sees is covered,
+        // the controller of `scope` isn't on it.
+        assert!(watches.get_in::<ConfigMap>(&scope).is_none());
+        assert!(watches.get_in::<ConfigMap>(&all).is_some());
+        assert!(watches.covering::<ConfigMap>(&scope).is_some());
+        watches.insert(selector_of(&scope), only.shared.clone());
+        let same = |a: Option<&SharedWatch<ConfigMap>>, b: &Fed<ConfigMap>| {
+            a.is_some_and(|a| a.listed.same_channel(&b.shared.listed))
+        };
+        assert!(same(watches.get_in(&scope), &only));
+        assert!(same(watches.get_in(&all), &every));
+        assert!(same(watches.covering(&scope), &only));
+        // `get`: the first spawned.
+        assert!(same(watches.get(), &every));
+        assert!(watches.get_in::<Secret>(&all).is_none());
+        // Both are waited for.
+        every.listed.send_replace(true);
+        assert!(!watches.wait_listed(Duration::from_millis(50)).await);
+        only.listed.send_replace(true);
+        assert!(watches.wait_listed(Duration::from_millis(50)).await);
+    }
+
+    #[test]
+    fn without_a_selector_both_scopes_share_one_watch() {
+        let scope = WatchScope::namespace("ns");
+        assert_eq!(selector_of(&scope), selector_of(&scope.without_selector()));
+        assert_eq!(selector_of(&WatchScope::cluster()), None);
+        assert!(selector_of(&selected()).is_some());
+    }
+
+    #[tokio::test]
+    async fn spawn_adds_a_watch_only_for_a_new_selector() {
+        let client = offline();
+        let health = Arc::new(Health::default());
+        let count = |w: &SharedWatches| w.kinds.get(&TypeId::of::<ConfigMap>()).map_or(0, Vec::len);
+        let mut watches = SharedWatches::default();
+        for scope in [selected(), selected().without_selector(), selected()] {
+            watches.spawn(
+                scope.api::<ConfigMap>(client.clone()),
+                &scope,
+                &health,
+                "cm",
+            );
+        }
+        assert_eq!((count(&watches), watches.listed.len()), (2, 2));
+        // No selector: the scope and its selector-free copy are one watch.
+        let mut watches = SharedWatches::default();
+        let scope = WatchScope::namespace("ns");
+        for scope in [scope.clone(), scope.without_selector()] {
+            watches.spawn(
+                scope.api::<ConfigMap>(client.clone()),
+                &scope,
+                &health,
+                "cm",
+            );
+        }
+        assert_eq!(count(&watches), 1);
+    }
+
+    #[tokio::test]
+    async fn a_cluster_kind_is_skipped_without_cluster_kinds() {
+        use k8s_openapi::api::core::v1::Namespace;
+        let client = offline();
+        let watches = SharedWatches::default();
+        let full = WatchScope::namespace("ns").without_cluster_kinds().unwrap();
+        assert!(watches.touched::<Namespace>(&full, &client).is_none());
+        assert!(watches.touched::<ConfigMap>(&full, &client).is_some());
+        assert!(
+            watches
+                .touched::<Namespace>(&WatchScope::cluster(), &client)
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_filtered_stream_only_yields_the_changes_the_predicate_sees() {
+        let mut fed = fed::<ConfigMap>();
+        let mut watches = SharedWatches::default();
+        let scope = WatchScope::namespace("ns");
+        watches.insert(selector_of(&scope), fed.shared.clone());
+        apply(&mut fed, watcher::Event::Init);
+        apply(&mut fed, watcher::Event::InitDone);
+        let touched = watches.touched::<ConfigMap>(&scope, &offline()).unwrap();
+        // A hash of `data` only: a change of the labels is dropped.
+        let data = |o: &ConfigMap| {
+            use std::hash::{DefaultHasher, Hash, Hasher};
+            let mut h = DefaultHasher::new();
+            o.data.hash(&mut h);
+            Some(h.finish())
+        };
+        let mut stream = Box::pin(touched.predicate_filter(data, Default::default()));
+        let with = |data: &str, label: &str| {
+            let mut o = cm("a");
+            o.data = Some([("k".to_string(), data.to_string())].into());
+            o.metadata.labels = Some([("l".to_string(), label.to_string())].into());
+            o
+        };
+        // Listed (empty): now waiting for changes.
+        assert!(drain(&mut stream).await.is_empty());
+        apply(&mut fed, watcher::Event::Apply(with("1", "x")));
+        apply(&mut fed, watcher::Event::Apply(with("1", "y")));
+        apply(&mut fed, watcher::Event::Apply(with("2", "y")));
+        let seen: Vec<_> = drain(&mut stream)
+            .await
+            .into_iter()
+            .map(|o| o.unwrap().data.unwrap_or_default()["k"].clone())
+            .collect();
+        assert_eq!(seen, ["1", "2"]);
     }
 
     #[tokio::test]
