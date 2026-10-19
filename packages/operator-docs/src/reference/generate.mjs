@@ -22,6 +22,9 @@ export const PAGES = ["reason-codes", "events", "metrics", "resource-budget"];
  * @property {string} metricsPrefix The operator's metric prefix (`weebo_<name>`),
  *   as passed to the kit's `ReconcileMetrics`/`admission::router`. Checked
  *   against the sources.
+ * @property {string} [group] The API group the pages name (the domain of
+ *   the operator's annotations). Default: the CRDs' group. Required when
+ *   there is no CRD; must match the CRDs' group otherwise.
  * @property {string} [dir] Generated pages. Default `content/docs/reference`.
  * @property {string} [reasonCodes] The file declaring the `reason_codes!`
  *   catalog. Default `../crates/domain/src/error.rs`.
