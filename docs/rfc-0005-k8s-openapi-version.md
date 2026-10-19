@@ -2,7 +2,7 @@
 
 | Field       | Value                                                                  |
 | ----------- | ---------------------------------------------------------------------- |
-| Status      | Accepted (2026-10-19, après grill)                                     |
+| Status      | Implemented (v0.19.1)                                                  |
 | Short       | Feature de version `k8s-openapi` hors des bibliothèques                |
 | Settles     | Qui choisit la version de Kubernetes que compilent les crates `weebo-kit-*` |
 | Author      | Max Batleforc <maxleriche.60@gmail.com>                                |
@@ -210,9 +210,13 @@ crates du kit par git sur la branche de cette RFC, puis sur le tag.
 1. **Avant** (fait le 2026-10-19 sur des copies) : `cargo check -p
    controller` de ProxyAuthK8S avec `weebo-kit-runtime` échoue : « Both v1_34
    and v1_36 features are enabled on the k8s-openapi crate ».
-2. **Après** (fait sur des copies, à refaire sur la branche) : la même
-   commande passe, et `cargo tree -e features -i k8s-openapi` ne montre que
-   `v1_34`.
+2. **Après**, sur le tag v0.19.1 (2026-10-19, une copie de ProxyAuthK8S par
+   `git archive HEAD`) : `libs/server/controller` dépend de
+   `weebo-kit-domain`, `-api` et `-runtime` en `{ git = …, tag = "v0.19.1" }`,
+   le workspace garde `k8s-openapi` en `v1_34`. `cargo check -p controller`
+   passe (code 0) ; `cargo tree -p server -e features -i k8s-openapi` ne
+   montre que `feature "v1_34"` ; `Cargo.lock` pointe le commit du tag
+   (`a6cdb648`, conforme à `git ls-remote`).
 3. **Plage** (fait sur une copie) : sans la feature, `cargo check` des
    crates domain, api, runtime, application et adapters passe avec
    `K8S_OPENAPI_ENABLED_VERSION` à 1.34 et à 1.32.
@@ -224,7 +228,13 @@ crates du kit par git sur la branche de cette RFC, puis sur le tag.
    la variable de `mise.toml`.
 6. **Refus** : remettre `"v1_36"` dans `[workspace.dependencies]` fait échouer
    la garde de §6.2, avec un message qui nomme le fichier.
-7. **Matrice** : le job `k8s-versions` passe sur les cinq versions.
+7. **Matrice** : le job `k8s-versions` passe sur les cinq versions (CI de
+   la PR #13).
+
+Points 4 à 6, fait : `task template:check`, `task lint`, `task test` et
+`task doc` passent ; les cinq opérateurs, synchronisés sur v0.19.1 sans
+toucher leur `Cargo.toml`, n'ont que `v1_36` dans leur graphe ; remettre
+`v1_36` dans le workspace fait échouer la garde (`Cargo.toml:43`).
 
 **Deliberately untouched** :
 
@@ -385,3 +395,4 @@ Aucune.
 | --- | --- |
 | 2026-10-19 | Brouillon, écrit depuis la RFC 0011 de ProxyAuthK8S |
 | 2026-10-19 | Déposée dans le kit ; grill : matrice CI 1.32 à 1.36 (décision 2), garde en test Rust (3), plage et version de test au README (4), patch (5) ; opérateurs vérifiés (tous déclarent `v1_36`) ; `testkit` retiré des *Touches* (pas de test) |
+| 2026-10-19 | Implémentée en v0.19.1 (PR #13) ; preuve 2 sur ProxyAuthK8S (tag v0.19.1, `v1_34` seul) ; opérateurs synchronisés sans changement de `Cargo.toml` |
