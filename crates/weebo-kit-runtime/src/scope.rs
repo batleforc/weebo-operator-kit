@@ -74,6 +74,17 @@ impl WatchScope {
         Ok(self)
     }
 
+    /// This scope without its label selector, every other setting kept
+    /// (namespace, cluster-scoped kinds, cross-namespace references): for
+    /// what must see every object of a kind, whichever release selects it
+    /// (a policy outside the selector still applies).
+    pub fn without_selector(&self) -> Self {
+        Self {
+            selector: None,
+            ..self.clone()
+        }
+    }
+
     /// References across namespaces allowed (still subject to the
     /// target's consent). Never for an operator limited to one namespace:
     /// it doesn't see the others.
@@ -370,6 +381,27 @@ mod tests {
         let err = full.ensure::<Namespace>().unwrap_err().to_string();
         assert!(err.contains("Namespace is cluster-scoped"), "{err}");
         assert!(WatchScope::cluster().ensure::<Namespace>().is_ok());
+    }
+
+    #[test]
+    fn without_selector_keeps_everything_else() {
+        let scope = WatchScope::from_values(
+            Some("a"),
+            Some(r#"{"matchLabels": {"weebo.io/shard": "a"}}"#),
+            Some("false"),
+        )
+        .unwrap()
+        .with_cross_namespace_refs();
+        let all = scope.without_selector();
+        assert!(all.selector().is_none());
+        assert!(all.watcher_config().label_selector.is_none());
+        assert!(all.selects(&config_map("a", &[])));
+        assert!(!scope.selects(&config_map("a", &[])));
+        assert_eq!(all.watched_namespace(), Some("a"));
+        assert!(!all.cluster_kinds());
+        let cluster = WatchScope::cluster().with_cross_namespace_refs();
+        assert!(cluster.without_selector().cross_namespace_refs());
+        assert_eq!(cluster.without_selector(), cluster);
     }
 
     // Each kind knows its scope at compile time.
