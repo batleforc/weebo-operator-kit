@@ -31,6 +31,8 @@ tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+# The version the kit is tested with (RFC 0005).
+k8s-openapi = { workspace = true, features = ["v1_36"] }
 # `start_paused` in the leader-election tests.
 tokio = { workspace = true, features = ["test-util"] }
 # The scripted apiserver of the lease tests.

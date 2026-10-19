@@ -35,7 +35,12 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 kube = { version = "4.0", features = ["derive", "runtime", "client"] }
-k8s-openapi = { version = "0.28", features = ["v1_36", "schemars"] }
+# No `v1_*` feature: k8s-openapi leaves the Kubernetes version to the
+# application (its lib.rs), and two versions in one graph fail its build.
+# The operator's workspace picks it; the kit's tests take `v1_36` through a
+# dev-dependency, its `cargo check`/`doc` through K8S_OPENAPI_ENABLED_VERSION
+# (mise.toml). RFC 0005; the guard is crates/weebo-kit-domain/tests.
+k8s-openapi = { version = "0.28", features = ["schemars"] }
 schemars = "1.2"
 axum = "0.8"
 axum-server = { version = "0.8", default-features = false, features = [
