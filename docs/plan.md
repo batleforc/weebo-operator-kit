@@ -1567,3 +1567,13 @@ stores de `Instances` sont ceux des watches partagées, `main` attend
 `wait_listed` avant `acquire_leadership`. `controller::controller` reste
 tel quel : un opérateur l'adopte quand il veut (`Ctx.watches` est un
 champ de plus côté template, pas dans le kit).
+
+Publié en v0.20.0. Reste à faire côté opérateurs (demandé le 2026-10-19) :
+passer weebo-authentik, weebo-batlehub, weebo-angos et weebo-stalwart sur
+`SharedWatches` (contrôleurs par `watches.controller(…)`, kinds référencés
+par `watches_in`, campagne pour le lease après `wait_listed`), et
+weebo-forgejo de sa copie locale (`controller/shared.rs`, sa PR #16) à
+celle du kit. C'est un changement de code par opérateur, après le
+`kit:sync` v0.20.0 ; `task perf` le valide (requêtes/min au repos sous
+`Budget::small_cluster()` avec 4 workers : forgejo est passé de 37 watches
+à 15). Le correctif `wait_synced` arrive, lui, avec le seul `kit:sync`.
