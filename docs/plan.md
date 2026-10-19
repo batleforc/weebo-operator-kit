@@ -1622,3 +1622,21 @@ sans sélecteur, puis `ctx.watches.controller(…)`, et `get_in` au lieu de
 de son contrôleur de `ForgejoNamespacePolicy` et passer ses reflectors
 d'instances sans sélecteur sur `spawn(…, &scope.without_selector(), …)` ;
 weebo-angos son `controller::touched` (`watches_in_filtered`).
+
+### À faire — une cause `spec` pour les écritures distantes
+
+`RemoteWrite` n'a que `Created`, `Drift` et `Deleted` : une écriture qui
+applique un changement de spec est comptée `cause="drift"` dans
+`<prefix>_remote_writes_total`, comme une vraie dérive corrigée. L'Event
+`DriftCorrected` fait déjà la différence (rien quand `metadata.generation !=
+status.observedGeneration`), pas la métrique. Conséquence, relevée sur
+weebo-batlehub en comptant ses écritures (2026-10-19) : une série de
+modifications de spec en moins de 30 minutes déclenche `RepeatedDrift`,
+alors qu'aucun objet n'a dérivé.
+
+Piste : `RemoteWrite::Spec` (`cause="spec"`), choisi par l'appelant avec la
+même règle que l'Event (génération pas encore observée), et
+`RepeatedDrift` qui ne compte que `cause="drift"` (déjà le cas de son
+sélecteur). Ajout non cassant pour la métrique ; les opérateurs qui
+choisissent la cause eux-mêmes (`record_write`) l'adoptent un par un, la
+page de métriques d'`@weebo/operator-docs` liste la nouvelle valeur.
