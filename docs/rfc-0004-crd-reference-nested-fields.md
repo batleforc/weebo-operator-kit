@@ -865,8 +865,16 @@ de `task docs:pack` installée par `npm install --install-links`) :
    littéral (18 fois, aucun `\{`) ; « Exactly one of Secret, Cert, ConfigMap,
    SystemRoots, Insecure. » est sous `spec.cert`. À 1248–1440 px (Chromium
    1248), `#nd-toc` est visible, sans erreur JS ni 404 (accueil, page CRD,
-   page Mermaid, page API). La page a 48 sections, contre 53 chez crdoc :
-   l'écart n'est toujours pas expliqué. ProxyAuthK8S remplace `CrdForm` par
+   page Mermaid, page API). La page a 48 sections, contre 53 titres chez
+   crdoc : l'écart est voulu. Les 48 objets imbriqués sont les mêmes des
+   deux côtés (`[index]` de crdoc = `[]` ici, page régénérée depuis
+   `deploy/crd/proxykubeapi.yaml` de `f0004c3`, comparée à `crds.mdx` de
+   `f0004c3^`). Les 5 titres en plus chez crdoc sont la structure de sa
+   page unique : `# API Reference` (ici le titre du frontmatter),
+   `# weebo.si.rs/v1` (ici le fait *API version*), `## ProxyKubeApi` (ici
+   une page par kind), `### ProxyKubeApi.spec` (ici `## Spec fields`) et
+   `### ProxyKubeApi.status` (le schéma `status` est hors périmètre, non-goals du §3 et
+   point 9 du grill). Le générateur ne perd aucun objet. ProxyAuthK8S remplace `CrdForm` par
    son propre générateur pour `ProxyKubeApi` (unions `oneOf` de serde), dans
    son `mdx.tsx` : rien à changer côté kit.
 4. L'index `/api/search` contient « a path pattern has no » (règle de
@@ -922,3 +930,4 @@ ni `<br />` affiché dans du code. Page la plus lourde : 83 Ko
 | 2026-10-19 | Revue appliquée : table des matières coupée par `full: true` (§6.2) ; invariant de §5.2 étendu à `codeSpan` (noms, défauts, enums, short names, `apiVersion`, `kind`) ; T1 réécrit (job de build en lecture seule, enjeu = robustesse du build et intégrité du site) et T6 (images) ajouté ; preuve 6 par `globalThis.process.getBuiltinModule` ; paragraphes découpés avant le code (`Quantity`) ; goal 2 en « Markdown inline, sans JSX ni image » ; harnais avec `remark-gfm`, `remarkHeading` et `CrdForm` factice ; §8 corrigé (audit des devDependencies, pas de Dependabot, épinglage) ; `x-kubernetes-int-or-string`, enums avec `null`, union d'une branche, contraintes de schéma, jeu de caractères des ancres et `customId`, tableaux de tableaux ; `llms-full.txt` et noms des routes ; budget d'index de recherche ; chiffres mis à jour (weebo-stalwart 8 kinds, 842 descriptions, 180 règles, 117 enums) ; « exactement la page d'aujourd'hui » retiré ; migration (`regen-and-diff`, ProxyAuthK8S en pnpm) ; *Touches*, *Références* et *Changelog* complétés |
 | 2026-10-19 | Phase 2 écrite, §17 : règles hors objet, backticks orphelins échappés, écriture différée ; preuve sur weebo-forgejo |
 | 2026-10-19 | Preuves 3 à 5 sur ProxyAuthK8S (v0.19.0, sa RFC 0005 phase 3) ; écart de sections avec crdoc (48 contre 53) toujours ouvert |
+| 2026-10-19 | Écart 48/53 expliqué (§17, preuve 3) : mêmes 48 objets imbriqués ; les 5 titres en plus de crdoc sont sa structure de page et `status`, hors périmètre |
