@@ -20,6 +20,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use weebo_kit_runtime::events;
 use weebo_kit_runtime::metrics::ReconcileMetrics;
+use weebo_kit_runtime::shared::SharedWatches;
 use weebo_kit_runtime::status::StatusUpdate;
 use weebo_kit_runtime::{Health, WatchScope};
 
@@ -60,6 +61,40 @@ pub struct Ctx {
     /// What the controllers watch (`WEEBO_WATCH_NAMESPACE`,
     /// `WEEBO_WATCH_LABEL_SELECTOR`): every watch goes through it.
     pub scope: WatchScope,
+    /// The binary's shared watches ([`spawn_watches`]): one per kind for
+    /// every controller and every store read (`SharedWatches::default()`:
+    /// each controller watches on its own). A controller watching a
+    /// referenced kind goes through them too
+    /// (`weebo_kit_runtime::shared::WatchesIn::watches_in`).
+    pub watches: SharedWatches,
+}
+
+/// One watch per kind, on `scope`, for every controller and the instance
+/// stores (no `{{product}}Instance` without cluster-scoped kinds). Spawned
+/// before the lease is campaigned for: a standby keeps them warm.
+pub fn spawn_watches(client: &Client, scope: &WatchScope, health: &Arc<Health>) -> SharedWatches {
+    let mut watches = SharedWatches::default();
+    if scope.cluster_kinds() {
+        watches.spawn(
+            scope.api::<api::Instance>(client.clone()),
+            scope,
+            health,
+            "{{product}}Instance watch",
+        );
+    }
+    watches.spawn(
+        scope.api::<api::LocalInstance>(client.clone()),
+        scope,
+        health,
+        "{{product}}LocalInstance watch",
+    );
+    watches.spawn(
+        scope.api::<api::Object>(client.clone()),
+        scope,
+        health,
+        "{{product}}Object watch",
+    );
+    watches
 }
 
 /// What stopped a reconcile before (or instead of) its status.

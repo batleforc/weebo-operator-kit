@@ -22,7 +22,9 @@ const KIND: &str = "{{product}}Object";
 
 pub async fn run(client: Client, ctx: Arc<Ctx>) {
     let health = ctx.health.clone();
-    let results = super::controller(ctx.scope.api::<Object>(client), &ctx.scope)
+    let results = ctx
+        .watches
+        .controller(ctx.scope.api::<Object>(client), &ctx.scope)
         .graceful_shutdown_on(ctx.shutdown.wait())
         .run(reconcile, error_policy, ctx);
     super::drive(KIND, health, results).await;
