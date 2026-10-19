@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.21.0](https://github.com/batleforc/weebo-operator-kit/compare/9b723a33954b1decf516291cd404d16c0727fdb8..v0.21.0) - 2026-10-19
+#### Features
+- (**runtime**) shared watches per label selector, filtered watches_in (#21) - ([83d9f9c](https://github.com/batleforc/weebo-operator-kit/commit/83d9f9c83027333889c4d4ee51a3e8c51d05d191)) - Maxime, Claude Opus 5.5 (1M context)
+#### Documentation
+- (**plan**) shared watches adopted, three API gaps to close (#20) - ([ba61265](https://github.com/batleforc/weebo-operator-kit/commit/ba6126513c8b2f81cec4d4c8a169e56414acdce8)) - Maxime, Claude Opus 5.5 (1M context)
+- (**plan**) shared watches still to adopt in the operators (#19) - ([9b723a3](https://github.com/batleforc/weebo-operator-kit/commit/9b723a33954b1decf516291cd404d16c0727fdb8)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.20.0](https://github.com/batleforc/weebo-operator-kit/compare/9dab634f16ae9e467a9725bb69df4dad5f9a6eea..v0.20.0) - 2026-10-19
 #### Features
 - (**operator-docs**) reference.group for a component without CRDs; RFC 0004 section gap explained (#15) - ([9dab634](https://github.com/batleforc/weebo-operator-kit/commit/9dab634f16ae9e467a9725bb69df4dad5f9a6eea)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
