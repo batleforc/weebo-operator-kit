@@ -15,6 +15,7 @@ pub mod health;
 pub mod leader;
 pub mod metrics;
 pub mod pod;
+pub mod runtime;
 pub mod scope;
 pub mod shutdown;
 pub mod status;
@@ -41,6 +42,7 @@ mod published_in_the_docs {
         let actual = serde_json::json!({
             "reconcile_duration_buckets_secs": metrics::DURATION_BUCKETS,
             "default_concurrency": controller::DEFAULT_CONCURRENCY,
+            "default_worker_threads": runtime::DEFAULT_WORKER_THREADS,
             "steady_requeue_secs": controller::STEADY_REQUEUE_SECS,
             "retry_requeue_secs": controller::RETRY_REQUEUE_SECS,
             "status_retries": status::STATUS_RETRIES,

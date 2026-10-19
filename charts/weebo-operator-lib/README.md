@@ -69,7 +69,7 @@ and `helm.sh/resource-policy: keep`: the kit's `helm:crds` task
 The values contract is the one of `templates/operator`'s chart
 (`deploy/charts/<operator>/values.yaml` and its `values.schema.json`):
 `replicaCount`, `image`, `serviceAccount`, `crds`, `reconcileConcurrency`,
-`logFormat`, `watch`, `leaderElection`, `webhook`, `certManager`, `metrics`,
+`workerThreads` (optional: unset, the binary's default applies), `logFormat`, `watch`, `leaderElection`, `webhook`, `certManager`, `metrics`,
 `serviceMonitor`, `prometheusRule`, `probes`, `shutdown`,
 `podDisruptionBudget`, `rbac.namespacedExample`, `resources`, scheduling,
 security contexts, `networkPolicy` and `extraEnv`. An operator adds its

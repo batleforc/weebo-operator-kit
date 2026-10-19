@@ -301,7 +301,9 @@ erreurs que l'opérateur traduit) :
 - **Squelette de controller** (`weebo-kit-runtime::controller` et
   `status`) : `controller(api)` (watch filtrée par prédicats generation/
   annotations/labels/finalizers/suppression, concurrence
-  `WEEBO_RECONCILE_CONCURRENCY`, 4 par défaut), `drive`, `jittered`,
+  `WEEBO_RECONCILE_CONCURRENCY`, 4 par défaut), `runtime::build` (runtime
+  tokio à `WEEBO_WORKER_THREADS` workers, 4 par défaut, pas un par cœur),
+  `drive`, `jittered`,
   `requeue_after(steady, due_in)` (300 s/30 s ±20 %),
   `retry_after_error` (corps de l'`error_policy` : Event `Warning` +
   ~30 s), `finalize` (cleanup sauf `force-orphan`, puis Event du code
