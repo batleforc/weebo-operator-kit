@@ -266,7 +266,7 @@ operator's. Add a `reference` section to `crd-docs.config.mjs` and the same
 | ---- | -------------- |
 | `reason-codes` | the operator's `reason_codes!` catalog (codes, doc comments, severities, the success code), and how its code uses them: admission denials (`Denial::new`), lifecycle Events (`announce_change`), the finalizer's release code (`controller::finalize`), the errors announced before a status (`(Code, events::…)`) |
 | `events` | the kit's Event rules (`weebo-kit-runtime::events`), with those codes and the CRDs' group (the `force-orphan` annotation) |
-| `metrics` | the kit's metrics, probes and runtime settings, with the operator's metric prefix (and its leader gauge when the sources declare `<prefix>_leader`) |
+| `metrics` | the kit's metrics, probes and runtime settings, with the operator's metric prefix (its leader gauge when the sources declare `<prefix>_leader`, and `<prefix>_remote_writes_total` with its drift query only when they call `record_write`) |
 | `resource-budget` | the kit's `Budget::small_cluster()`, the operator's overrides, and the `weebo-kit-perf` report committed under `perf/` |
 
 ```js

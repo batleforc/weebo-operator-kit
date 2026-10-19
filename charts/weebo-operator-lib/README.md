@@ -132,7 +132,7 @@ with `weebo_kit_runtime::pod::own_labels`.
 | `weebo-operator.podDisruptionBudget`       | when enabled and `replicaCount > 1`                           |
 | `weebo-operator.metricsService`            | `metrics.prometheus.enabled`                                  |
 | `weebo-operator.serviceMonitor`            | `serviceMonitor.enabled`                                      |
-| `weebo-operator.prometheusRule`            | the kit's alerts (`<Chart>OperatorDown`, `NoLeader`, `MultipleLeaders`, `ReconcileErrors`, `ReconcileSlow`, `RepeatedDrift`) + `params.alerts`; needs `metrics.prometheus.enabled`, scoped to the `<fullname>-metrics` scrape job (a ServiceMonitor on the metrics Service) |
+| `weebo-operator.prometheusRule`            | the kit's alerts (`<Chart>OperatorDown`, `NoLeader`, `MultipleLeaders`, `ReconcileErrors`, `ReconcileSlow`, `RepeatedDrift` unless `prometheusRule.repeatedDrift.enabled` is false: it reads `<prefix>_remote_writes_total`, exported only by an operator that calls `record_write`) + `params.alerts`; needs `metrics.prometheus.enabled`, scoped to the `<fullname>-metrics` scrape job (a ServiceMonitor on the metrics Service) |
 | `weebo-operator.networkPolicy`             | `networkPolicy.enabled`, egress with `params.egress`          |
 | `weebo-operator.argocdHealthConfigMap`     | the Ready-condition health check (Lua)                        |
 

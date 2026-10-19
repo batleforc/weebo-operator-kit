@@ -213,7 +213,7 @@ longer history, ship them with an event exporter, or alert on the
   );
 }
 
-export function metricsPage({ prefix, leaderGauge, extraMetrics = [], runtime }) {
+export function metricsPage({ prefix, leaderGauge, remoteWrites = true, extraMetrics = [], runtime }) {
   const p = prefix;
   const buckets = runtime.reconcile_duration_buckets_secs.join(", ");
   const rows = [
@@ -224,12 +224,16 @@ export function metricsPage({ prefix, leaderGauge, extraMetrics = [], runtime })
       "Reconcile runs",
     ],
     [`\`${p}_reconcile_duration_seconds\``, "histogram", "`kind`", `Reconcile run duration; buckets ${buckets} s`],
-    [
-      `\`${p}_remote_writes_total\``,
-      "counter",
-      "`kind`, `cause` (`created`/`drift`/`deleted`)",
-      "Writes to the remote system. At rest it stays flat: an object is only written when it differs from its spec",
-    ],
+    ...(remoteWrites
+      ? [
+          [
+            `\`${p}_remote_writes_total\``,
+            "counter",
+            "`kind`, `cause` (`created`/`drift`/`deleted`)",
+            "Writes to the remote system. At rest it stays flat: an object is only written when it differs from its spec",
+          ],
+        ]
+      : []),
     [
       `\`${p}_webhook_decisions_total\``,
       "counter",
@@ -270,11 +274,15 @@ sum by (kind) (rate(${p}_reconcile_total{result="error"}[15m]))
 # Why they fail
 sum by (reason) (rate(${p}_reconcile_total{result="error"}[15m]))
 
-# Objects rewritten at rest: one correction is a drift, a steady rate is
+${
+  remoteWrites
+    ? `# Objects rewritten at rest: one correction is a drift, a steady rate is
 # a field compared wrong (the RepeatedDrift alert)
 sum by (kind) (increase(${p}_remote_writes_total{cause="drift"}[30m]))
 
-# Reconcile p95, per kind
+`
+    : ""
+}# Reconcile p95, per kind
 histogram_quantile(0.95, sum by (kind, le) (rate(${p}_reconcile_duration_seconds_bucket[5m])))
 ${leaderGauge ? `\n# Nothing reconciles: no replica holds the lease\nsum(${leaderGauge}) < 1\n` : ""}\`\`\`
 
