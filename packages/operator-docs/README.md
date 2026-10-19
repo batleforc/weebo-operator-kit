@@ -223,9 +223,37 @@ export default defineConfig({
 Per kind, the page has its facts (API version, scope, short names, guide),
 the spec's description (its first sentence becomes the page description),
 the example manifest, the spec field table and the manifest builder. A field
-without a description means the Rust doc-comment is missing: fix it there.
-The index table shows a short-names column only when some kind has short
-names.
+without a description means the Rust doc-comment is missing: fix it there;
+the generator prints a count per kind (`ForgejoRepository: 3 fields without
+a description`). The index table shows a short-names column only when some
+kind has short names.
+
+Under the spec table, every nested object has its own section, depth first
+in field order: its path as title (`spec.a.b`, `spec.a[]` for an array,
+`spec.a[key]` for a map), its field table, and what the schema says about
+it. The section's anchor is the path without `[]`/`[key]` (`#spec.a.b`),
+linked from the parent's row and listed in the page's table of contents.
+Property names must stay within `[A-Za-z0-9_.-]`, and two sections may not
+share an anchor (a field `a.b` next to an object `a` with a field `b`):
+either fails generation, and no page is written.
+
+- **Type**: `map[string]`, `object[]`, `string[][]`, `int-or-string`, …
+- **Required**: `yes`/`no`, or `one of`/`any of` for the fields of a serde
+  enum (`oneOf` of single `required`), whose section then says `Exactly one
+  of …`. Any other `oneOf`/`anyOf` gets a generic line.
+- **Description**: the field's text, then `Values:` (enum, without `null`)
+  and `Constraints:` (`pattern`, `minimum`, `maxLength`, `minItems`, …). A
+  paragraph break stays one (`<br /><br />`).
+- **Rules**: each `x-kubernetes-validations` entry, as its message, the rule
+  and its `fieldPath`, under the object it applies to. A rule on a string or
+  a list is listed under the object holding that field, after its name.
+
+CRD text is written as inline Markdown: `*`, `` ` `` and `[links](…)` keep
+their meaning, but outside code spans `\ { } < >` and the `!` of `![` are
+escaped, so a description can never become a JS expression (evaluated at
+build time), a JSX element or an image fetched at build time. Names,
+defaults, enum values and rules are shown as code, fenced past any backtick
+they contain.
 
 ## The operator reference
 

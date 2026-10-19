@@ -98,7 +98,7 @@ test("a perf report, checked like Report::check", () => {
 
 const crdConfig = {
   crdDir: path.join(fixtures, "crd"),
-  examples: { ExampleWidget: { name: "w" }, ExampleGadget: { url: "https://g" } },
+  examples: { ExampleWidget: { name: "w" }, ExampleGadget: { url: "https://g" }, ExampleNested: { target: { host: "h" } } },
 };
 const reference = {
   reasonCodes: catalogFile,

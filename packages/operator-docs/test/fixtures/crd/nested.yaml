@@ -1,0 +1,156 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: nesteds.example.weebo.io
+spec:
+  group: example.weebo.io
+  names:
+    kind: ExampleNested
+    plural: examplenesteds
+    singular: examplenested
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            description: A nested kind.
+            properties:
+              target:
+                description: Where it points.
+                properties:
+                  host:
+                    description: The host.
+                    type: string
+                  port:
+                    description: The port.
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                required:
+                - host
+                type: object
+              rules:
+                description: Access rules.
+                items:
+                  properties:
+                    path:
+                      description: A path.
+                      minLength: 1
+                      type: string
+                  type: object
+                  x-kubernetes-validations:
+                  - message: path must not be empty
+                    rule: self.path != ''
+                type: array
+              matrix:
+                description: Rows of cells.
+                items:
+                  items:
+                    properties:
+                      cell:
+                        description: One cell.
+                        type: string
+                    type: object
+                  type: array
+                type: array
+              byName:
+                additionalProperties:
+                  properties:
+                    value:
+                      description: The value.
+                      type: string
+                  type: object
+                description: Entries by name.
+                type: object
+              labels:
+                additionalProperties:
+                  type: string
+                description: Free labels.
+                type: object
+              port:
+                description: A port, by number or name.
+                x-kubernetes-int-or-string: true
+              pullPolicy:
+                description: When to pull.
+                enum:
+                - Always
+                - IfNotPresent
+                - null
+                nullable: true
+                type: string
+              source:
+                description: Where the data comes from.
+                oneOf:
+                - required:
+                  - Secret
+                - required:
+                  - ConfigMap
+                properties:
+                  ConfigMap:
+                    description: A ConfigMap name.
+                    type: string
+                  Secret:
+                    description: A Secret.
+                    properties:
+                      name:
+                        description: Its name.
+                        type: string
+                    type: object
+                type: object
+              only:
+                description: A one-branch union.
+                oneOf:
+                - required:
+                  - Secret
+                properties:
+                  Secret:
+                    description: A Secret name.
+                    type: string
+                type: object
+              shape:
+                description: An other union shape.
+                oneOf:
+                - required:
+                  - a
+                  - b
+                - required:
+                  - c
+                properties:
+                  a:
+                    type: string
+                  b:
+                    type: string
+                  c:
+                    type: string
+                type: object
+              tags:
+                description: Tags.
+                items:
+                  type: string
+                  x-kubernetes-validations:
+                  - rule: self.size() < 64
+                type: array
+                x-kubernetes-validations:
+                - message: tags must be unique
+                  rule: self.all(t, self.filter(u, u == t).size() == 1)
+              note:
+                description: |-
+                  First paragraph,
+                  wrapped.
+
+                  Second paragraph.
+                type: string
+            required:
+            - target
+            type: object
+            x-kubernetes-validations:
+            - fieldPath: .target
+              message: set a target or rules
+              rule: has(self.target) || has(self.rules)
+            - message: a rule with a backtick
+              rule: self.note != '`'
+        type: object
+    served: true
+    storage: true
