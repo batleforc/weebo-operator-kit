@@ -88,9 +88,15 @@ jobs:
             echo "LIBCLANG_PATH=$(dirname "$LIBCLANG_SO")"
             echo "BINDGEN_EXTRA_CLANG_ARGS="
           } >> "$GITHUB_ENV"
+      # Authenticated: unauthenticated, mise's GitHub API calls hit a shared
+      # runner's rate limit (a 403 installing cargo-generate failed a run).
+      # The token only reaches this step; `mise exec` installs nothing more.
       - run: mise install
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - run: mise exec -- task "$TASK"
         env:
+          MISE_EXEC_AUTO_INSTALL: "false"
           TASK: ${{ inputs.lint-task }}
 
   test:
@@ -129,9 +135,15 @@ jobs:
             echo "LIBCLANG_PATH=$(dirname "$LIBCLANG_SO")"
             echo "BINDGEN_EXTRA_CLANG_ARGS="
           } >> "$GITHUB_ENV"
+      # Authenticated: unauthenticated, mise's GitHub API calls hit a shared
+      # runner's rate limit (a 403 installing cargo-generate failed a run).
+      # The token only reaches this step; `mise exec` installs nothing more.
       - run: mise install
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - run: mise exec -- task "$TASK"
         env:
+          MISE_EXEC_AUTO_INSTALL: "false"
           TASK: ${{ inputs.test-task }}
 
   # Same gate as cog's pre-commit and pre-bump hooks: no known CVE.
@@ -144,9 +156,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-mise
+      # Authenticated: unauthenticated, mise's GitHub API calls hit a shared
+      # runner's rate limit (a 403 installing cargo-generate failed a run).
+      # The token only reaches this step; `mise exec` installs nothing more.
       - run: mise install
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - run: mise exec -- task "$TASK"
         env:
+          MISE_EXEC_AUTO_INSTALL: "false"
           TASK: ${{ inputs.audit-task }}
 
   helm:
@@ -159,7 +177,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-mise
+      # Authenticated: unauthenticated, mise's GitHub API calls hit a shared
+      # runner's rate limit (a 403 installing cargo-generate failed a run).
+      # The token only reaches this step; `mise exec` installs nothing more.
       - run: mise install
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - run: mise exec -- task "$TASK"
         env:
+          MISE_EXEC_AUTO_INSTALL: "false"
           TASK: ${{ inputs.helm-task }}
