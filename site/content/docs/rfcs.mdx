@@ -1,0 +1,23 @@
+---
+title: RFCs
+description: The kit's design records, kept in docs/ on GitHub (in French).
+---
+
+Design records live next to the plan in the kit's
+[`docs/`](https://github.com/batleforc/weebo-operator-kit/tree/main/docs)
+directory. They are written **in French**, like
+[`docs/plan.md`](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/plan.md),
+the authoritative design document; the links below open them on GitHub.
+
+| RFC | Subject | Status |
+| --- | ------- | ------ |
+| [RFC 0001 — Stalwart](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/rfc-0001-stalwart.md) | Stalwart as the cluster's internal mail server, and the weebo-stalwart operator generated from the template (domains, service accounts, mailboxes, groups, lists) | Draft |
+| [RFC 0002 — Linking](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/rfc-0002-liaison.md) | `link.weebo.io` headers, a `weebo-link` controller and admission hooks: how an object of one product makes one exist in another, without any operator knowing the other | Draft |
+| [RFC 0004 — Nested CRD fields](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/rfc-0004-crd-reference-nested-fields.md) | `weebo-crd-docs` writes a section per nested object, and escapes CRD text before it reaches MDX | Accepted; shipped in v0.18.1 and v0.19.0 |
+| [RFC 0005 — `k8s-openapi` version](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/rfc-0005-k8s-openapi-version.md) | the kit's libraries no longer pick the Kubernetes version (see [Kubernetes version](/docs/guides/kubernetes-version)) | Implemented in v0.19.1 |
+| [Vault path grants](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/rfc-vault-path-grants.md) | `pathGrants` on the cluster instance: named namespaces may write named Vault paths outside their `<pathPrefix>/<namespace>/` subtree | Accepted; shipped in v0.15.0 |
+
+There is no RFC 0003 in the kit. The fixes of the 2026-10-13 review are
+listed in
+[`docs/review-2026-10-13.md`](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/review-2026-10-13.md)
+(shipped in v0.14.0).

@@ -1,0 +1,197 @@
+---
+title: Architecture
+description: The kit's crates, their hexagonal layering and the main pieces of each.
+---
+
+The kit has the same hexagonal layout as the operators, one crate per
+layer, with the same dependency rules. Each crate's rustdoc (`task doc`)
+is the reference; this page says what lives where.
+
+| Crate | Layer | Depends on |
+| ----- | ----- | ---------- |
+| `weebo-kit-domain` | domain | nothing (no `kube`, no `http`) |
+| `weebo-kit-api` | CRD field types | `serde`, `schemars`, `k8s-openapi` |
+| `weebo-kit-application` | ports and use-case helpers | `weebo-kit-api`, `k8s-openapi` types — no adapter, no Kubernetes client |
+| `weebo-kit-adapters` | outbound adapters | `weebo-kit-application`, `kube`, `vaultrs` |
+| `weebo-kit-runtime` | inbound / binary | `weebo-kit-domain`, `-api`, `-application`, `kube`, OpenTelemetry, `axum` |
+| `weebo-kit-testkit` | tests | `envtest`, `kube` |
+| `weebo-kit-perf` | tests | `weebo-kit-testkit`, `kube` |
+
+`weebo-kit-adapters` does not depend on the runtime: anything an outbound
+adapter needs from the binary (the watch scope's label selector, say) is
+passed in as a value.
+
+## weebo-kit-domain
+
+Pure building blocks.
+
+- **`reason`**: the `Reason` trait (`SUCCESS`, `as_str`, `severity`) and
+  `Severity` (`Blocking`/`Advisory`); the `reason_codes!` macro declares
+  an operator's catalog enum with `as_str()`, `ALL` and `Display` from one
+  list. The kit never defines a code.
+- **`failure`**: `Failure<R>` (blocks `Ready`) and `Advisory<R>` (a
+  non-blocking condition), generic over the operator's reason codes.
+- **`drift`**: write only what differs. `Drift` clears every PATCH field
+  already holding its desired value and records the ones that differ
+  (`keep`, `keep_opt`, `keep_with`, `note`), with comparisons for what
+  the remote system normalizes (`same_set`, `same_subset`,
+  `same_trimmed`). `RemoteWrite` (`Created`, `Drift`, `Deleted`) is the
+  `cause` label of the remote-writes counter. See
+  [Drift and remote writes](/docs/guides/drift).
+- **`allow_list`**: the engine behind every `*NamespacePolicy` —
+  `Rule<K>`, `Request<K>`, `evaluate`, `evaluate_policies` (merges the
+  rules of every policy), glob matching of namespaces
+  (`namespace_matches`). Generic over the operator's kinds and over named
+  dimensions of referenced cluster CRs.
+- **`vault_paths`**: where a CR may write in Vault — its
+  `<pathPrefix>/<namespace>/` subtree, or a path opened by the instance's
+  `pathGrants` (`subtree`, `default_path`, `granted`, `validate`, `check`;
+  RFC `rfc-vault-path-grants`).
+
+## weebo-kit-api
+
+CRD field types that operators embed in their own
+`#[derive(CustomResource)]` types — never a whole CRD. Their doc comments
+become schema descriptions in every operator's CRDs.
+
+- **`status::Condition`** (and `Condition::READY`, `ready()`).
+- **`refs`**: `SecretKeyRef`, `LocalSecretKeyRef` (a key in the
+  referencing object's own namespace), `ObjectRef`.
+- **`secret`**: `SecretTarget` (where a generated credential is written:
+  name, namespace, `backend`), `SecretStoreBackend` (`kubernetes`/`vault`),
+  `VaultPathGrant`.
+- **`instance`**: `InstanceRef { name, kind, namespace }` and
+  `InstanceKind::{Instance, LocalInstance}` (a reference to the
+  operator's cluster or namespaced instance), `BoundInstance` (the
+  resolved instance recorded in the status), `SharedWith` and
+  `AttachNamespaces`/`NamespacesFrom` (an instance's consent to objects
+  of other namespaces), the `SharesItself` trait.
+- **`tls`**: `TlsOptions`, `LocalTlsOptions`.
+- **`annotations`**: `Annotations::new("<group>")` reads the common
+  annotations under the operator's domain — `force-orphan`,
+  `allow-disruptive-update`, `rotate-secret`, `import-pending`,
+  `previous-owner`, and the `instance-token` Secret label.
+
+## weebo-kit-application
+
+Ports and use-case helpers, like each operator's own `application`
+crate.
+
+- **`ports`**: `SecretStore` (write, check, delete a target's data,
+  owned by a `SecretOwner`), `SecretStoreFactory` (the store of a
+  `BoundInstance`), `PolicySource<R>`; neutral errors
+  `SecretStoreError`, `ClusterError`.
+- **`emit`**: writing a value the remote system shows only once (client
+  secret, token) to every target of a CR — `targets`, `check_target(s)`
+  (a namespaced CR writes only in its namespace: `TargetViolation`),
+  `any_missing`, `write_all`, `delete_all`, `rotation_requested`.
+- **`refs`**: resolving a `*Ref` field — `Referenced<Id>`, `RefState`
+  (`Ready`, `NotFound`, `NotReady`, `NotReconciled`, `OtherInstance`),
+  `RefError`, `same_instance`.
+- **`instances`**: pure instance resolution by watch scope —
+  `resolve`, `resolve_bound` (keeps the instance recorded in the status
+  while it is still a candidate), `check_binding`, the
+  `InstanceDirectory` trait, `ResolveError`/`InstanceError`.
+- **`sharing`**: `shares_with`, the generic consent check behind
+  `SharedWith`.
+- **`workload`** and **`pod_safety`**: the core of an operator that
+  deploys the software it drives — `OwnedObjects`/`PodLogs` ports,
+  hash-named objects (`content_hash`, `hashed_name`, `stale`),
+  `OperatorPod`, `network_policy`, restricted security contexts, an image
+  allow-list and pod-template checks.
+- **`test_support`** (feature `test-support`): `FakeSecretStore`,
+  `FakeOwnedObjects`, `FakePodLogs`.
+
+## weebo-kit-adapters
+
+- **Secret stores**: `K8sSecretStore` (ownership by the `managed-by`
+  label and an owner annotation, adoption of Secrets written before the
+  label, `replace` guarded by `resourceVersion`), `VaultSecretStore` (KV
+  v2, check-and-set writes, owner in `custom_metadata`) with `VaultConfig`
+  and `VaultLogins` (one login per instance, failures replayed), and
+  `RoutingSecretStore`, the per-target router between them — Vault is
+  only contacted on the first Vault target (`RoutingSecretStore::lazy`).
+- **`secret_ref`**: `read_secret_key`, and `read_local_instance_token`,
+  which reads a namespaced instance's token only from a Secret labelled
+  `<domain>/instance-token: "true"`.
+- **Instances**: `Instances<I, L>` (cluster and local instance kinds),
+  `LocalInstances<L>` (local only), the older `InstanceResolver`/`select`,
+  and `wait_synced` (store reads that don't wait out the reflector
+  timeout).
+- **`adopt`**: the importer's flow — `Adopter` creates a CR paused
+  (`import-pending`), seeds its status, releases it.
+- **`migrate`**: `migrate_instance_refs`, the offline rewrite of a string
+  `instanceRef` into an object.
+- **`workloads`**: `KubeOwnedObjects` (server-side apply, pods checked
+  before any write), `KubePodLogs`, `is_ours`.
+
+## weebo-kit-runtime
+
+What every operator binary and its controllers need around the business
+logic.
+
+- **`controller`**: the skeleton — `controller(api, &scope)` (watch
+  filtered by generation/annotations/labels/finalizers/deletion,
+  concurrency `WEEBO_RECONCILE_CONCURRENCY`, 4 by default), `drive`,
+  `jittered`, `requeue_after` (300 s steady, 30 s retry, ±20 %, never
+  under 1 s), `retry_after_error`, `finalize`/`finalize_with`
+  (cleanup unless `force-orphan`, then the operator's release Event).
+- **`shared`**: one watch per kind and label selector, shared by every
+  controller and store read — `SharedWatch`, `SharedWatches`,
+  `WatchesIn::watches_in`/`watches_in_filtered`, `LISTED_TIMEOUT`. See
+  [Shared watches](/docs/guides/shared-watches).
+- **`scope`**: `WatchScope` from `WEEBO_WATCH_NAMESPACE`,
+  `WEEBO_WATCH_LABEL_SELECTOR`, `WEEBO_WATCH_CLUSTER_KINDS` and
+  `WEEBO_CROSS_NAMESPACE_REFS`: the right `Api` per kind scope
+  (`api::<K>()`), the watcher config, `without_selector()`.
+- **`status`**: `publish` (one merge patch of the conditions,
+  `observedGeneration` on success and the operator's fields, retried on
+  transient errors, then the Events) and `record` (a status field written
+  right after the remote write it records). **`conditions`** builds the
+  condition list.
+- **`events`**: `announce_outcome` (a `Warning` on every reconcile ending
+  `Ready: False`, `Normal` on changes), `announce_change`,
+  `announce_drift`, `announce_error`/`spawn_error`.
+- **`metrics`**: `ReconcileMetrics` — `<prefix>_reconcile_total`,
+  `<prefix>_reconcile_duration_seconds` and, through `record_write`,
+  `<prefix>_remote_writes_total`.
+- **`leader`**: Lease-based election, writes guarded by
+  `resourceVersion`, expiry judged on the local monotonic clock
+  (`acquire_leadership`, `Leadership::release`, `is_leader`,
+  `register_leader_gauge`).
+- **`health`**: `Health` and the `/readyz`, `/livez`, `/healthz` routes.
+- **`webhook_server`**: the TLS server (certificate reloaded, drained on
+  shutdown, port 8443 by default) the probes and webhooks run on;
+  **`admission`**: the `/validate` router around the operator's
+  `Admission` trait (`Denial`, fail closed, `DELETE` and spec-less
+  `UPDATE` always admitted, `<prefix>_webhook_decisions_total`),
+  `check_vault_targets`, and `ScopeGuard`/`scope_router` (`/scope`:
+  refuses taking a managed object out of the label selector).
+- **`telemetry`**: logs, traces, OTLP and Prometheus metrics
+  (`init`, `serve_metrics` on `WEEBO_METRICS_ADDR`, `LOG_FORMAT=json`).
+- **`runtime::build`**: the tokio runtime with `WEEBO_WORKER_THREADS`
+  workers (4 by default, not one per core).
+- **`shutdown`**, **`store::spawn_reflector`**, **`pod`**
+  (`own_labels`, `own_namespace`, `operator_pod`).
+
+## weebo-kit-testkit
+
+`EnvTestCluster::start(crd_dir)` runs a real `kube-apiserver` and `etcd`
+through the `envtest` crate, with the operator's CRDs installed;
+`client_as_service_account` impersonates a ServiceAccount to prove RBAC.
+`polling::wait_for`/`wait_for_absence` poll an object. Building it needs
+Go and `libclang` (`task doctor`).
+
+## weebo-kit-perf
+
+What an operator costs, measured before it ships. `PerfRun` starts the
+operator's **release binary** against envtest, samples its process
+(`/proc`: RSS, CPU, descriptors, threads), its reconcile metrics and the
+apiserver's request counter, phase by phase (warm-up, idle `BASELINE`,
+loads, idle `FINAL`). The `Report` is checked against a `Budget` —
+`Budget::small_cluster()` by default: idle under 64 MiB and 10 m CPU,
+peak under 192 MiB, at most 60 requests/min idle and 20 per object,
+50 ms CPU per object, convergence within 60 s per 100 objects, p95
+reconcile under 2 s — and written as Markdown and JSON under
+`target/perf/`. The reusable `perf.yml` workflow runs it every week in
+the operators.

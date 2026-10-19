@@ -1,0 +1,103 @@
+---
+title: Operators using the kit
+description: The weebo operators built on the kit, and ProxyAuthK8S, with the parts each uses and the kit release each is pinned on.
+---
+
+Kit versions below are those pinned on each repository's `main` branch
+on 2026-10-19 (the `tag` of its `weebo-kit-*` dependencies, or its
+Taskfile's `KIT_TAG`). The latest kit release is v0.21.0.
+
+| Project | Manages | Kit release | Docs |
+| ------- | ------- | ----------- | ---- |
+| [weebo-forgejo](https://github.com/batleforc/weebo-forgejo) | Forgejo v16+ | v0.21.0 | [site](https://batleforc.github.io/weebo-forgejo/) |
+| [weebo-authentik](https://github.com/batleforc/weebo-authentik) | Authentik | v0.20.0 | [site](https://batleforc.github.io/weebo-authentik/) |
+| [weebo-batlehub](https://github.com/batleforc/weebo-batlehub) | BatleHub registry proxy-caches | v0.20.0 | [site](https://batleforc.github.io/weebo-batlehub/) |
+| [weebo-angos](https://github.com/batleforc/weebo-angos) | Angos OCI registries | v0.20.0 | [site](https://batleforc.github.io/weebo-angos/) |
+| [weebo-stalwart](https://github.com/batleforc/weebo-stalwart) | a Stalwart mail server | v0.20.0 | not published yet |
+| [ProxyAuthK8S](https://github.com/batleforc/ProxyAuthK8S) | an authenticating proxy in front of Kubernetes API servers | v0.20.0 (tasks, docs) | [site](https://batleforc.github.io/ProxyAuthK8S/) (French) |
+
+## The weebo operators
+
+The five operators share the whole kit: the seven `weebo-kit-*` crates
+(domain, api, application, adapters, runtime, testkit, perf), a chart on
+the `weebo-operator-lib` library chart, the shared Taskfiles, the
+reusable `checks.yml` and `publish.yml` workflows, `cog.toml` from the
+kit's template, and a docs site on `@weebo/operator-docs`. Each declares
+`k8s-openapi` with `v1_36` in its own workspace. All five run their
+controllers on [shared watches](/docs/guides/shared-watches).
+
+### weebo-forgejo
+
+Manages the inside of an existing Forgejo — users (local, bot, external
+OIDC, observed), organizations, teams, repositories (empty, template,
+mirror; branch protections, team access), webhooks, deploy and user keys,
+OAuth2 applications and access tokens — with credentials written to
+Kubernetes Secrets and/or Vault, and a `ForgejoNamespacePolicy`
+allow-list enforced by the admission webhook. It is the reference the kit
+was extracted from: when the two first operators diverged, the kit
+started from forgejo's code. It counts its remote writes
+(`record_write`) and runs the weekly `perf.yml` budget.
+
+### weebo-authentik
+
+Manages Authentik groups, users, applications (with their OAuth2 or proxy
+provider), access policies, brands, outposts, flows and scope mappings,
+on a cluster `AuthentikInstance` or a namespaced `AuthentikLocalInstance`,
+with an `AuthentikNamespacePolicy` allow-list. Uses the Kubernetes and
+Vault secret stores, counts its remote writes, and runs `perf.yml`.
+
+### weebo-batlehub
+
+Drives [BatleHub](https://github.com/batlehub/batlehub) instances (a
+package registry proxy-cache): either an existing one it connects to, or
+one it deploys itself (`managed`: Deployments, Service, cache, its own
+token). It writes registries, team namespace claims, package grants and
+policies through the admin API, and runs maintenance actions. The kit's
+managed-workload core (`workload`, `pod_safety`, `KubeOwnedObjects`,
+v0.17.0) was extracted from it; it uses it, along with `LocalInstances`
+(it has no cluster instance kind) and `record_write`, and runs `perf.yml`.
+
+### weebo-angos
+
+Runs [Angos](https://github.com/project-angos/angos) OCI registries.
+Angos has no administration API: the operator renders its configuration,
+runs its workload and reads what the pods did in their logs — the kit's
+`OwnedObjects` and `PodLogs` ports. Kinds: `AngosLocalInstance`,
+`AngosRepository`, `AngosIdentity` (generated password, Argon2id hash,
+written to targets), `AngosMaintenance` (scrub/prune Jobs). Runs
+`perf.yml`.
+
+### weebo-stalwart
+
+Manages a [Stalwart](https://stalw.art/) mail server: domains, sending
+accounts for applications (App Passwords and SMTP settings written to
+Vault or Secrets), mailboxes, groups and mailing lists, on a cluster or
+local instance with a `StalwartNamespacePolicy`. It was generated from
+the kit's template; its design is the kit's
+[RFC 0001](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/rfc-0001-stalwart.md).
+Counts its remote writes. Its docs site is not published yet.
+
+## ProxyAuthK8S
+
+[ProxyAuthK8S](https://github.com/batleforc/ProxyAuthK8S) exposes
+Kubernetes API servers behind one authenticating reverse proxy: each
+target cluster is a `ProxyKubeApi` resource reconciled by its built-in
+controller, users log in with OIDC from a web UI or the
+`kubectl proxyauth` plugin, and requests go through a policy
+(allow-listed resources, port-forward filtering, rate limiting, audit).
+
+It is not a template-generated operator, and takes only part of the kit
+(its RFC 0005, "adopt weebo-operator-kit"):
+
+- **`@weebo/operator-docs`** for its documentation site (v0.20.0
+  tarball, in a pnpm workspace: `NPM_CLIENT: pnpm`);
+- the shared **`tasks/rust.yaml`** and **`tasks/repo.yaml`**, pinned by
+  its Taskfile's `KIT_TAG` (no kit crate in `Cargo.toml` to read the tag
+  from) and moved by `task kit:sync`.
+
+It keeps its own CI, chart and coverage gate. It compiles for Kubernetes
+`v1_34`, which is why the kit stopped choosing the `k8s-openapi` version
+([RFC 0005](/docs/guides/kubernetes-version)): its RFC 0011, accepted,
+adopts `weebo-kit-domain`, `weebo-kit-api` and `weebo-kit-runtime`
+(reason codes, a `Ready` condition published with `status::publish`,
+Events and reconcile metrics) on that version.

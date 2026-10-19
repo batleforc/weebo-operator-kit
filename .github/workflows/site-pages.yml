@@ -1,0 +1,68 @@
+name: Site
+
+# Builds the kit's documentation site (site/) as a static export and
+# publishes it to GitHub Pages (https://batleforc.github.io/weebo-operator-kit).
+# The site installs @weebo/operator-docs from packages/operator-docs, so a
+# change to the package redeploys it too. GitHub-only: the Pages deploy
+# actions have no Forgejo Actions equivalent.
+#
+# Pages source: "GitHub Actions" (build_type=workflow).
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - packages/operator-docs/**
+      - .github/workflows/site-pages.yml
+  workflow_dispatch:
+
+permissions: {}
+
+# One deployment at a time; never cancel one in flight, so Pages is never
+# left half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # configure-pages reads the Pages site config (base_path, origin).
+      pages: read
+    env:
+      # Only node and task are installed (not the Rust/Go toolchain), and
+      # mise's API calls are authenticated: see ci.yml.
+      MISE_EXEC_AUTO_INSTALL: "false"
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      - run: mise install node task
+      - id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Build the static site
+        env:
+          # A project site is served under /<repo>; base_path is exactly that.
+          DOCS_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          DOCS_SITE_URL: ${{ steps.pages.outputs.origin }}
+        run: mise exec -- task site:build
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

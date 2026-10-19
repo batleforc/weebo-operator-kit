@@ -1,0 +1,83 @@
+---
+title: Start a new operator
+description: Generate an operator from templates/operator, wired on the kit's crates, chart, tasks and CI.
+---
+
+`templates/operator` is a `cargo-generate` template of a whole operator
+repository, wired on every part of the kit. It is the only way the kit is
+consumed "by copy": everything it generates pins the kit by tag, so
+[`task kit:sync`](/docs/guides/kit-sync) moves it later.
+
+## Generate
+
+```bash
+cargo generate --git https://github.com/batleforc/weebo-operator-kit \
+  --tag vX.Y.Z templates/operator
+```
+
+Two placeholders:
+
+- `product`, in CamelCase — the kinds' prefix (`<Product>Instance`,
+  `<Product>Object`) and the API group `<product>.weebo.io`;
+- `license`, `Apache-2.0` (default) or `MIT`, written to `Cargo.toml` and
+  the images' `org.opencontainers.image.licenses` label. Add the matching
+  `LICENSE.md` yourself.
+
+## What you get
+
+A hexagonal workspace, one crate per layer:
+
+| Crate | Holds |
+| ----- | ----- |
+| `domain` | the reason codes (`reason_codes!`) |
+| `api` | the CRD types, embedding the kit's field types |
+| `application` | ports (`RemoteGateway`, `GatewayFactory`) and the `reconcile_*` use cases |
+| `adapters-outbound` | the HTTP gateway — **a placeholder to replace with the real client** |
+| `adapters-inbound` | the controllers (on shared watches) and the webhook router |
+| `operator` | the binary: telemetry, shared watches, leader election, webhook server, controllers |
+| `crdgen` | writes `deploy/crd/` from `api` |
+| `testkit` | envtest and fakes for the integration tests |
+
+and around it:
+
+- CRDs `<Product>Instance` (cluster-scoped: URL and token),
+  `<Product>LocalInstance` (namespaced, `sharedWith`) and
+  `<Product>Object` (an example remote object with a finalizer, compared
+  with `Drift` before every write);
+- unit tests, a wiremock contract test of the gateway and envtest tests
+  (the object's lifecycle, a namespaced and a full-namespaced watch scope
+  on their RBAC only, the `instanceRef` migration);
+- `deploy/charts/<name>`, a thin chart on the
+  [library chart](/docs/chart) (`templates/_params.tpl` holds the
+  operator's own group, kinds, env and egress);
+- a `Taskfile.yaml` including the kit's `tasks/{rust,repo,helm}.yaml`
+  by URL and sha256, and `.tasks/kit.yaml` (`kit:cog`, `kit:sync`);
+- `.github/workflows/ci.yml` calling the kit's `checks.yml`, and
+  `publish.yml` calling the kit's `publish.yml`;
+- `Containerfile` (Red Hat Hummingbird) and `Containerfile.static` (musl,
+  `hi/static`), `.grype.yaml`, `deny.toml`, `mise.toml`.
+
+## First steps
+
+```bash
+task init     # toolchain (mise), mise.lock, cog.toml from the kit, git hooks
+task doctor   # envtest prerequisites (Go, libclang, etcd, kube-apiserver)
+task recu     # CRDs (crdgen) and their copies in the chart
+task test:all # unit, contract and envtest tests
+```
+
+Then replace the placeholder REST shape of
+`crates/adapters-outbound/src/http_gateway.rs` with the real API, and grow
+`<Product>Object` into the real kinds. The template has no docs site: add
+one with [`@weebo/operator-docs`](/docs/guides/docs-package).
+
+## How the kit checks the template
+
+`task template:check` (part of `task test:all`, so it runs before every
+kit tag, and in the kit's CI) renders the template for a product named
+`Example` outside the kit's tree, rewires it on the working tree (crates
+and library chart by path), builds, lints and tests it, and checks that
+its committed CRDs and chart are what it regenerates. Never render the
+template inside the kit's tree with `cargo-generate` directly: it would
+add the project to the kit's workspace (`task template:render` renders
+outside, then moves it to `target/template/`).

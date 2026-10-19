@@ -1,0 +1,44 @@
+---
+title: Kubernetes version
+description: The operator, not the kit, picks the k8s-openapi version feature (RFC 0005).
+---
+
+`k8s-openapi` compiles for one Kubernetes version, chosen by a `v1_*`
+feature, and refuses two such features in one Cargo graph. Its rule: a
+library must not enable any; the application does. Since v0.19.1
+([RFC 0005](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/rfc-0005-k8s-openapi-version.md)),
+the kit follows it.
+
+## The rule
+
+- **No kit library enables a `v1_*` feature.** The workspace declares
+  `k8s-openapi = { version = "0.28", features = ["schemars"] }` and every
+  library crate takes it with `workspace = true`, no feature. A test in
+  `weebo-kit-domain` reads the crates' `Cargo.toml` and fails if one does.
+- **The operator picks**, in its own workspace, at the oldest apiserver
+  it supports. The template (and every weebo operator today) uses
+  `v1_36`:
+
+  ```toml
+  k8s-openapi = { version = "0.28", features = ["v1_36", "schemars"] }
+  ```
+
+  ProxyAuthK8S compiles for `v1_34`: without this rule, adding a kit crate
+  failed its build.
+- **The kit's own builds** still need a version: its tests take `v1_36`
+  through a dev-dependency in each crate that has tests, and
+  `cargo check`/`cargo doc` through `K8S_OPENAPI_ENABLED_VERSION = "1.36"`
+  in `mise.toml`.
+
+## Supported range
+
+The libraries compile for every version `k8s-openapi` 0.28 has, 1.32 to
+1.36. The kit's CI checks each one (`k8s-versions` job of `ci.yml`,
+`cargo check --lib` of `weebo-kit-domain`, `-api`, `-application`,
+`-adapters` and `-runtime`); tests run against 1.36. Should the kit ever
+use a field of one version only, it will gate it with `k8s-openapi`'s
+`k8s_if_*` macros or document its floor.
+
+Moving the kit's test version no longer forces the operators to move the
+same day. Moving `kube` or `k8s-openapi` itself is still a kit release
+followed by one per operator.

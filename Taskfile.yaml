@@ -62,12 +62,14 @@ tasks:
       - mise exec -- cargo doc --workspace --no-deps
 
   audit:
-    desc: "Check dependencies for CVE (cargo-deny + trivy on Cargo.lock, npm audit on packages/operator-docs)"
+    desc: "Check dependencies for CVE (cargo-deny + trivy on Cargo.lock, npm audit on packages/operator-docs and site/)"
     cmds:
       - task: rust:audit
       # What the package brings into an operator's site; its dev tooling
       # (the peers it is type-checked against) is the operators' to audit.
       - task: repo:audit
+      # What the kit's own site ships (from its lockfile, like repo:audit).
+      - mise exec -- npm audit --prefix site --omit=dev --audit-level=high
 
   test:all:
     desc: "Every test, then the operator template rendered and built on this working tree (the release suite, before every tag)"
@@ -154,6 +156,34 @@ tasks:
         task template:render >/dev/null
         diff -r "$generated/deploy/crd" "$out/deploy/crd"
         diff -r -x charts -x Chart.lock "$generated/deploy/charts" "$out/deploy/charts"
+
+  site:deps:
+    desc: "Install the kit's documentation site's npm dependencies (site/), @weebo/operator-docs copied from packages/operator-docs; reinstalls when either changes"
+    sources:
+      - site/package.json
+      - site/package-lock.json
+      - packages/operator-docs/package.json
+      - packages/operator-docs/next.mjs
+      - packages/operator-docs/{bin,css,src}/**/*
+    generates:
+      - site/node_modules/.package-lock.json
+    cmds:
+      - mise exec -- npm ci --prefix site --no-fund --no-audit
+
+  site:
+    desc: "Run the kit's documentation site (site/) in dev mode (http://localhost:3000); re-run after changing packages/operator-docs"
+    deps: [site:deps]
+    dir: site
+    cmds:
+      - mise exec -- npm run dev
+
+  site:build:
+    desc: "Lint + static export of the kit's documentation site into site/out/ (DOCS_BASE_PATH for a sub-path)"
+    deps: [site:deps]
+    dir: site
+    cmds:
+      - mise exec -- npm run lint
+      - mise exec -- npm run build
 
   docs:version:
     desc: "Fail when packages/operator-docs' version differs from the workspace's (its release tarball is named after it)"

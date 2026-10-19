@@ -1,0 +1,11 @@
+{
+  "title": "Guides",
+  "pages": [
+    "new-operator",
+    "kit-sync",
+    "kubernetes-version",
+    "drift",
+    "shared-watches",
+    "docs-package"
+  ]
+}
