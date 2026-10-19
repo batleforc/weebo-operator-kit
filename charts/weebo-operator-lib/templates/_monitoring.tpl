@@ -75,6 +75,10 @@ The kit's alerts on the kit's metrics (`<prefix>_reconcile_total`,
 `<prefix>_leader`), prefix and
 alert names from the chart name; params.alerts appends the operator's own
 (a list of rules), before prometheusRule.additionalRules.
+RepeatedDrift reads `<prefix>_remote_writes_total`, which only an operator
+calling `ReconcileMetrics::record_write` exports: one that writes to no
+remote system sets prometheusRule.repeatedDrift.enabled=false (default
+true, also when the key is missing).
 
 Metric names are matched with regexes: the operator exports through
 OpenTelemetry, and the OTel -> Prometheus translation may append `_total`
@@ -161,6 +165,7 @@ spec:
           annotations:
             summary: {{`'p99 reconcile of {{ $labels.kind }} above 60s'`}}
             description: The remote system answers slowly, or reconciles queue up.
+        {{- if dig "repeatedDrift" "enabled" true $pr }}
         - alert: {{ $a }}RepeatedDrift
           # A real drift is corrected in one pass; a field the comparison
           # gets wrong (a value the remote system stores normalized) is
@@ -171,6 +176,7 @@ spec:
           annotations:
             summary: {{`'{{ $labels.kind }} objects rewritten on every reconcile'`}}
             description: {{`'Look for DriftCorrected Events on {{ $labels.kind }} naming the same field each time: a comparison to fix, not a drift.'`}}
+        {{- end }}
         {{- with $p.alerts }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

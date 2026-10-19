@@ -93,6 +93,18 @@ tasks:
         printf '%s\n' "$out" | grep -q '^    - deployments$'
         out="$(mise exec -- helm template smoke "$chart")"
         if printf '%s\n' "$out" | grep -q 'deployments$'; then exit 1; fi
+      # prometheusRule.repeatedDrift.enabled: RepeatedDrift by default, none
+      # when false (an operator that counts no remote write).
+      - |
+        set -eu
+        chart="{{.TEMPLATE_OUT}}/deploy/charts/weebo-example"
+        on="--set metrics.prometheus.enabled=true --set prometheusRule.enabled=true"
+        mise exec -- helm lint "$chart" $on --set prometheusRule.repeatedDrift.enabled=false > /dev/null
+        out="$(mise exec -- helm template smoke "$chart" $on)"
+        printf '%s\n' "$out" | grep -q 'alert: .*RepeatedDrift$'
+        out="$(mise exec -- helm template smoke "$chart" $on --set prometheusRule.repeatedDrift.enabled=false)"
+        if printf '%s\n' "$out" | grep -q 'RepeatedDrift'; then exit 1; fi
+        printf '%s\n' "$out" | grep -q 'alert: .*ReconcileSlow$'
 
   template:render:
     desc: "Render templates/operator (cargo-generate) for a product named Example into TEMPLATE_OUT, wired on this working tree (kit crates and library chart by path)"

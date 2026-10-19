@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { budgetPage, eventsPage, metricsPage, reasonCodesPage } from "./pages.mjs";
 import { SMALL_CLUSTER } from "./perf.mjs";
-import { leaderGauge as leaderGaugeOf, parseReasonCodes, scanUsage } from "./rust.mjs";
+import { countsWrites, leaderGauge as leaderGaugeOf, parseReasonCodes, scanUsage } from "./rust.mjs";
 
 /** The kit runtime's constants the pages quote, kept equal by a weebo-kit-runtime test. */
 const RUNTIME = JSON.parse(
@@ -70,6 +70,7 @@ export function generateReference(config, { root, group }) {
     if (!usage.text.includes(m.name)) throw new Error(`metric ${m.name} not found in the operator's sources`);
   }
   const leaderGauge = leaderGaugeOf(usage.text, prefix);
+  const remoteWrites = countsWrites(usage.text, prefix);
 
   const overrides = config.budget ?? {};
   for (const key of Object.keys(overrides)) {
@@ -82,7 +83,7 @@ export function generateReference(config, { root, group }) {
   const pages = {
     "reason-codes": reasonCodesPage({ catalog, usage, remedies: config.remedies, shownAs: config.shownAs }),
     events: eventsPage({ catalog, usage, group, runtime: RUNTIME }),
-    metrics: metricsPage({ prefix, leaderGauge, extraMetrics: config.extraMetrics, runtime: RUNTIME }),
+    metrics: metricsPage({ prefix, leaderGauge, remoteWrites, extraMetrics: config.extraMetrics, runtime: RUNTIME }),
     "resource-budget": budgetPage({
       budget: { ...SMALL_CLUSTER, ...overrides },
       overrides,

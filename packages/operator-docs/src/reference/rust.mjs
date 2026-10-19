@@ -128,6 +128,16 @@ export function leaderGauge(text, prefix) {
 }
 
 /**
+ * Whether the operator counts its writes to the remote system: its sources
+ * call the kit's `ReconcileMetrics::record_write` (or name
+ * `<prefix>_remote_writes`). Without it, `<prefix>_remote_writes_total` is
+ * never exported (an operator that only applies Kubernetes objects).
+ */
+export function countsWrites(text, prefix) {
+  return text.includes(`"${prefix}_remote_writes"`) || /\brecord_write\s*\(/.test(text);
+}
+
+/**
  * How the operator's code uses its catalog, from every non-test `.rs` file
  * under `dir` but `catalogFile`:
  * - `denials`: codes of an admission `Denial` (or `undecidable`);

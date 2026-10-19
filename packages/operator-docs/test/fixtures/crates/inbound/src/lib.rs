@@ -4,6 +4,10 @@ fn metrics() {
     meter.u64_counter("weebo_example_remote_calls");
 }
 
+fn wrote(metrics: &ReconcileMetrics) {
+    metrics.record_write("ExampleWidget", RemoteWrite::Drift);
+}
+
 fn admit() -> Result<(), Denial<ReasonCode>> {
     Err(Denial::new(
         ReasonCode::NotAllowed,

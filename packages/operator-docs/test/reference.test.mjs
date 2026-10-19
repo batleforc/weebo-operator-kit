@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { generateCrdDocs } from "../src/crd-docs/generate.mjs";
 import { meaning, shownAs } from "../src/reference/pages.mjs";
 import { measured, workload } from "../src/reference/perf.mjs";
-import { leaderGauge, parseReasonCodes, scanUsage } from "../src/reference/rust.mjs";
+import { countsWrites, leaderGauge, parseReasonCodes, scanUsage } from "../src/reference/rust.mjs";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const catalogFile = path.join(fixtures, "crates/domain/src/error.rs");
@@ -65,6 +65,8 @@ test("the kit's helpers count as uses: finalize_with, register_leader_gauge", ()
   assert.deepEqual([...used.released], ["Released"]);
   assert.equal(leaderGauge(used.text, "weebo_example"), "weebo_example_leader");
   assert.equal(leaderGauge("fn main() {}", "weebo_example"), undefined);
+  assert.equal(countsWrites(used.text, "weebo_example"), false);
+  assert.equal(countsWrites("metrics.record_write(KIND, RemoteWrite::Created);", "weebo_example"), true);
   fs.rmSync(dir, { recursive: true });
 });
 
@@ -130,12 +132,32 @@ test("the four reference pages, from the operator's sources", () => {
   const metrics = read("metrics.mdx");
   assert.match(metrics, /`weebo_example_reconcile_total`/);
   assert.match(metrics, /`weebo_example_remote_writes_total` \| counter \| `kind`, `cause`/);
+  assert.match(metrics, /increase\(weebo_example_remote_writes_total\{cause="drift"\}/);
   assert.match(metrics, /`weebo_example_leader`/);
   assert.match(metrics, /`weebo_example_remote_calls` \| counter \| `op`/);
   const budget = read("resource-budget.mdx");
   assert.match(budget, /\| Memory at rest \(median RSS of every idle window\) \| 64 MiB \| 36 MiB \| ok \|/);
   assert.match(budget, /\| Memory not given back: final vs baseline idle window \| 10 % \| 20 % \| \*\*over\*\* \|/);
   assert.match(budget, /100 `widgets` per load/);
+  fs.rmSync(root, { recursive: true });
+});
+
+test("no remote_writes_total when the operator never counts a write", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "reference-"));
+  const sources = path.join(root, "crates");
+  fs.mkdirSync(path.join(sources, "src"), { recursive: true });
+  fs.writeFileSync(
+    path.join(sources, "src/main.rs"),
+    'fn main() {\n    ReconcileMetrics::new("example-operator", "weebo_example");\n}\n',
+  );
+  generateCrdDocs(
+    { ...crdConfig, reference: { ...reference, sources, extraMetrics: [], remedies: {} } },
+    { root },
+  );
+  const metrics = fs.readFileSync(path.join(root, "content/docs/reference/metrics.mdx"), "utf8");
+  assert.match(metrics, /`weebo_example_reconcile_total`/);
+  assert.doesNotMatch(metrics, /remote_writes/);
+  assert.doesNotMatch(metrics, /RepeatedDrift/);
   fs.rmSync(root, { recursive: true });
 });
 
