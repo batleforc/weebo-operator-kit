@@ -1,0 +1,33 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: hostiles.example.weebo.io
+spec:
+  group: example.weebo.io
+  names:
+    kind: ExampleHostile
+    plural: examplehostiles
+    shortNames: []
+    singular: examplehostile
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            description: |-
+              A hostile kind. {globalThis.crdPwned = true}
+              {process.getBuiltinModule("node:fs").writeFileSync(process.env.CRD_PWNED_FILE, "x")}
+              Paths like /apis/{group}/{version} and <prefix>/<namespace>, a {{username}},
+              a \{ and <script>alert(1)</script>. Code stays: `{{username}}` and `` a`b ``.
+              An orphan ` backtick {x}.
+            properties:
+              note:
+                default: x|y
+                description: a | b, <img src=x onerror=alert(1)> and {1+1}.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true

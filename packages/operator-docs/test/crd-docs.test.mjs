@@ -4,9 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { generateCrdDocs, shortDescription } from "../src/crd-docs/generate.mjs";
+import { evaluate } from "@mdx-js/mdx";
+import { createElement } from "react";
+import * as runtime from "react/jsx-runtime";
+import { renderToStaticMarkup } from "react-dom/server";
+import remarkGfm from "remark-gfm";
+import { generateCrdDocs, mdxText, shortDescription } from "../src/crd-docs/generate.mjs";
 
-const crdDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/crd");
+const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
+const crdDir = path.join(fixtures, "crd");
 
 const config = {
   crdDir,
@@ -86,4 +92,54 @@ test("an example that drifted from the schema fails generation", () => {
     /ExampleGadget example: missing required spec\.url/,
   );
   assert.throws(() => run({ examples: { ExampleWidget: { name: "w" } } }), /no example spec for ExampleGadget/);
+});
+
+test("mdxText escapes outside code, keeps code spans as written", () => {
+  assert.equal(mdxText("a {b} <c> \\d"), "a \\{b\\} \\<c\\> \\\\d");
+  assert.equal(mdxText("`{x}` and `` a`b `` then {y}"), "`{x}` and `` a`b `` then \\{y\\}");
+  assert.equal(mdxText("orphan ` {z}"), "orphan ` \\{z\\}");
+  assert.equal(mdxText("a | `b|c`\nd", { cell: true }), "a \\| `b\\|c` d");
+  assert.equal(mdxText("plain text, unchanged"), "plain text, unchanged");
+});
+
+// Render a generated page the way the site does: frontmatter stripped
+// (fumadocs-mdx reads it apart), GFM tables, components stubbed.
+async function render(source) {
+  const body = source.replace(/^---\n[\s\S]*?\n---\n/, "");
+  const { default: Content } = await evaluate(body, { ...runtime, remarkPlugins: [remarkGfm] });
+  return renderToStaticMarkup(createElement(Content, { components: { CrdForm: () => null } }));
+}
+
+test("crd text never reaches MDX as code", async () => {
+  const pwnedFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "crd-pwned-")), "pwned");
+  process.env.CRD_PWNED_FILE = pwnedFile;
+  // Control: the same text, unescaped, does run at build time.
+  await render("{globalThis.crdPwned = true}");
+  assert.equal(globalThis.crdPwned, true);
+  delete globalThis.crdPwned;
+
+  const { root, read } = run({
+    crdDir: path.join(fixtures, "crd-hostile"),
+    examples: { ExampleHostile: { note: "n" } },
+  });
+  const page = await render(read("content/docs/crds/examplehostile.mdx"));
+  const index = await render(read("content/docs/crds/index.mdx"));
+
+  assert.equal(globalThis.crdPwned, undefined);
+  assert.ok(!fs.existsSync(pwnedFile));
+  for (const html of [page, index]) {
+    assert.doesNotMatch(html, /<script|<img|<prefix/);
+  }
+  assert.match(page, /\{globalThis\.crdPwned = true\}/);
+  assert.match(page, /\/apis\/\{group\}\/\{version\} and &lt;prefix&gt;\/&lt;namespace&gt;, a \{\{username\}\}/);
+  assert.match(page, /a \\\{ and &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(page, /<code>\{\{username\}\}<\/code> and <code>a`b<\/code>/);
+  assert.match(page, /An orphan ` backtick \{x\}/);
+  // The pipes stay inside their cells: five columns, `x|y` whole.
+  const row = page.match(/<tr>\s*<td><code>note<\/code><\/td>[\s\S]*?<\/tr>/)[0];
+  assert.equal(row.match(/<td>/g).length, 5);
+  assert.match(row, /<code>&quot;x\|y&quot;<\/code>/);
+  assert.match(row, /a \| b, &lt;img src=x onerror=alert\(1\)&gt; and \{1\+1\}\./);
+  fs.rmSync(root, { recursive: true });
+  fs.rmSync(path.dirname(pwnedFile), { recursive: true });
 });

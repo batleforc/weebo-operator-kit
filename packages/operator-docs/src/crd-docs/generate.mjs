@@ -91,8 +91,35 @@ function fieldType(schema) {
   return schema.type ?? "object";
 }
 
-function escapeCell(text) {
-  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+const escapeOutsideCode = (text) => text.replace(/[\\{}<>]/g, "\\$&");
+
+/**
+ * CRD text, made safe to paste into MDX: outside code spans, `\ { } < >` are
+ * escaped, so no description can become a JS expression (evaluated at build
+ * time) or a JSX element. Code spans (a backtick run closed by a run of the
+ * same length, as in CommonMark) are left as written: MDX reads neither
+ * inside them. With `cell`, `|` is escaped everywhere (GFM splits a cell even
+ * inside code) and line breaks become spaces.
+ */
+export function mdxText(text, { cell = false } = {}) {
+  let out = "";
+  let rest = text;
+  for (let open = rest.match(/`+/); open; open = rest.match(/`+/)) {
+    const fence = open[0];
+    const after = rest.slice(open.index + fence.length);
+    const close = after.match(new RegExp(`(?<!\`)${fence}(?!\`)`));
+    out += escapeOutsideCode(rest.slice(0, open.index));
+    if (close) {
+      out += fence + after.slice(0, close.index + fence.length);
+      rest = after.slice(close.index + fence.length);
+    } else {
+      // An orphan run is literal text, never the start of a code span.
+      out += fence;
+      rest = after;
+    }
+  }
+  out += escapeOutsideCode(rest);
+  return cell ? out.replace(/\|/g, "\\|").replace(/\r?\n/g, " ") : out;
 }
 
 function renderFieldsTable(properties, required) {
@@ -102,8 +129,9 @@ function renderFieldsTable(properties, required) {
     const isRequired = requiredSet.has(name) ? "yes" : "no";
     const def =
       schema.default !== undefined ? `\`${JSON.stringify(schema.default)}\`` : "";
-    const description = escapeCell((schema.description ?? "").trim());
-    return `| \`${name}\` | \`${type}\` | ${isRequired} | ${def} | ${description} |`;
+    const description = (schema.description ?? "").trim();
+    const cells = [`\`${name}\``, `\`${type}\``, isRequired, def, description];
+    return `| ${cells.map((c) => mdxText(c, { cell: true })).join(" | ")} |`;
   });
   return [
     "| Field | Type | Required | Default | Description |",
@@ -214,7 +242,7 @@ export function generateCrdDocs(config, { root }) {
       // Backticks and bold are stripped: the description renders as plain text.
       .dump({ title: kind, description: summary.replace(/`|\*\*/g, ""), full: true })
       .trim();
-    const mdx = `---\n${frontmatter}\n---\n\n${facts}\n\n${description}\n\n## Example\n\n\`\`\`yaml\n${example}\n\`\`\`\n\n## Spec fields\n\n${table}\n\n## Build a manifest\n\nAnswer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and \`kubectl apply\`.\n\n<CrdForm kind="${kind}" />\n`;
+    const mdx = `---\n${frontmatter}\n---\n\n${facts}\n\n${mdxText(description)}\n\n## Example\n\n\`\`\`yaml\n${example}\n\`\`\`\n\n## Spec fields\n\n${table}\n\n## Build a manifest\n\nAnswer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and \`kubectl apply\`.\n\n<CrdForm kind="${kind}" />\n`;
     fs.writeFileSync(path.join(mdxOutDir, `${singular}.mdx`), mdx);
 
     // apiVersion/kind/scope aren't JSON Schema keywords — added here purely
@@ -243,7 +271,7 @@ export function generateCrdDocs(config, { root }) {
       `[\`${k.kind}\`](${baseUrl}/${k.singular})`,
       ...(withShortNames ? [codeList(k.shortNames)] : []),
       scopeLabel(k.scope),
-      escapeCell(k.summary),
+      mdxText(k.summary, { cell: true }),
     ].join(" | "),
   );
   const indexMdx = `---
