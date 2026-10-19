@@ -2,6 +2,16 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.20.0](https://github.com/batleforc/weebo-operator-kit/compare/9dab634f16ae9e467a9725bb69df4dad5f9a6eea..v0.20.0) - 2026-10-19
+#### Features
+- (**operator-docs**) reference.group for a component without CRDs; RFC 0004 section gap explained (#15) - ([9dab634](https://github.com/batleforc/weebo-operator-kit/commit/9dab634f16ae9e467a9725bb69df4dad5f9a6eea)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+- (**runtime**) one shared watch per kind, store waits that wake every reconcile (#17) - ([a554fbb](https://github.com/batleforc/weebo-operator-kit/commit/a554fbb271eb1f9226a22a1172984bb23d5af1f0)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+#### Bug Fixes
+- (**ci**) checks.yml installs its tools with an authenticated mise (#18) - ([ec36645](https://github.com/batleforc/weebo-operator-kit/commit/ec3664538b7c688a20fd038a6cd37e78d3866669)) - Maxime, Claude Opus 5.5 (1M context)
+- (**operator-docs,chart**) remote_writes_total and RepeatedDrift only for operators that count their writes (#16) - ([bf01be4](https://github.com/batleforc/weebo-operator-kit/commit/bf01be4fac26c83253b5b84eb6b77fd46d620309)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.19.2](https://github.com/batleforc/weebo-operator-kit/compare/5b29508f4ad8897bd7269534e61efcfce0bc8e88..v0.19.2) - 2026-10-19
 #### Bug Fixes
 - (**kit-sync**) install the docs dependencies, not only their lockfile (#14) - ([5b29508](https://github.com/batleforc/weebo-operator-kit/commit/5b29508f4ad8897bd7269534e61efcfce0bc8e88)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
