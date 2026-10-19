@@ -318,6 +318,11 @@ refused by server-side apply).
 {{- end }}
 - name: WEEBO_RECONCILE_CONCURRENCY
   value: {{ $v.reconcileConcurrency | quote }}
+{{- with $v.workerThreads }}
+# tokio worker threads (the binary defaults to 4, not one per core).
+- name: WEEBO_WORKER_THREADS
+  value: {{ . | quote }}
+{{- end }}
 - name: LOG_FORMAT
   value: {{ $v.logFormat | quote }}
 {{- if include "weebo-operator.metricsEnabled" $ctx }}

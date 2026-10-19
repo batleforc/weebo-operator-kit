@@ -19,8 +19,13 @@ use weebo_kit_runtime::{Health, WatchScope, leader, telemetry, webhook_server};
 /// rollout must compete for the same lease.
 const DEFAULT_LEASE_NAME: &str = "{{project-name}}-operator-leader";
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+/// The kit's runtime: `WEEBO_WORKER_THREADS` workers (4 by default), not
+/// tokio's one per core (`weebo_kit_runtime::runtime`).
+fn main() -> anyhow::Result<()> {
+    weebo_kit_runtime::runtime::build()?.block_on(operator())
+}
+
+async fn operator() -> anyhow::Result<()> {
     let telemetry = telemetry::init(controller::FIELD_MANAGER)?;
     let result = match std::env::args().nth(1).as_deref() {
         // What the image's smoke run calls: no cluster needed.
