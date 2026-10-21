@@ -22,23 +22,38 @@ export default function GraphView({
   selected: string | undefined;
   onSelect: (id: string) => void;
 }) {
-  // 240px nodes (global.css), with room for an edge's label between columns.
-  const positions = useMemo(() => layout(graph, { x: 360, y: 100 }), [graph]);
-  // Labels on the selected resource's edges only: on every edge, they pile
-  // up along the columns.
+  // 240px nodes (global.css), with room between columns for a label of
+  // two field names.
+  const positions = useMemo(() => layout(graph, { x: 420, y: 100 }), [graph]);
+  // One edge per pair of nodes: two fields of a resource naming the same
+  // object (`clientIdFrom`, `issuerFrom`) share it, and its label lists
+  // them. Labels on the selected resource's edges only: on every edge, they
+  // pile up along the columns.
   const edges = useMemo((): Edge[] => {
-    const labelled = (a: string, b: string, label: string) =>
-      selected !== undefined && (a === selected || b === selected) ? { label } : {};
-    return [
-      ...graph.slots.flatMap((slot, i): Edge[] =>
-        slot.target
-          ? [{ id: `ref-${i}`, source: slot.resource, target: slot.target.id, ...labelled(slot.resource, slot.target.from ?? slot.target.id, formatPath(slot.path)) }]
-          : [],
-      ),
-      ...graph.nodes.flatMap((n): Edge[] =>
-        n.from ? [{ id: `made-${n.id}`, source: n.id, target: n.from, className: "crd-ide-edge-made", ...labelled(n.from, n.from, "made by") }] : [],
-      ),
-    ];
+    const pairs = new Map<string, { source: string; target: string; owner: string; fields: string[]; made: boolean }>();
+    const add = (source: string, target: string, owner: string, field: string, made: boolean) => {
+      const key = `${source}->${target}`;
+      const pair = pairs.get(key) ?? { source, target, owner, fields: [], made };
+      pair.fields.push(field);
+      pairs.set(key, pair);
+    };
+    for (const slot of graph.slots) {
+      // The field's own name (`clientIdFrom`): a whole path does not fit
+      // between two columns, and the list shows it.
+      const field = formatPath(slot.path).split(".").pop() ?? "";
+      if (slot.target) add(slot.resource, slot.target.id, slot.target.from ?? slot.target.id, field, false);
+    }
+    for (const n of graph.nodes) if (n.from) add(n.id, n.from, n.from, "made by", true);
+    return [...pairs.entries()].map(([id, p]): Edge => {
+      const shown = selected !== undefined && (p.source === selected || p.owner === selected);
+      return {
+        id,
+        source: p.source,
+        target: p.target,
+        ...(p.made ? { className: "crd-ide-edge-made" } : {}),
+        ...(shown ? { label: p.fields.join(", ") } : {}),
+      };
+    });
   }, [graph, selected]);
   const nodes = useMemo(() => {
     return graph.nodes.map((n): Node => {
