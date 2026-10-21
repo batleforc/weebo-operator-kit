@@ -4,8 +4,8 @@
 // for (it carries @xyflow/react). Every action has its equivalent in the
 // list, which stays the way to work with the keyboard or a screen reader.
 
-import { useMemo } from "react";
-import { Background, Controls, Position, ReactFlow, type Edge, type Node } from "@xyflow/react";
+import { useEffect, useMemo, useState } from "react";
+import { applyNodeChanges, Background, Controls, Position, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import type { Graph } from "./model/graph";
 import { layout } from "./model/layout";
@@ -24,17 +24,22 @@ export default function GraphView({
 }) {
   // 240px nodes (global.css), with room for an edge's label between columns.
   const positions = useMemo(() => layout(graph, { x: 360, y: 100 }), [graph]);
-  const edges = useMemo(
-    (): Edge[] => [
+  // Labels on the selected resource's edges only: on every edge, they pile
+  // up along the columns.
+  const edges = useMemo((): Edge[] => {
+    const labelled = (a: string, b: string, label: string) =>
+      selected !== undefined && (a === selected || b === selected) ? { label } : {};
+    return [
       ...graph.slots.flatMap((slot, i): Edge[] =>
-        slot.target ? [{ id: `ref-${i}`, source: slot.resource, target: slot.target.id, label: formatPath(slot.path) }] : [],
+        slot.target
+          ? [{ id: `ref-${i}`, source: slot.resource, target: slot.target.id, ...labelled(slot.resource, slot.target.from ?? slot.target.id, formatPath(slot.path)) }]
+          : [],
       ),
       ...graph.nodes.flatMap((n): Edge[] =>
-        n.from ? [{ id: `made-${n.id}`, source: n.id, target: n.from, className: "crd-ide-edge-made", label: "made by" }] : [],
+        n.from ? [{ id: `made-${n.id}`, source: n.id, target: n.from, className: "crd-ide-edge-made", ...labelled(n.from, n.from, "made by") }] : [],
       ),
-    ],
-    [graph],
-  );
+    ];
+  }, [graph, selected]);
   const nodes = useMemo(() => {
     return graph.nodes.map((n): Node => {
       const label = `${n.kind.kind} ${n.namespace ? `${n.namespace}/` : ""}${n.name}${ORIGIN[n.origin]}`;
@@ -52,6 +57,11 @@ export default function GraphView({
     });
   }, [graph, positions, selected]);
 
+  // xyflow measures the nodes through onNodesChange: without it, nothing
+  // is measured and `fitView` never fits.
+  const [flowNodes, setFlowNodes] = useState(nodes);
+  useEffect(() => setFlowNodes(nodes), [nodes]);
+
   // A made object opens its maker; an external has no editor.
   const open = (id: string) => {
     const node = graph.nodes.find((n) => n.id === id);
@@ -62,9 +72,15 @@ export default function GraphView({
   return (
     <div className="crd-ide-graph h-[28rem] border border-(--rule-soft)" role="group" aria-label="Project graph, a view of the resource list below, which has every action">
       <ReactFlow
-        nodes={nodes}
+        // A new set of nodes is fitted again.
+        key={graph.nodes.length}
+        nodes={flowNodes}
         edges={edges}
+        onNodesChange={(changes) => setFlowNodes((current) => applyNodeChanges(changes, current))}
         fitView
+        fitViewOptions={{ padding: 0.1 }}
+        // A chain of a dozen columns still fits the docs' width.
+        minZoom={0.15}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable

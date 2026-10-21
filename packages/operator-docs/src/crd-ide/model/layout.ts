@@ -30,7 +30,10 @@ export function layout(graph: Graph, spacing = { x: 280, y: 120 }): Map<string, 
     const d = depthOf(node.id);
     const row = rows.get(d) ?? 0;
     rows.set(d, row + 1);
-    positions.set(node.id, { x: d * spacing.x, y: row * spacing.y });
+    // Every other column sits half a row lower: an edge that skips columns
+    // (to the instance everything lives on) does not run over the nodes
+    // between.
+    positions.set(node.id, { x: d * spacing.x, y: (row + (d % 2) / 2) * spacing.y });
   }
   return positions;
 }

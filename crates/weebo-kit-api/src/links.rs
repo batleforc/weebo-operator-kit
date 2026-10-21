@@ -16,6 +16,8 @@
 //!   pub parent_ref: ObjectRef,
 //!   ```
 //!
+//!   On a list field, the marker applies to each item (`spec.memberRefs[]`).
+//!
 //! - `x-weebo-produces` `{ "kind", "name": [..], "namespace"?, "unless"? }`:
 //!   the object (each item, in a list) makes an object of `kind`, named by
 //!   the first of its `name` fields that is set. [`crate::SecretTarget`]
@@ -226,10 +228,14 @@ fn walk(
                 Target::Kind(gk) => gk,
             })
             .collect();
-        out.references.push(Link {
-            path: path.to_string(),
-            to,
-        });
+        // On a list field (`#[schemars(extend(..))]` on a `Vec<ObjectRef>`),
+        // the marker lands on the array: each item is a reference.
+        let path = if node.contains_key("items") {
+            format!("{path}[]")
+        } else {
+            path.to_string()
+        };
+        out.references.push(Link { path, to });
     }
     if let Some(marker) = node.get(PRODUCES) {
         let marker: ProducesMarker = read(PRODUCES, marker, path)?;
@@ -296,6 +302,8 @@ mod tests {
         plain: ObjectRef,
         #[schemars(extend("x-weebo-keys" = ["token"]))]
         secret_targets: Vec<SecretTarget>,
+        #[schemars(extend("x-weebo-link" = { "to": [{ "group": "example.weebo.io", "kind": "ExampleObject" }] }))]
+        member_refs: Vec<ObjectRef>,
         one_target: Option<SecretTarget>,
     }
 
@@ -343,6 +351,10 @@ mod tests {
                     ],
                 ),
                 link("spec.keys[]", &secret),
+                link(
+                    "spec.memberRefs[]",
+                    &[("example.weebo.io", "ExampleObject")]
+                ),
                 link("spec.parentRef", &[("example.weebo.io", "ExampleObject")]),
                 link("spec.token", &secret),
             ]

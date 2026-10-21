@@ -500,10 +500,10 @@ test("layout: a column per dependency depth", () => {
   const { project } = load(RECIPE);
   const positions = layout(buildGraph(project, catalog), { x: 10, y: 1 });
   assert.deepEqual(Object.fromEntries(positions), {
-    r1: { x: 30, y: 0 },
+    r1: { x: 30, y: 0.5 },
     r2: { x: 20, y: 0 },
     r3: { x: 0, y: 0 },
-    "r3/produces/0/0": { x: 10, y: 0 },
+    "r3/produces/0/0": { x: 10, y: 0.5 },
   });
 });
 
