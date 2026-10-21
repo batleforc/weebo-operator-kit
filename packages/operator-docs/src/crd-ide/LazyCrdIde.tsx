@@ -7,5 +7,5 @@ import dynamic from "next/dynamic";
 
 export const LazyCrdIde = dynamic(() => import("./CrdIde").then((m) => m.CrdIde), {
   ssr: false,
-  loading: () => <p className="border border-(--rule-strong) px-6 py-10 text-[13px] text-fd-muted-foreground">Loading the IDE...</p>,
+  loading: () => <p data-crd-ide="" className="border border-(--rule-strong) px-6 py-10 text-[13px] text-fd-muted-foreground">Loading the IDE...</p>,
 });

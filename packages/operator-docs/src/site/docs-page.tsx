@@ -59,8 +59,9 @@ export function createDocsPage<C extends MdxLoaderConfig>({
 
     return (
       // `full` turns the side TOC off in fumadocs-ui; a CRD page is full for its
-      // form, and long enough to need the TOC.
-      <DocsPage toc={page.data.toc} full={page.data.full} tableOfContent={{ enabled: true }}>
+      // form, and long enough to need the TOC. A page without a heading (the
+      // CRD IDE's) has none: its column goes to the content.
+      <DocsPage toc={page.data.toc} full={page.data.full} tableOfContent={{ enabled: page.data.toc.length > 0 }}>
         <DocsTitle>{page.data.title}</DocsTitle>
         <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
         <div className="flex flex-row gap-2 items-center border-b pb-6">

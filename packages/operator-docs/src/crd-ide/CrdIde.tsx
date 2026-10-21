@@ -121,10 +121,18 @@ export function CrdIde({ sources = DEFAULT_SOURCES, recipes = NO_RECIPES, choice
   );
 
   if (error) {
-    return <p className="border border-(--rule-strong) px-6 py-10 text-[13px] text-fd-muted-foreground">Could not load the CRDs: {error}</p>;
+    return (
+      <p data-crd-ide="" className="border border-(--rule-strong) px-6 py-10 text-[13px] text-fd-muted-foreground">
+        Could not load the CRDs: {error}
+      </p>
+    );
   }
   if (!catalog || !graph) {
-    return <p className="border border-(--rule-strong) px-6 py-10 text-[13px] text-fd-muted-foreground">Loading the CRDs...</p>;
+    return (
+      <p data-crd-ide="" className="border border-(--rule-strong) px-6 py-10 text-[13px] text-fd-muted-foreground">
+        Loading the CRDs...
+      </p>
+    );
   }
 
   const resource = project.resources.find((r) => r.id === selected);
@@ -145,7 +153,8 @@ export function CrdIde({ sources = DEFAULT_SOURCES, recipes = NO_RECIPES, choice
 
   return (
     // A container: the columns follow the IDE's own width (the docs column), not the window's.
-    <div className="not-prose @container flex flex-col gap-4">
+    // `data-crd-ide`: the docs layout gives its page the whole width (global.css).
+    <div data-crd-ide="" className="not-prose @container flex flex-col gap-4">
       <Toolbar
         catalog={catalog}
         project={project}

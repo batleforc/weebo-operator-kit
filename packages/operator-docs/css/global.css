@@ -436,6 +436,23 @@ body {
   background: transparent;
 }
 
+/* ── CRD IDE page ────────────────────────────────────────────────────────────
+   The page that holds the IDE takes the whole width beside the sidebar,
+   and the whole window once the sidebar is collapsed: fumadocs-ui caps the
+   main column at --fd-layout-width minus the sidebar (collapsed or not)
+   and a full page at 1168px. */
+#nd-docs-layout:has([data-crd-ide]) {
+  --fd-layout-width: 100vw;
+}
+
+#nd-docs-layout[data-sidebar-collapsed='true']:has([data-crd-ide]) {
+  --fd-layout-width: calc(100vw + var(--fd-sidebar-width));
+}
+
+#nd-page:has([data-crd-ide]) {
+  max-width: none;
+}
+
 /* ── CRD IDE graph ───────────────────────────────────────────────────────────
    @xyflow/react's base.css lays the graph out; these rules draw it with the
    theme's tokens: ruled boxes, the accent for the selected node, made and
