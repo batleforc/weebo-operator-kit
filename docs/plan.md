@@ -305,7 +305,8 @@ erreurs que l'opérateur traduit) :
   tokio à `WEEBO_WORKER_THREADS` workers, 4 par défaut, pas un par cœur),
   `drive`, `jittered`,
   `requeue_after(obj, steady, due_in)` (300 s/30 s ±20 %, le délai
-  d'échec doublé à chaque échec consécutif du CR jusqu'à 300 s),
+  d'échec doublé à chaque retry du CR qui échoue encore jusqu'à 300 s ;
+  un échec vu plus tôt, sur un événement de watch, ne compte pas),
   `retry_after_error` (corps de l'`error_policy` : Event `Warning` +
   même backoff), `finalize` (cleanup sauf `force-orphan`, puis Event du code
   `released` de l'opérateur), `status::publish` (merge patch des
