@@ -215,19 +215,22 @@ fn walk(
     };
     if let Some(marker) = node.get(MARKER) {
         let marker: LinkMarker = read(MARKER, marker, path)?;
-        let to = marker
-            .to
-            .into_iter()
-            .map(|t| match t {
-                Target::Role {
-                    role: InstanceKind::Instance,
-                } => roles.instance.clone(),
-                Target::Role {
-                    role: InstanceKind::LocalInstance,
-                } => roles.local_instance.clone(),
-                Target::Kind(gk) => gk,
-            })
-            .collect();
+        let mut to: Vec<GroupKind> = Vec::new();
+        let resolved = marker.to.into_iter().map(|t| match t {
+            Target::Role {
+                role: InstanceKind::Instance,
+            } => roles.instance.clone(),
+            Target::Role {
+                role: InstanceKind::LocalInstance,
+            } => roles.local_instance.clone(),
+            Target::Kind(gk) => gk,
+        });
+        // An operator with a single instance kind gives both roles the same.
+        for gk in resolved {
+            if !to.contains(&gk) {
+                to.push(gk);
+            }
+        }
         // On a list field (`#[schemars(extend(..))]` on a `Vec<ObjectRef>`),
         // the marker lands on the array: each item is a reference.
         let path = if node.contains_key("items") {
