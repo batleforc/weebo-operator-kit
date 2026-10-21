@@ -1750,6 +1750,17 @@ peut pas rester dans la CRD.
   `accessibilite-check` (RGAA) et `eco-check` sur le diff. Pas d'e2e
   navigateur en V1.
 
+#### Import d'un cluster (ajouté le 2026-10-22)
+
+`kubectl get <kinds> -A -o yaml` s'importe tel quel : les `List` sont
+dépliées, les champs posés par le serveur retirés (`status`, `uid`,
+`resourceVersion`, `managedFields`, annotation last-applied…), un `Secret`
+devient un objet externe avec ses clés et jamais ses valeurs, un objet de
+même identité (kind, namespace, nom) est remplacé. Plusieurs fichiers en
+un import (un dossier GitOps). Vérifié sur la doc de weebo-forgejo : liens
+et Secrets résolus, aucune valeur ni champ serveur dans l'export ou le
+brouillon.
+
 #### Release
 
 Mineure (0.x) : le template `crdgen` change (chaque opérateur régénère et

@@ -316,19 +316,25 @@ function Toolbar({
         ) : null}
         <div className="flex flex-col gap-1">
           <label htmlFor={ids.file} className={labelClass}>
-            Import a YAML file
+            Import YAML files
           </label>
           <input
             id={ids.file}
             type="file"
+            multiple
             accept=".yaml,.yml,text/yaml"
             className="text-[13px]"
+            aria-describedby={`${ids.file}-hint`}
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) file.text().then(onImport, () => onImport(""));
+              const files = [...(e.target.files ?? [])];
+              // One import for them all: references across files resolve.
+              if (files.length) Promise.all(files.map((f) => f.text())).then((texts) => onImport(texts.join("\n---\n")), () => onImport(""));
               e.target.value = "";
             }}
           />
+          <p id={`${ids.file}-hint`} className="max-w-md text-[12px] text-fd-muted-foreground">
+            Manifests, or a cluster&apos;s objects: <code>kubectl get &lt;kinds&gt; -A -o yaml</code>. What the server sets is dropped; a Secret keeps its keys, never its values. An object already in the project is replaced.
+          </p>
         </div>
         <button type="button" className="ctl" disabled={project.resources.length === 0 && project.externals.length === 0} onClick={() => {
           if (!window.confirm("Remove every resource and external object of the project?")) return;

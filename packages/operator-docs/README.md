@@ -212,9 +212,15 @@ import { RECIPES } from '@/lib/recipes';
 
 A recipe is `{ id, label, description?, yaml }`.
 
-- **Resources**: add one of any catalog kind, import YAML (file or
+- **Resources**: add one of any catalog kind, import YAML (files or
   paste), or add a recipe. A manifest in another served version of a kind,
   or of a kind outside the catalog, is kept read-only and exported as is.
+- **Import a cluster's objects**: `kubectl get <kinds> -A -o yaml` (a
+  `List`) imports as is, several files at once. What the server sets
+  (`status`, `uid`, `resourceVersion`, `managedFields`, the
+  last-applied annotation…) is dropped; a `Secret` becomes an external
+  object with its keys, never its values (neither in the page nor in the
+  draft); an object already in the project is replaced, not duplicated.
 - **Links** come from `links.json` (see [Links](#links)): under each
   resource, every reference field is a select of the objects it may point
   at — the project's resources, the objects they make (the Secret of an

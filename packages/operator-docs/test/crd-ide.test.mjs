@@ -340,33 +340,31 @@ spec:
   url: u
   tokenSecretRef: { name: s, key: k }
 ---
-apiVersion: ${G}/v1alpha1
-kind: ExampleInstance
-metadata: { name: cluster }
-spec:
-  url: u
-  tokenSecretRef: { name: example-token, namespace: team-b, key: token }
----
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata: { name: example-token, namespace: team-b }
 spec:
   data: [{ secretKey: token }]
 `);
-  const issues = validate(project, catalog);
+  // The same object twice: an import replaces, the editor can still add one.
+  const withCopy = addResource(project, project.resources[3].doc).project;
+  const issues = validate(withCopy, catalog);
   assert.deepEqual(
     issues.map((i) => [i.resource, i.code]),
     [
       ["r4", "missing-required"],
+      ["r6", "missing-required"],
       ["r1", "dangling-reference"],
       ["r2", "missing-key"],
       ["r3", "not-shared"],
       ["r4", "missing-namespace"],
-      ["r5", "duplicate"],
+      ["r6", "missing-namespace"],
+      ["r6", "duplicate"],
     ],
   );
-  assert.match(issues[2].message, /has no key nope \(known: token\)/);
-  assert.match(issues[3].message, /team-b\/main is not shared with namespace team-a/);
+  const message = (code) => issues.find((i) => i.code === code)?.message;
+  assert.match(message("missing-key"), /has no key nope \(known: token\)/);
+  assert.match(message("not-shared"), /team-b\/main is not shared with namespace team-a/);
 
   // The same name, another kind, same namespace: a wrong kind.
   const wrong = load(`
@@ -394,6 +392,7 @@ spec: { tokenSecretRef: { name: s, key: k }, sharedWith: ${JSON.stringify(shared
 apiVersion: v1
 kind: Secret
 metadata: { name: s, namespace: team-b }
+data: { k: eA== }
 ---
 ${
   from
@@ -629,4 +628,63 @@ test("lazy schemas: listed kinds, specs unchecked and unpruned until their schem
   assert.deepEqual(codes(validate(bad, full)), ["range"]);
   assert.equal(withSchemas(lazy, [{ ...schemas[0], kind: "Nope" }]).get(`${G}/Nope`), undefined);
   assert.ok(project.resources.length === 3);
+});
+
+test("import: a cluster's List, cleaned; Secrets as externals without values; same objects replaced", () => {
+  const LIST = `
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: ${G}/v1alpha1
+    kind: ExampleLocalInstance
+    metadata:
+      name: main
+      namespace: team-a
+      uid: 1234
+      resourceVersion: "42"
+      generation: 3
+      creationTimestamp: "2026-10-01T00:00:00Z"
+      managedFields: [{ manager: kubectl }]
+      annotations:
+        kubectl.kubernetes.io/last-applied-configuration: "{}"
+        keep: me
+    spec:
+      tokenSecretRef: { name: token, key: token }
+    status:
+      conditions: [{ type: Ready, status: "True" }]
+  - apiVersion: v1
+    kind: Secret
+    metadata: { name: token, namespace: team-a }
+    data: { token: c2VjcmV0, other: eA== }
+    stringData: { more: plain }
+  - kind: Broken
+`;
+  const { project, issues } = load(LIST);
+  assert.deepEqual(codes(issues), ["invalid-document"]);
+  assert.equal(project.resources.length, 1);
+  assert.deepEqual(project.resources[0].doc.metadata, { name: "main", namespace: "team-a", annotations: { keep: "me" } });
+  assert.equal(project.resources[0].doc.status, undefined);
+  assert.deepEqual(project.externals, [
+    { id: "x2", kind: secret, name: "token", namespace: "team-a", keys: ["more", "other", "token"] },
+  ]);
+  assert.ok(!JSON.stringify(project).includes("c2VjcmV0"), "no Secret value is kept");
+  // The reference resolves to the Secret, with its keys.
+  assert.deepEqual(validate(project, catalog), []);
+
+  // Imported again, changed: replaced in place, no duplicate.
+  const again = importYaml(project, catalog, LIST.replace("key: token }", "key: nope }").replace("other: eA==", "")).project;
+  assert.equal(again.resources.length, 1);
+  assert.equal(again.resources[0].id, "r1");
+  assert.equal(again.externals.length, 1);
+  assert.deepEqual(codes(validate(again, catalog)), ["missing-key"]);
+
+  // An annotation-free object loses the empty map.
+  const bare = load(`
+apiVersion: ${G}/v1alpha1
+kind: ExampleObject
+metadata:
+  name: o
+  annotations: { kubectl.kubernetes.io/last-applied-configuration: "{}" }
+`).project;
+  assert.deepEqual(bare.resources[0].doc.metadata, { name: "o" });
 });
