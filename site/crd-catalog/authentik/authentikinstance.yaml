@@ -1,0 +1,325 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: authentikinstances.authentik.weebo.io
+spec:
+  group: authentik.weebo.io
+  names:
+    categories: []
+    kind: AuthentikInstance
+    plural: authentikinstances
+    shortNames: []
+    singular: authentikinstance
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for AuthentikInstanceSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              Connection to a real Authentik server. Cluster-scoped — an org-wide,
+              shared piece of infrastructure, not owned by a single namespace.
+            properties:
+              secretStore:
+                default:
+                  backend: kubernetes
+                description: |-
+                  Where this instance's oauth2 application credentials are written:
+                  the backend of the implicit target of an `AuthentikApplication`
+                  without `secretTargets` (default `kubernetes`), and the Vault
+                  connection every Vault target uses.
+                properties:
+                  backend:
+                    default: kubernetes
+                    enum:
+                    - kubernetes
+                    - vault
+                    type: string
+                  vault:
+                    nullable: true
+                    properties:
+                      address:
+                        description: Vault server address, e.g. `https://vault.example.com:8200`.
+                        type: string
+                      caSecretRef:
+                        description: |-
+                          Optional custom CA certificate to verify Vault's TLS with, read from
+                          a Kubernetes `Secret` (the referenced `key` must hold a PEM bundle).
+                          Use this to trust a private CA (e.g. openbao-tls) without mounting
+                          it into the operator pod — the operator reads the Secret via the
+                          API and hands the PEM to its Vault client. When unset, the system
+                          trust store is used. Only consulted for `https://` Vault addresses.
+                        nullable: true
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        - namespace
+                        type: object
+                      kubernetesAuthMount:
+                        default: kubernetes
+                        description: |-
+                          Mount path of Vault's Kubernetes auth backend. Defaults to
+                          `kubernetes`, Vault's own default mount name.
+                        type: string
+                      kubernetesAuthRole:
+                        description: |-
+                          Vault Kubernetes-auth role this operator authenticates as — its
+                          own ServiceAccount JWT is exchanged for a Vault token via
+                          `auth/<kubernetesAuthMount>/login`. See `.prompt/plan.md`'s note
+                          on `vault.tf`'s OIDC federation for why a Vault-aware `SecretStore`
+                          exists at all (unrelated to this auth step, which is the
+                          operator authenticating *to* Vault, not Vault federating
+                          Authentik as an OIDC provider).
+                        type: string
+                      mount:
+                        description: |-
+                          KV v2 secrets engine mount (e.g. `secret`) credentials are written
+                          under.
+                        type: string
+                      pathGrants:
+                        description: |-
+                          Paths outside `<pathPrefix>/<namespace>/` that the
+                          `AuthentikApplication`s of the listed namespaces may write to (an
+                          application publishing its credentials where its consumer already
+                          reads them). A grant opens its paths to everyone allowed to create
+                          an `AuthentikApplication` in a covered namespace; it never hands
+                          over a value another CR owns. The Vault policy of
+                          `kubernetesAuthRole` stays the hard bound: restrict it to the same
+                          paths.
+                        items:
+                          description: |-
+                            Paths of the instance's secret backend that objects may write to
+                            outside their namespace's subtree `<pathPrefix>/<namespace>/`. Opens
+                            them to every subject allowed to create an emitting object in a
+                            covered namespace, and cannot hand over a value another object owns.
+                          properties:
+                            clusterScoped:
+                              description: |-
+                                The grant opens `paths` to cluster-scoped objects (instead of
+                                `namespaces`).
+                              type: boolean
+                            namespaces:
+                              description: |-
+                                Namespaces whose objects may write `paths`: exact names, `*`, or a
+                                prefix glob such as `team-*`. `team-*` opens the paths to every
+                                matching namespace.
+                              items:
+                                maxLength: 64
+                                minLength: 1
+                                type: string
+                              maxItems: 64
+                              type: array
+                            paths:
+                              description: |-
+                                Path patterns under the mount, compared segment by segment: a
+                                literal segment matches itself, `+` exactly one segment, and a last
+                                `*` one or more. Each holds at least one literal segment, e.g.
+                                `shared/auth`, `+/auth`, `platform/*`. Prefer exact paths where
+                                values not written by the operator live: a covered object may take
+                                over a value no object owns yet.
+                              items:
+                                maxLength: 512
+                                pattern: ^(?:(?:[^/*+]+|\+)/)*(?:[^/*+]+|\+|\*)$
+                                type: string
+                                x-kubernetes-validations:
+                                - message: a path pattern has no "." or ".." segment
+                                  rule: '!self.matches(''(^|/)\\.\\.?(/|$)'')'
+                                - message: a path pattern has at least one literal segment
+                                  rule: self.matches('(^|/)[^/*+]+(/|$)')
+                              maxItems: 64
+                              minItems: 1
+                              type: array
+                          required:
+                          - paths
+                          type: object
+                          x-kubernetes-validations:
+                          - message: a grant names namespaces or is clusterScoped, not both
+                            rule: (has(self.namespaces) && size(self.namespaces) > 0) != (has(self.clusterScoped) && self.clusterScoped)
+                        maxItems: 32
+                        type: array
+                      pathPrefix:
+                        default: weebo-authentik
+                        description: |-
+                          Path prefix under `mount` — a target's default KV path is
+                          `<pathPrefix>/<namespace>/<name>` (`<namespace>/<name>` when empty),
+                          and an `AuthentikApplication` may only write under
+                          `<pathPrefix>/<its namespace>/`, unless `pathGrants` opens a path to
+                          it.
+
+                          An empty prefix makes every namespace's subtree a top-level folder
+                          of the mount: a namespace named like a folder that holds other
+                          values (one a grant opens, `shared/` say) owns that folder — its
+                          objects write there without any grant. Keep a prefix unless the
+                          mount is reserved to per-namespace folders and no namespace can be
+                          created with the name of another top-level folder.
+                        type: string
+                    required:
+                    - address
+                    - kubernetesAuthRole
+                    - mount
+                    type: object
+                type: object
+              tls:
+                default:
+                  insecureSkipVerify: false
+                description: |-
+                  TLS verification for the API connection above — a private CA to trust
+                  (`tls.caSecretRef`), or the `tls.insecureSkipVerify` escape hatch.
+                  Defaults to plain platform-trust-store verification.
+                properties:
+                  caSecretRef:
+                    description: |-
+                      Optional custom CA certificate to verify the instance's TLS with,
+                      read from a Kubernetes `Secret` (the referenced `key` must hold a PEM
+                      bundle). Use this to trust a private CA without mounting it into the
+                      operator pod — the operator reads the Secret via the API and hands the
+                      PEM to its HTTP client. It is added *on top of* the platform trust
+                      store, so publicly-signed endpoints keep working. When unset, only the
+                      platform trust store (plus the usual `SSL_CERT_FILE`/`SSL_CERT_DIR`
+                      env vars) is used.
+                    nullable: true
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                  insecureSkipVerify:
+                    default: false
+                    description: |-
+                      Skip certificate verification entirely — insecure, intended only for
+                      throwaway/self-signed instances. Prefer `caSecretRef` below, which
+                      trusts a private CA without turning verification off.
+                    type: boolean
+                type: object
+              tokenSecretRef:
+                description: |-
+                  A key inside a Kubernetes `Secret` in an explicit namespace — used by
+                  cluster-scoped CRDs, which have no namespace of their own to default to.
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - key
+                - name
+                - namespace
+                type: object
+              url:
+                description: |-
+                  Base **web** URL of the Authentik instance, e.g.
+                  `https://login.example.com` — not the `/api/v3` REST endpoint, which
+                  is derived from it (see [`split_urls`]). This is the root the
+                  per-application OIDC issuers hang off,
+                  `<url>/application/o/<slug>/`, so it is what oauth2 consumers end up
+                  trusting.
+                type: string
+            required:
+            - tokenSecretRef
+            - url
+            type: object
+          status:
+            nullable: true
+            properties:
+              authentikId:
+                description: |-
+                  The Authentik-side primary key. Presence means this CR actually
+                  owns/created the corresponding Authentik object — set once on
+                  first successful create (or seeded by the import tool), never
+                  inferred by name-matching. See `.prompt/plan.md`.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to
+                  (`AuthentikApplication`, and the `AuthentikAccessPolicy`s through
+                  their application): a `spec.instanceRef` by name only never
+                  silently moves to another instance created later under that name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              observedGeneration:
+                format: int64
+                nullable: true
+                type: integer
+              providerId:
+                description: |-
+                  Set on `AuthentikApplication` only: the pk of the provider its
+                  application points at. Kept so that provider is reused, or deleted
+                  with the CR, even after the application itself was deleted out of
+                  band in Authentik.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: AuthentikInstance
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

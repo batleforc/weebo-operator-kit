@@ -16,6 +16,12 @@ pub enum SecretStoreBackend {
 /// value is fanned out to each.
 #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("x-weebo-produces" = {
+    "kind": { "kind": "Secret" },
+    "name": ["name"],
+    "namespace": "namespace",
+    "unless": { "path": "backend", "equals": "vault" }
+}))]
 pub struct SecretTarget {
     /// `kubernetes` (default) or `vault`. A Vault target reuses the Vault
     /// connection (address, mount, auth) the instance configures, which it

@@ -1,0 +1,51 @@
+{
+  "kinds": {
+    "{{product}}Instance": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ]
+    },
+    "{{product}}LocalInstance": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ]
+    },
+    "{{product}}Object": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "{{product | downcase}}.weebo.io",
+              "kind": "{{product}}Instance"
+            },
+            {
+              "group": "{{product | downcase}}.weebo.io",
+              "kind": "{{product}}LocalInstance"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "version": 1
+}

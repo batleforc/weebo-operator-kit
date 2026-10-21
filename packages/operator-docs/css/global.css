@@ -436,6 +436,72 @@ body {
   background: transparent;
 }
 
+/* ── CRD IDE graph ───────────────────────────────────────────────────────────
+   @xyflow/react's base.css lays the graph out; these rules draw it with the
+   theme's tokens: ruled boxes, the accent for the selected node, made and
+   external objects dashed. */
+.crd-ide-graph .react-flow__node {
+  width: 240px;
+  padding: var(--s2) var(--s3);
+  background: var(--ground-sunk);
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+  font-size: var(--t-meta);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.crd-ide-graph .react-flow__node.selected {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.crd-ide-graph .react-flow__node:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.crd-ide-graph :is(.crd-ide-node-produced, .crd-ide-node-external) {
+  border-style: dashed;
+  color: var(--ink-dim);
+}
+
+.crd-ide-graph .react-flow__edge-path {
+  stroke: var(--rule-strong);
+}
+
+.crd-ide-graph .crd-ide-edge-made .react-flow__edge-path {
+  stroke-dasharray: 4 4;
+}
+
+.crd-ide-graph .react-flow__edge-textbg {
+  fill: var(--ground);
+}
+
+.crd-ide-graph .react-flow__edge-text {
+  fill: var(--ink-dim);
+  font-size: 11px;
+}
+
+.crd-ide-graph .react-flow__handle {
+  visibility: hidden;
+}
+
+.crd-ide-graph .react-flow__attribution {
+  background: var(--ground);
+}
+
+.crd-ide-graph .react-flow__attribution a {
+  color: var(--ink-dim);
+}
+
+.crd-ide-graph .react-flow__controls-button {
+  background: var(--ground-sunk);
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+}
+
 /* ── Reduced motion ──────────────────────────────────────────────────────────
    Removed outright, with no crossfade substitute (The One Motion Rule). */
 @media (prefers-reduced-motion: reduce) {

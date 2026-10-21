@@ -67,9 +67,9 @@ test("one page and one schema per kind, plus the section index", () => {
     "examplenested",
   ]);
   assert.deepEqual(JSON.parse(read("public/crd-schemas/index.json")), [
-    { kind: "ExampleWidget", singular: "examplewidget", scope: "Namespaced" },
-    { kind: "ExampleGadget", singular: "examplegadget", scope: "Cluster" },
-    { kind: "ExampleNested", singular: "examplenested", scope: "Namespaced" },
+    { kind: "ExampleWidget", singular: "examplewidget", scope: "Namespaced", apiVersion: "example.weebo.io/v1alpha1", served: ["v1alpha1"] },
+    { kind: "ExampleGadget", singular: "examplegadget", scope: "Cluster", apiVersion: "example.weebo.io/v1alpha1", served: ["v1alpha1"] },
+    { kind: "ExampleNested", singular: "examplenested", scope: "Namespaced", apiVersion: "example.weebo.io/v1alpha1", served: ["v1alpha1"] },
   ]);
   const index = read("content/docs/crds/index.mdx");
   assert.match(index, /\| Kind \| Short names \| Scope \| Description \|/);
@@ -273,4 +273,128 @@ test("crd text never reaches MDX as code", async () => {
   assert.match(page, /\{globalThis\.crdPwnedNested = true\} &lt;script&gt;alert\(2\)&lt;\/script&gt; !<a href/);
   fs.rmSync(root, { recursive: true });
   fs.rmSync(path.dirname(pwnedFile), { recursive: true });
+});
+
+// The fixture CRDs, copied next to a crdgen `links.json`.
+function withLinks(generated) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "crd-links-"));
+  for (const file of fs.readdirSync(crdDir)) fs.copyFileSync(path.join(crdDir, file), path.join(dir, file));
+  if (generated !== undefined) fs.writeFileSync(path.join(dir, "links.json"), JSON.stringify(generated));
+  return dir;
+}
+
+const secret = { group: "", kind: "Secret" };
+
+test("links.json: the crdgen's references and the config's productions, checked", () => {
+  const dir = withLinks({
+    version: 1,
+    kinds: {
+      ExampleNested: {
+        references: [
+          { path: "spec.rules[].path", to: [secret] },
+          { path: "spec.byName.*", to: [{ group: "example.weebo.io", kind: "ExampleWidget" }] },
+        ],
+        produces: [
+          {
+            kind: secret,
+            each: "spec.rules[]",
+            name: ["path"],
+            keyNames: ["token"],
+            unless: { path: "path", equals: "/" },
+          },
+        ],
+      },
+      ExampleWidget: { references: [], produces: [] },
+    },
+  });
+  const { root, read } = run({
+    crdDir: dir,
+    links: {
+      ExampleNested: { references: [{ path: "spec.matrix[][].cell", to: [{ kind: "ConfigMap" }] }] },
+      ExampleWidget: { produces: [{ kind: { kind: "Secret" }, name: ["spec.name", "metadata.name"], keys: "spec.labels.*" }] },
+    },
+  });
+  assert.deepEqual(JSON.parse(read("public/crd-schemas/links.json")), {
+    version: 1,
+    kinds: {
+      ExampleNested: {
+        references: [
+          { path: "spec.byName.*", to: [{ group: "example.weebo.io", kind: "ExampleWidget" }] },
+          { path: "spec.matrix[][].cell", to: [{ group: "", kind: "ConfigMap" }] },
+          { path: "spec.rules[].path", to: [secret] },
+        ],
+        produces: [{ kind: secret, each: "spec.rules[]", name: ["path"], keyNames: ["token"], unless: { path: "path", equals: "/" } }],
+      },
+      ExampleWidget: {
+        references: [],
+        produces: [{ kind: secret, name: ["spec.name", "metadata.name"], keys: "spec.labels.*" }],
+      },
+    },
+  });
+  fs.rmSync(root, { recursive: true });
+  fs.rmSync(dir, { recursive: true });
+});
+
+test("links.json: an operator without one publishes empty links", () => {
+  const { root, read } = run();
+  assert.deepEqual(JSON.parse(read("public/crd-schemas/links.json")), { version: 1, kinds: {} });
+  fs.rmSync(root, { recursive: true });
+});
+
+test("links.json: unknown kinds and fields, duplicates and bad files fail generation", () => {
+  const cases = [
+    [{ version: 2, kinds: {} }, {}, /links\.json: expected \{ version: 1, kinds \}/],
+    [{ version: 1, kinds: { ExampleGone: {} } }, {}, /stale\? rerun the crdgen\): ExampleGone is not one of the CRDs/],
+    [{ version: 1, kinds: { ExampleWidget: { references: [{ path: "spec.nope", to: [secret] }] } } }, {}, /ExampleWidget has no field "spec\.nope"/],
+    [{ version: 1, kinds: { ExampleWidget: { references: [{ path: "spec.name[]", to: [secret] }] } } }, {}, /has no field "spec\.name\[\]"/],
+    [{ version: 1, kinds: { ExampleWidget: { references: [{ path: "spec.name", to: [] }] } } }, {}, /spec\.name references no kind/],
+    [{ version: 1, kinds: { ExampleWidget: { references: [{ path: "spec.name", to: [{ kind: "not a kind" }] }] } } }, {}, /invalid kind/],
+    [
+      { version: 1, kinds: { ExampleWidget: { references: [{ path: "spec.name", to: [secret] }] } } },
+      { ExampleWidget: { references: [{ path: "spec.name", to: [secret] }] } },
+      /config links: ExampleWidget spec\.name is already a reference/,
+    ],
+    [undefined, { ExampleWidget: { produces: [{ kind: secret, name: [] }] } }, /produces an object with no name field/],
+    [undefined, { ExampleWidget: { produces: [{ kind: secret, name: ["spec.name"], keys: "spec.keys[]" }] } }, /has no field "spec\.keys\[\]"/],
+    [undefined, { ExampleNested: { produces: [{ kind: secret, each: "spec.rules[]", name: ["nope"] }] } }, /has no field "spec\.rules\[\]\.nope"/],
+    [undefined, { ExampleNested: { produces: [{ kind: secret, name: ["metadata.name"], keyNames: "token" }] } }, /keyNames is not a list/],
+    [undefined, { ExampleNested: { produces: [{ kind: secret, name: ["metadata.name"], unless: { path: "spec.target.host", equals: 1 } }] } }, /unless\.equals is not a string/],
+  ];
+  for (const [generated, links, error] of cases) {
+    const dir = withLinks(generated);
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "crd-docs-"));
+    assert.throws(() => generateCrdDocs({ ...config, crdDir: dir, links }, { root }), error);
+    // Refused: nothing written.
+    assert.ok(!fs.existsSync(path.join(root, "public/crd-schemas")));
+    fs.rmSync(root, { recursive: true });
+    fs.rmSync(dir, { recursive: true });
+  }
+});
+
+test("the published schema is the storage version's, with every served version", () => {
+  const dir = withLinks(undefined);
+  const file = path.join(dir, "widget.yaml");
+  const crd = yaml.load(fs.readFileSync(file, "utf8"));
+  const [v1] = crd.spec.versions;
+  crd.spec.versions = [
+    { ...v1, name: "v1alpha1", storage: false },
+    { ...v1, name: "v1beta1", storage: true },
+    { ...v1, name: "v0", served: false, storage: false },
+  ];
+  fs.writeFileSync(file, yaml.dump(crd));
+  const { root, read } = run({ crdDir: dir });
+  const schema = JSON.parse(read("public/crd-schemas/examplewidget.schema.json"));
+  assert.equal(schema.apiVersion, "example.weebo.io/v1beta1");
+  assert.deepEqual(schema.served, ["v1alpha1", "v1beta1"]);
+  fs.rmSync(root, { recursive: true });
+  fs.rmSync(dir, { recursive: true });
+});
+
+test("pages: false writes the schemas, index.json and links.json, and no page", () => {
+  const { root, read } = run({ pages: false, examples: {} });
+  assert.ok(!fs.existsSync(path.join(root, "content")));
+  assert.equal(JSON.parse(read("public/crd-schemas/index.json")).length, 3);
+  assert.ok(read("public/crd-schemas/examplewidget.schema.json"));
+  assert.deepEqual(JSON.parse(read("public/crd-schemas/links.json")), { version: 1, kinds: {} });
+  fs.rmSync(root, { recursive: true });
 });

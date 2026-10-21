@@ -1,0 +1,267 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: forgejolocalinstances.forgejo.weebo.io
+spec:
+  group: forgejo.weebo.io
+  names:
+    kind: ForgejoLocalInstance
+    plural: forgejolocalinstances
+    shortNames:
+    - fjli
+    singular: forgejolocalinstance
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.url
+      name: URL
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for ForgejoLocalInstanceSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              Connection to a real Forgejo server (v16 or later), owned by a
+              namespace: its token is that namespace's, and only the objects of this
+              namespace use it unless `sharedWith` says otherwise. What an operator
+              limited to one namespace uses. Objects bound to it are not governed by
+              `ForgejoNamespacePolicy` — the namespace's own token bounds what they
+              can do — and write their secrets as Kubernetes `Secret`s only: the
+              operator's Vault identity is shared by every namespace.
+            properties:
+              sharedWith:
+                description: |-
+                  Other namespaces (or cluster-scoped objects) allowed to use this
+                  instance — and its token. Unset: this namespace only.
+                nullable: true
+                properties:
+                  clusterScoped:
+                    description: Cluster-scoped objects may use this instance.
+                    type: boolean
+                  namespaceSelector:
+                    description: |-
+                      Namespaces whose labels match this selector may use this instance.
+                      An empty selector (`{}`) matches every namespace: the instance —
+                      and the token it holds — is then shared with the whole cluster.
+                    nullable: true
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                        items:
+                          description: A label selector requirement is a selector that contains values, a key, and an operator that relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector applies to.
+                              type: string
+                            operator:
+                              description: operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                  namespaces:
+                    description: Namespaces whose objects may use this instance.
+                    items:
+                      type: string
+                    type: array
+                type: object
+              tls:
+                default:
+                  insecureSkipVerify: false
+                description: |-
+                  TLS verification for the API connection above; the CA `Secret`
+                  lives in this namespace.
+                properties:
+                  caSecretRef:
+                    description: |-
+                      Optional custom CA certificate (a PEM bundle under `key`) to verify
+                      the instance's TLS with, read from a `Secret` of the instance's own
+                      namespace. Added on top of the platform trust store.
+                    nullable: true
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                  insecureSkipVerify:
+                    default: false
+                    description: |-
+                      Skip certificate verification entirely — insecure, intended only for
+                      throwaway/self-signed instances. Prefer `caSecretRef` below.
+                    type: boolean
+                type: object
+              tokenSecretRef:
+                description: |-
+                  Key of a `Secret` of this namespace holding the API token the
+                  operator acts with (a site admin's for user and organization
+                  management). Re-read on every gateway call, so rotating it needs no
+                  restart. The `Secret` must carry the label
+                  `forgejo.weebo.io/instance-token: "true"`: the operator reads it with
+                  its own rights, so only a Secret labelled for that use is ever sent
+                  to the instance's URL.
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                required:
+                - key
+                - name
+                type: object
+              url:
+                description: |-
+                  Base web URL of the Forgejo instance, e.g. `https://git.example.com`
+                  — not the `/api/v1` REST endpoint, which is derived from it. Written
+                  as `FORGEJO_URL` into emitted secrets.
+                type: string
+            required:
+            - tokenSecretRef
+            - url
+            type: object
+          status:
+            nullable: true
+            properties:
+              appliedSecretHash:
+                description: |-
+                  SHA-256 of the write-only inputs last sent to Forgejo (webhook
+                  secret and authorization header), so a changed `Secret` value is
+                  re-applied even though Forgejo never returns it.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              forgejoId:
+                description: |-
+                  The Forgejo-side identifier. Presence means this CR actually
+                  owns/created the corresponding Forgejo object — set once on first
+                  successful create (or seeded by the importer), never inferred by
+                  name-matching. For `managementPolicy: Observe` users it is the id
+                  of the observed user.
+                nullable: true
+                type: string
+              forgejoName:
+                description: |-
+                  Current Forgejo-side name the API addresses the object by (user
+                  login, organization or team name). Kept so a rename in `spec` knows
+                  the old name to rename *from*.
+                nullable: true
+                type: string
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under that name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastRotation:
+                description: |-
+                  Value of the `forgejo.weebo.io/rotate-secret` annotation the last
+                  secret was issued for, so the same nonce never rotates twice. Only
+                  used by kinds that emit a secret (a `rotationPeriod` renewal shows
+                  as a new `forgejoId` instead).
+                nullable: true
+                type: string
+              observedGeneration:
+                format: int64
+                nullable: true
+                type: integer
+              ownerId:
+                description: |-
+                  Forgejo id of the account owning the object (an access token's
+                  user, an OAuth2 application's owner), so a renamed owner isn't
+                  mistaken for a different one.
+                nullable: true
+                type: string
+              passwordEmitted:
+                description: |-
+                  A `ForgejoUser`'s generated password was handed out to its
+                  `secretTargets`: turning it into a bot (or an external account) then
+                  replaces the password, so the one handed out stops working. Never
+                  set on an adopted account: its password isn't the operator's.
+                nullable: true
+                type: boolean
+              secretPending:
+                description: |-
+                  A secret (token, client secret, password) was issued in Forgejo but
+                  not written to every target: the targets may hold a revoked value,
+                  so the next reconcile issues a new one instead of trusting them.
+                nullable: true
+                type: boolean
+            type: object
+        required:
+        - spec
+        title: ForgejoLocalInstance
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

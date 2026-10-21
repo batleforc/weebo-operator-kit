@@ -1642,3 +1642,197 @@ même règle que l'Event (génération pas encore observée), et
 sélecteur). Ajout non cassant pour la métrique ; les opérateurs qui
 choisissent la cause eux-mêmes (`record_write`) l'adoptent un par un, la
 page de métriques d'`@weebo/operator-docs` liste la nouvelle valeur.
+
+### À faire — l'IDE à CRD (décidé le 2026-10-21)
+
+Le formulaire de manifeste (`CrdBuilder`/`CrdForm`) édite une ressource
+d'un kind à la fois. L'IDE à CRD est un outil distinct, à côté : il
+compose un **projet** de ressources liées, d'un ou de plusieurs
+opérateurs, et le montre en formulaire et en graphe. Il reste dans le
+modèle du site : 100 % statique, aucun accès à un cluster.
+
+#### Périmètre
+
+- Trois publics : l'utilisateur qui découvre un opérateur (mode guidé, par
+  recettes), l'admin qui maintient des manifestes GitOps (import, édition,
+  export), le développeur (démo, vérification d'un assemblage).
+- Un seul composant, deux usages : sur le site d'un opérateur, ses CRD ;
+  sur le site du kit (`site/`), les CRD de tous les opérateurs weebo plus
+  un catalogue de CRD tierces (External Secrets, cert-manager…).
+- Validation côté client : schéma structurel (types, requis, enum,
+  pattern, bornes) et résolution des liens (cible absente du projet,
+  mauvais kind, référence inter-namespace sans `sharedWith`). Les règles
+  CEL (`x-kubernetes-validations`) sont affichées, pas évaluées :
+  l'API server le fera.
+- Hors périmètre : l'interconnexion des opérateurs **au runtime** (un CR
+  d'un opérateur consommé par un autre dans le cluster, types de
+  référence inter-opérateurs dans `weebo-kit-api`). Sujet à part, à
+  instruire avant toute ligne de code.
+
+#### Les liens
+
+Le schéma OpenAPI ne dit pas qu'un champ pointe vers un kind. Kubernetes
+refuse les extensions `x-…` arbitraires dans `openAPIV3Schema` : l'info ne
+peut pas rester dans la CRD.
+
+- **Opérateurs weebo** : un marqueur `x-weebo-link` posé sur le champ
+  (`#[schemars(extend(…))]`), par défaut sur les types du kit qui sont des
+  références (`InstanceRef`, `SecretKeyRef`, `LocalSecretKeyRef`) ; pour un
+  `ObjectRef`, l'opérateur ajoute le kind cible sur le champ. La CRD ne
+  le garde pas d'elle-même : `CustomResourceExt::crd()` passe le schéma par
+  `JSONSchemaProps`, qui ignore les clés inconnues (un test du kit le
+  vérifie). `weebo_kit_api::links::of::<K>(&roles)` génère le schéma à
+  nouveau, avec les réglages de kube, et lit les marqueurs ; les rôles
+  `Instance`/`LocalInstance` d'`InstanceRef` deviennent les kinds de
+  l'opérateur. `crdgen` (template) écrit `deploy/crd/links.json`
+  (`{ "version": 1, "kinds": { <Kind>: [{ path, to: [{ group, kind }] }] } }`,
+  chemins triés, `[]` pour les items d'un tableau, `*` pour les valeurs
+  d'une map). `helm:crds` et `weebo-crd-docs` ne lisent que les `*.yaml` :
+  le fichier ne les gêne pas. `weebo-crd-docs` publie `links.json` à
+  côté de `crd-schemas/`. `weebo-kit-api` gagne `serde_json`,
+  déjà une dépendance de schemars.
+- **CRD tierces** : une table `CrdLinks`, donnée de la config de docs (comme
+  `CrdChoices`), jamais dans le paquet.
+- Deux sortes de liens : la **référence** (un champ nomme une ressource du
+  projet : `instanceRef` → une instance) et la **production** (une
+  ressource produit un objet Kubernetes : un `ExternalSecret` produit le
+  Secret de `spec.target.name`, qu'un `SecretKeyRef` consomme). Les objets
+  produits apparaissent comme nœuds dérivés ; un Secret créé hors du
+  projet est un nœud externe déclaré à la main (nom, clés), jamais
+  exporté. La production se déclare dans `CrdLinks`.
+
+#### Sources des schémas
+
+- Site d'un opérateur : ses `crd-schemas/` et son `links.json`.
+- Site du kit : au build, les schémas d'une release taguée de chaque
+  opérateur weebo (liste et tags épinglés dans `site/`), plus un catalogue
+  de CRD tierces à versions épinglées (`site/`, mis à jour comme une
+  dépendance, un test vérifie qu'elles se parsent). Le paquet ne nomme
+  aucun produit.
+- Partout : glisser-déposer d'un CRD YAML, chargé localement.
+- CRD à plusieurs versions : l'IDE propose la version de stockage ; un
+  manifeste d'une autre version servie s'importe en lecture seule, avec un
+  avertissement. Pas de conversion.
+
+#### Données
+
+- **Le projet, c'est le YAML** : pas de format maison. Import d'un YAML
+  multi-documents (les liens sont reconstruits par résolution des
+  références), export en YAML multi-documents trié par dépendances
+  (Secrets et instances d'abord) ou en zip d'un fichier par ressource.
+  Kustomize plus tard.
+- Brouillon dans `localStorage` (lecture et écriture protégées, la page
+  marche sans) ; les positions du graphe sont recalculées par auto-layout.
+- Namespace par défaut du projet, surchargeable par ressource ; les kinds
+  cluster-scoped n'en ont pas.
+- **Recettes** (mode guidé) : un YAML multi-documents avec des trous
+  (`<à remplir>`), importé par le même chemin. Celles d'un opérateur dans
+  sa config de docs ; celles qui croisent les opérateurs dans `site/` du
+  kit.
+
+#### Technique
+
+- Sous-chemin `@weebo/operator-docs/crd-ide`, chargé à la demande
+  (`next/dynamic`) sur sa seule page : les autres pages ne paient pas le
+  graphe. Nouvelle dépendance `@xyflow/react` : release. L'auto-layout est
+  dans le modèle, sans bibliothèque.
+- Un **modèle TS pur**, sans React : graphe, résolution des liens,
+  validation, import/export, recettes, layout. Les vues n'en sont que des
+  projections.
+- Vues : la **liste/arbre** des ressources et de leurs liens est
+  l'interface principale, entièrement au clavier (un lien = choisir une
+  cible dans un select) ; le **graphe** (`@xyflow/react`) est une vue
+  synchronisée ; l'éditeur du nœud sélectionné réutilise `crd-form`
+  (`fields`, `schema-utils`, `buildManifest`, `CrdChoices`), un seul
+  moteur schéma → formulaire.
+- Tests : unitaires sur le modèle pur (aller-retour import/export,
+  résolution, validation, recettes), gate de couverture à 80 % ; revue
+  `accessibilite-check` (RGAA) et `eco-check` sur le diff. Pas d'e2e
+  navigateur en V1.
+
+#### Release
+
+Mineure (0.x) : le template `crdgen` change (chaque opérateur régénère et
+publie `links.json`), le paquet gagne une dépendance et `index.json` des
+champs. Pour les opérateurs, reprendre le `crdgen` du template et ajouter
+`x-weebo-keys` à leurs `secretTargets` ; tant qu'ils ne l'ont pas fait,
+le site du kit liste leurs kinds sans lien.
+
+#### Ordre de réalisation
+
+1. `weebo_kit_api::links` (marqueur, `of`, test anti-fuite) et `crdgen`
+   du template (fait, à publier).
+2. `weebo-crd-docs` publie `links.json` ; `CrdLinks` dans sa config
+   (fait, à publier : chemins vérifiés contre la CRD, `produces` avec
+   `name` en liste de champs, le premier renseigné gagnant, et `keys`).
+3. Le modèle TS pur et ses tests (fait, à publier) :
+   `@weebo/operator-docs/crd-ide/model` (`src/crd-ide/model/`). Catalogue
+   (schémas + `links.json`, plusieurs sites), projet (ressources
+   `editable`/`readOnly`/`unknown`, externes, namespace par défaut), graphe
+   recalculé (nœuds produits, emplacements de référence résolus par kind,
+   nom et namespace), validation (schéma, trous `<…>`, références,
+   `sharedWith`, doublons), import/export YAML dans l'ordre des
+   dépendances, un fichier par ressource, zip. Écarts au plan :
+   - **pas d'`elkjs`/`dagre`** : une colonne par profondeur de dépendance
+     suffit à un graphe de quelques dizaines de nœuds, sans dépendance ;
+   - **zip « stored » écrit à la main** (CRC32, ~80 lignes) : des
+     manifestes de quelques Ko ne justifient pas une lib de deflate ;
+   - `weebo-crd-docs` publie la **version de stockage** (et non
+     `versions[0]`) et la liste `served` des versions servies (Q19) ;
+   - raccourci : le `kind` d'un `InstanceRef` (`Instance`/`LocalInstance`)
+     ne restreint pas la cible, la résolution accepte tous les kinds du
+     lien ;
+   - tests : `node --test` sur les sources TS (types retirés par Node 24,
+     `test/ts-resolve.mjs` pour les imports sans extension), gate de
+     couverture à 80 % sur `src/crd-ide/**` dans `npm run check`.
+4. Les vues : liste, éditeur (`crd-form`), graphe (fait, à publier).
+   `<CrdIde />` dans `docsMdxComponents(choices, { recipes, sources })`,
+   derrière `LazyCrdIde` (`next/dynamic`, `ssr: false`) : le code de l'IDE
+   ne charge que sur sa page, `GraphView` (et `@xyflow/react` 12.12) est un
+   second import dynamique, chargé au passage en vue graphe. Colonnes en
+   container query (la largeur de la colonne de doc, pas de la fenêtre).
+   Vérifié dans un build du site (copie jetable sous `target/`) piloté par
+   Playwright : recette, liens, graphe, zip, brouillon rechargé, pas de
+   défilement horizontal à 390 px. Corrigé au passage dans `crd-form` :
+   un `kind` à enum n'est une union discriminée que si une de ses valeurs
+   est un champ frère — `InstanceRef` en était une pour `CrdForm`, qui
+   retirait `instanceRef` du manifeste. Revues `accessibilite-check` et
+   `eco-check` appliquées : la liste reste affichée en vue graphe, focus
+   déplacé après une suppression et vers l'éditeur depuis un problème,
+   nom de la ressource dans chaque select de lien ; YAML mémoïsé et
+   coloration différée, brouillon écrit 500 ms après la dernière frappe
+   (et à `pagehide`), layout recalculé au seul changement du graphe. Les
+   recettes passent en prop de `<CrdIde recipes={…} />` dans la page : dans
+   `docsMdxComponents`, leur YAML partirait avec chaque page.
+5. Le site du kit : agrégation au build, catalogue tiers, recettes
+   croisées (fait, à publier). Décidé le 2026-10-21 en cours de route :
+   - **Q23 — schémas chargés à la demande** : `index.json` porte
+     l'`apiVersion` de stockage et les versions servies ; le catalogue de
+     l'IDE ne charge au départ que les index et les `links.json` (14
+     fichiers sur le site du kit), le schéma d'un kind arrive avec sa
+     première ressource (`withSchemas`, `missingSchemas`). Sans schéma, une
+     spec n'est ni vérifiée ni élaguée. Les schémas des stores ESO et des
+     issuers cert-manager pèsent 255 à 393 Ko chacun, 1,36 Mo pour six
+     kinds.
+   - **Q24 — les Secrets produits par les opérateurs** : `SecretTarget`
+     porte `x-weebo-produces` (un Secret par cible, aucun pour une cible
+     `vault`), un champ déclare les clés écrites avec `x-weebo-keys`
+     (`#[schemars(extend("x-weebo-keys" = ["token"]))]`). `links::of`
+     renvoie `{ references, produces }`, le `links.json` de `crdgen` a la
+     forme publiée. Une production a `each`, `namespace`, `keyNames`,
+     `unless`. À faire dans chaque opérateur : `x-weebo-keys` sur ses
+     `secretTargets` (sans, les clés de ses Secrets sont inconnues et
+     `missing-key` ne vérifie rien).
+   - **Q25 — opérateurs sans `links.json`** : leurs kinds sont listés sans
+     lien jusqu'à leur release sur ce kit.
+   - **Q26 — catalogue commité** : `site/crd-catalog.config.mjs` (les 5
+     opérateurs à leur tag, ESO v2.12.0 : ExternalSecret, SecretStore,
+     ClusterSecretStore ; cert-manager v1.21.2 : Certificate, Issuer,
+     ClusterIssuer, avec leurs `CrdLinks`), `task site:catalog` (réseau)
+     écrit `site/crd-catalog/`, `scripts/crd-schemas.mjs` (`predev`/
+     `prebuild`, hors ligne) génère `public/crd-schemas/<nom>/` avec
+     `weebo-crd-docs` en mode `pages: false`.
+   - Page `/docs/ide` et deux recettes croisées (`site/src/lib/recipes.ts`) :
+     Forgejo avec son token depuis ESO et sa CA depuis cert-manager ; Angos
+     avec la connexion à l'UI par une application Authentik. Vérifiées dans
+     le navigateur : seuls les trous restent signalés.

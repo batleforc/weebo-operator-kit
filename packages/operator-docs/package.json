@@ -17,6 +17,8 @@
   },
   "exports": {
     "./crd-form": "./src/crd-form/index.ts",
+    "./crd-ide": "./src/crd-ide/index.ts",
+    "./crd-ide/model": "./src/crd-ide/model/index.ts",
     "./site": "./src/site/index.ts",
     "./config": "./src/site/config.ts",
     "./routes": "./src/site/routes.tsx",
@@ -34,10 +36,11 @@
     "README.md"
   ],
   "scripts": {
-    "check": "tsc --noEmit && node --test 'test/*.test.mjs'",
+    "check": "tsc --noEmit && node --import ./test/ts-resolve.mjs --test --experimental-test-coverage --test-coverage-include='src/crd-ide/**' --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 'test/*.test.mjs'",
     "lint": "eslint"
   },
   "dependencies": {
+    "@xyflow/react": "^12.12.0",
     "js-yaml": "^5.2.1"
   },
   "peerDependencies": {

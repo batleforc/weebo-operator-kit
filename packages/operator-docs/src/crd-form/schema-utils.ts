@@ -8,9 +8,15 @@ export const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 // enum-typed `kind` property plus sibling properties named after each enum
 // value (kube-core can't emit a real discriminated union). A variant with no
 // sibling property is a schema-only stub: accepted here, rejected by the
-// operator's reconciler.
+// operator's reconciler. An enum `kind` with no variant as a sibling is a
+// plain field (an `instanceRef`'s `Instance`/`LocalInstance`), not a union.
 export function isDiscriminatedUnion(schema: FieldSchema): boolean {
-  return schema.type === "object" && Array.isArray(schema.properties?.kind?.enum);
+  const properties = schema.properties ?? {};
+  return (
+    schema.type === "object" &&
+    Array.isArray(properties.kind?.enum) &&
+    properties.kind.enum.some((variant) => variant !== "kind" && variant in properties)
+  );
 }
 
 export function discriminatedVariants(schema: FieldSchema): string[] {

@@ -6,7 +6,10 @@
 //   - <contentDir>/index.mdx + meta.json — the section's table of kinds and
 //     its sidebar order;
 //   - <schemaDir>/<singular>.schema.json — the spec schema the form fetches,
-//     and <schemaDir>/index.json — the kind list `<CrdBuilder />` offers.
+//     and <schemaDir>/index.json — the kind list `<CrdBuilder />` offers;
+//   - <schemaDir>/links.json — which fields reference another object and
+//     which objects a kind produces, for the CRD IDE: the crdgen's
+//     <crdDir>/links.json, merged with the config's `links`.
 // Both output directories are owned by the generator: their previous
 // .mdx/.json files are removed first, so a deleted CRD leaves no page behind.
 //
@@ -44,9 +47,44 @@ import { generateReference } from "../reference/generate.mjs";
  *   in, not the alphabet. Kinds not listed come last, alphabetically.
  * @property {string} [indexIntro] The paragraph above the index table
  *   (Markdown). Default: a generic one.
+ * @property {boolean} [pages] `false`: only the schemas, index.json and
+ *   links.json (a catalog of another tool's CRDs, for the CRD IDE): no page,
+ *   no example needed. Default `true`.
+ * @property {CrdLinks} [links] Reference fields and produced objects the
+ *   crdgen's `links.json` does not declare (a CRD written by another tool,
+ *   an object the kind makes). Every path is checked against the CRD.
  * @property {import("../reference/generate.mjs").ReferenceConfig} [reference]
  *   When set, also generates the operator reference pages (reason codes,
  *   Events, metrics & health, resource budget) from the operator's sources.
+ */
+
+/**
+ * A Kubernetes kind; `group` absent or `""` is the core group.
+ * @typedef {{ group?: string, kind: string }} GroupKind
+ */
+
+/**
+ * A field naming another object (`spec.instanceRef`). Paths are dotted from
+ * the object's root; `[]` steps into an array's items, `*` into a map's
+ * values.
+ * @typedef {{ path: string, to: GroupKind[] }} Reference
+ */
+
+/**
+ * Objects a resource of this kind makes, such as the Secret an external
+ * secret writes: their kind, one per value `each` reaches (default: one, the
+ * resource itself), the fields that name it (the first one set wins,
+ * `metadata.name` as a last resort), its namespace's field (default: the
+ * resource's), and its keys: a field listing them (`keys`) or a fixed list
+ * (`keyNames`). `unless` skips an item whose field holds a value. Paths
+ * other than `each` are relative to each item.
+ * @typedef {{ kind: GroupKind, each?: string, name: string[], namespace?: string, keys?: string, keyNames?: string[], unless?: { path: string, equals: string } }} Production
+ */
+
+/**
+ * Per kind, what `weebo_kit_api::links` cannot say: references of a CRD
+ * written by another tool, and the objects the kind produces.
+ * @typedef {Record<string, { references?: Reference[], produces?: Production[] }>} CrdLinks
  */
 
 /** Identity, for editor completion in the operator's config file. */
@@ -340,6 +378,107 @@ function checkExample(kind, example, specSchema) {
   }
 }
 
+const METADATA_PATHS = new Set(["metadata.name", "metadata.namespace"]);
+
+// Whether `fieldPath` (`spec.a[].b`, `spec.m.*`) is a field of `schema`, the
+// CRD's openAPIV3Schema. `metadata` is not in a generated schema: its name
+// and namespace are always there.
+function hasPath(schema, fieldPath) {
+  if (METADATA_PATHS.has(fieldPath)) return true;
+  let nodes = [schema];
+  for (const segment of fieldPath.split(".")) {
+    const [, name, arrays] = /^([^[\]]+)((?:\[\])*)$/.exec(segment) ?? [];
+    if (!name) return false;
+    nodes = nodes
+      .flatMap(variants)
+      .map((n) => (name === "*" ? (typeof n.additionalProperties === "object" ? n.additionalProperties : undefined) : n.properties?.[name]))
+      .filter(Boolean);
+    for (let i = 0; i < arrays.length / 2; i++) nodes = nodes.flatMap(variants).map((n) => n.items).filter(Boolean);
+    if (!nodes.length) return false;
+  }
+  return true;
+}
+
+// A node and the variants of its `allOf`/`anyOf`/`oneOf`, recursively.
+const variants = (node) => [node, ...["allOf", "anyOf", "oneOf"].flatMap((k) => (node[k] ?? []).flatMap(variants))];
+
+function checkGroupKind(where, gk) {
+  if (typeof gk?.kind !== "string" || !/^[A-Za-z][A-Za-z0-9]*$/.test(gk.kind) || (gk.group !== undefined && typeof gk.group !== "string")) {
+    throw new Error(`${where}: invalid kind ${JSON.stringify(gk)}`);
+  }
+  return { group: gk.group ?? "", kind: gk.kind };
+}
+
+/**
+ * The published links: the crdgen's `links.json` (`{ version: 1, kinds:
+ * { <Kind>: { references, produces } } }`, absent for an operator whose
+ * crdgen predates it), plus the config's `links`. Every kind must be one of
+ * the CRDs, every path one of its fields, and a reference is declared once.
+ *
+ * @param {Map<string, object>} schemas openAPIV3Schema per kind
+ * @param {unknown} generated the parsed crdgen file, or undefined
+ * @param {CrdLinks} configured
+ */
+export function buildLinks(schemas, generated, configured) {
+  const kinds = {};
+  const entry = (where, kind) => {
+    if (!schemas.has(kind)) throw new Error(`${where}: ${kind} is not one of the CRDs`);
+    return (kinds[kind] ??= { references: [], produces: [] });
+  };
+  const checkPath = (where, kind, fieldPath) => {
+    if (typeof fieldPath !== "string" || !hasPath(schemas.get(kind), fieldPath)) {
+      throw new Error(`${where}: ${kind} has no field ${JSON.stringify(fieldPath)}`);
+    }
+  };
+  const addReference = (where, kind, ref) => {
+    const links = entry(where, kind);
+    checkPath(where, kind, ref?.path);
+    if (links.references.some((r) => r.path === ref.path)) throw new Error(`${where}: ${kind} ${ref.path} is already a reference`);
+    if (!Array.isArray(ref.to) || !ref.to.length) throw new Error(`${where}: ${kind} ${ref.path} references no kind`);
+    links.references.push({ path: ref.path, to: ref.to.map((gk) => checkGroupKind(`${where}: ${kind} ${ref.path}`, gk)) });
+  };
+  const addProduction = (where, kind, p) => {
+    const links = entry(where, kind);
+    if (!Array.isArray(p?.name) || !p.name.length) throw new Error(`${where}: ${kind} produces an object with no name field`);
+    if (p.each !== undefined) checkPath(where, kind, p.each);
+    const within = (rel) => (p.each ? `${p.each}.${rel}` : rel);
+    const relative = [...p.name, p.namespace, p.keys, p.unless?.path].filter((v) => v !== undefined);
+    for (const rel of relative) checkPath(where, kind, typeof rel === "string" ? within(rel) : rel);
+    if (p.keyNames !== undefined && !(Array.isArray(p.keyNames) && p.keyNames.every((k) => typeof k === "string"))) {
+      throw new Error(`${where}: ${kind} keyNames is not a list of names`);
+    }
+    if (p.unless !== undefined && typeof p.unless.equals !== "string") throw new Error(`${where}: ${kind} unless.equals is not a string`);
+    links.produces.push({
+      kind: checkGroupKind(`${where}: ${kind}`, p.kind),
+      ...(p.each !== undefined ? { each: p.each } : {}),
+      name: p.name,
+      ...(p.namespace !== undefined ? { namespace: p.namespace } : {}),
+      ...(p.keys !== undefined ? { keys: p.keys } : {}),
+      ...(p.keyNames?.length ? { keyNames: p.keyNames } : {}),
+      ...(p.unless !== undefined ? { unless: { path: p.unless.path, equals: p.unless.equals } } : {}),
+    });
+  };
+
+  if (generated !== undefined) {
+    const where = "links.json";
+    if (generated?.version !== 1 || typeof generated.kinds !== "object") {
+      throw new Error(`${where}: expected { version: 1, kinds }, rerun the crdgen`);
+    }
+    for (const [kind, { references = [], produces = [] }] of Object.entries(generated.kinds)) {
+      entry(`${where} (stale? rerun the crdgen)`, kind);
+      for (const ref of references) addReference(where, kind, ref);
+      for (const p of produces) addProduction(where, kind, p);
+    }
+  }
+  for (const [kind, { references = [], produces = [] }] of Object.entries(configured)) {
+    const where = "config links";
+    for (const ref of references) addReference(where, kind, ref);
+    for (const p of produces) addProduction(where, kind, p);
+  }
+  for (const links of Object.values(kinds)) links.references.sort((a, b) => a.path.localeCompare(b.path));
+  return { version: 1, kinds: Object.fromEntries(Object.entries(kinds).sort(([a], [b]) => a.localeCompare(b))) };
+}
+
 const scopeLabel = (scope) => (scope === "Namespaced" ? "Namespaced" : "Cluster");
 const codeList = (names, options) => names.map((n) => codeSpan(n, options)).join(", ");
 
@@ -367,6 +506,7 @@ export function generateCrdDocs(config, { root }) {
   const guides = config.guides ?? {};
   const examples = config.examples ?? {};
   const order = config.order ?? [];
+  const pages = config.pages ?? true;
 
   // Written only once every page is built: a refused CRD leaves the previous
   // pages in place, not half of a new set.
@@ -380,6 +520,7 @@ export function generateCrdDocs(config, { root }) {
     .sort();
   const index = [];
   const groups = new Set();
+  const schemas = new Map();
 
   for (const file of files) {
     const crd = yaml.load(fs.readFileSync(path.join(crdDir, file), "utf8"));
@@ -391,19 +532,34 @@ export function generateCrdDocs(config, { root }) {
     if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(singular)) {
       throw new Error(`${file}: invalid singular ${JSON.stringify(singular)}`);
     }
-    const version = crd.spec.versions[0];
+    // The storage version: the one the IDE and the form write. The other
+    // served ones are listed, so a manifest written in one of them is
+    // recognised.
+    const version = crd.spec.versions.find((v) => v.storage) ?? crd.spec.versions[0];
+    const served = crd.spec.versions.filter((v) => v.served !== false).map((v) => v.name);
     const specSchema = version.schema.openAPIV3Schema.properties.spec;
+    schemas.set(kind, version.schema.openAPIV3Schema);
     const apiVersion = `${crd.spec.group}/${version.name}`;
     const scope = crd.spec.scope;
     groups.add(crd.spec.group);
 
     const description = (specSchema.description ?? `${kind} spec.`).trim();
     const summary = shortDescription(description);
+    const shortNames = crd.spec.names.shortNames ?? [];
+    index.push({ kind, singular, scope, shortNames, summary, apiVersion, served });
+
+    // apiVersion/kind/scope/served aren't JSON Schema keywords — added here
+    // purely for the client-side form (CrdForm) and IDE to assemble a full
+    // manifest (apiVersion + kind + metadata.namespace-or-not) without a
+    // second fetch. Consumers that want strict JSON Schema should ignore them.
+    const cleanSchema = { apiVersion, kind, scope, served, ...stripK8sExtensions(specSchema) };
+    writes.push([path.join(schemaOutDir, `${singular}.schema.json`), `${JSON.stringify(cleanSchema, null, 2)}\n`]);
+    if (!pages) continue;
+
     const ctx = { kind, anchors: new Map(), undescribed: 0 };
     const fields = renderObject(specSchema, "spec", ctx);
     const sections = renderSections(specSchema, "spec", ctx);
     if (ctx.undescribed) console.warn(`${kind}: ${ctx.undescribed} field${ctx.undescribed === 1 ? "" : "s"} without a description`);
-    const shortNames = crd.spec.names.shortNames ?? [];
     const [guideTitle, guideHref] = guides[kind] ?? [];
 
     checkExample(kind, examples[kind], specSchema);
@@ -429,15 +585,6 @@ export function generateCrdDocs(config, { root }) {
       .trim();
     const mdx = `---\n${frontmatter}\n---\n\n${facts}\n\n${mdxText(description)}\n\n## Example\n\n\`\`\`yaml\n${example}\n\`\`\`\n\n## Spec fields\n\n${[fields, ...sections].join("\n\n")}\n\n## Build a manifest\n\nAnswer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and \`kubectl apply\`.\n\n<CrdForm kind="${kind}" />\n`;
     writes.push([path.join(mdxOutDir, `${singular}.mdx`), mdx]);
-
-    // apiVersion/kind/scope aren't JSON Schema keywords — added here purely
-    // for the client-side form (CrdForm) to assemble a full manifest
-    // (apiVersion + kind + metadata.namespace-or-not) without a second
-    // fetch. Consumers that want strict JSON Schema should ignore them.
-    const cleanSchema = { apiVersion, kind, scope, ...stripK8sExtensions(specSchema) };
-    writes.push([path.join(schemaOutDir, `${singular}.schema.json`), `${JSON.stringify(cleanSchema, null, 2)}\n`]);
-
-    index.push({ kind, singular, scope, shortNames, summary });
   }
 
   const rank = (kind) => (order.includes(kind) ? order.indexOf(kind) : order.length);
@@ -466,17 +613,29 @@ ${(config.indexIntro ?? DEFAULT_INTRO).trim()}
 ${header}
 ${rows.map((r) => `| ${r} |`).join("\n")}
 `;
-  writes.push([path.join(mdxOutDir, "index.mdx"), indexMdx]);
-  writes.push([
-    path.join(mdxOutDir, "meta.json"),
-    `${JSON.stringify({ title: "CRD reference", pages: ["index", ...index.map((k) => k.singular)] }, null, 2)}\n`,
-  ]);
-  // The kind picker of `<CrdBuilder />` reads this: every CRD, without a
-  // second data source to keep in sync.
+  if (pages) {
+    writes.push([path.join(mdxOutDir, "index.mdx"), indexMdx]);
+    writes.push([
+      path.join(mdxOutDir, "meta.json"),
+      `${JSON.stringify({ title: "CRD reference", pages: ["index", ...index.map((k) => k.singular)] }, null, 2)}\n`,
+    ]);
+  }
+  // The kind picker of `<CrdBuilder />` and the IDE's catalog read this:
+  // every CRD, without a second data source to keep in sync. The IDE loads a
+  // kind's schema only once a resource of that kind needs it.
   writes.push([
     path.join(schemaOutDir, "index.json"),
-    `${JSON.stringify(index.map(({ kind, singular, scope }) => ({ kind, singular, scope })), null, 2)}\n`,
+    `${JSON.stringify(
+      index.map(({ kind, singular, scope, apiVersion, served }) => ({ kind, singular, scope, apiVersion, served })),
+      null,
+      2,
+    )}\n`,
   ]);
+
+  const linksFile = path.join(crdDir, "links.json");
+  const generatedLinks = fs.existsSync(linksFile) ? JSON.parse(fs.readFileSync(linksFile, "utf8")) : undefined;
+  const links = buildLinks(schemas, generatedLinks, config.links ?? {});
+  writes.push([path.join(schemaOutDir, "links.json"), `${JSON.stringify(links, null, 2)}\n`]);
 
   if (config.reference) {
     if (groups.size > 1) throw new Error(`the CRDs span ${groups.size} API groups, the reference needs one`);
@@ -492,9 +651,11 @@ ${rows.map((r) => `| ${r} |`).join("\n")}
   // With no CRD and a reference group, the component has no CRD section:
   // nothing is written there.
   if (files.length || !group) {
-    fs.mkdirSync(mdxOutDir, { recursive: true });
     fs.mkdirSync(schemaOutDir, { recursive: true });
-    clean(mdxOutDir, [".mdx", "meta.json"]);
+    if (pages) {
+      fs.mkdirSync(mdxOutDir, { recursive: true });
+      clean(mdxOutDir, [".mdx", "meta.json"]);
+    }
     clean(schemaOutDir, [".json"]);
     for (const [file, content] of writes) fs.writeFileSync(file, content);
   }

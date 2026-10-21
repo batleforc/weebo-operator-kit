@@ -1,0 +1,19 @@
+---
+title: CRD IDE
+description: Compose the manifests of several weebo operators, and of the tools they work with, linked to each other.
+full: true
+---
+
+import { RECIPES } from '@/lib/recipes';
+
+Every kind of every weebo operator, plus External Secrets and cert-manager,
+in one project: add resources, point each reference field at another
+resource (or at the Secret one of them makes), and export the whole set as
+YAML. Start from a recipe to see how the operators fit together. The list
+of kinds, and the versions they come from, is
+[`site/crd-catalog.config.mjs`](https://github.com/batleforc/weebo-operator-kit/blob/main/site/crd-catalog.config.mjs).
+
+An operator's references show once it is released on a kit with
+`links.json` (v0.23 on); until then its kinds are listed without them.
+
+<CrdIde recipes={RECIPES} />

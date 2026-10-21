@@ -15,12 +15,21 @@ export interface FieldSchema {
   properties?: Record<string, FieldSchema>;
   required?: string[];
   additionalProperties?: FieldSchema | boolean;
+  pattern?: string;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
 }
 
 export interface CrdSchema extends FieldSchema {
   apiVersion: string;
   kind: string;
   scope: "Namespaced" | "Cluster";
+  /** Every served version; `apiVersion` is the storage one. */
+  served?: string[];
 }
 
 /** One entry of crd-schemas/index.json, the kind list `CrdBuilder` offers. */
@@ -28,6 +37,9 @@ export interface CrdIndexEntry {
   kind: string;
   singular: string;
   scope: "Namespaced" | "Cluster";
+  /** The storage version's; absent from a site generated before the IDE. */
+  apiVersion?: string;
+  served?: string[];
 }
 
 // Fetched JSON is checked at the boundary on its top-level shape; the nested
@@ -45,6 +57,14 @@ export function isCrdSchema(v: unknown): v is CrdSchema {
 export function isCrdIndex(v: unknown): v is CrdIndexEntry[] {
   return (
     Array.isArray(v) &&
-    v.every((e) => isRecord(e) && typeof e.kind === "string" && typeof e.singular === "string" && isScope(e.scope))
+    v.every(
+      (e) =>
+        isRecord(e) &&
+        typeof e.kind === "string" &&
+        typeof e.singular === "string" &&
+        isScope(e.scope) &&
+        (e.apiVersion === undefined || typeof e.apiVersion === "string") &&
+        (e.served === undefined || (Array.isArray(e.served) && e.served.every((s) => typeof s === "string"))),
+    )
   );
 }

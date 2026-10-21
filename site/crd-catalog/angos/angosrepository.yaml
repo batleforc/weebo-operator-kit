@@ -1,0 +1,413 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: angosrepositories.angos.weebo.io
+spec:
+  group: angos.weebo.io
+  names:
+    kind: AngosRepository
+    plural: angosrepositories
+    shortNames:
+    - arepo
+    singular: angosrepository
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.instance.name
+      name: Instance
+      type: string
+    - jsonPath: .spec.prefix
+      name: Prefix
+      type: string
+    - jsonPath: .spec.upstreams[0].url
+      name: Upstream
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for AngosRepositorySpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A repository of an Angos instance: the namespaces under its `prefix`,
+              who may pull, browse, push and delete there, where it caches from and
+              replicates to. Rendered into the instance's configuration by the
+              instance; `Ready` once every pod of the instance runs it.
+            properties:
+              access:
+                default:
+                  browse: []
+                  delete: []
+                  pull: []
+                  push: []
+                description: Who may do what (`access_policy`).
+                properties:
+                  browse:
+                    default: []
+                    description: Who may list revisions and uploads.
+                    items:
+                      type: string
+                    type: array
+                  delete:
+                    default: []
+                    description: Who may delete manifests and blobs.
+                    items:
+                      type: string
+                    type: array
+                  pull:
+                    default: []
+                    description: Who may pull (manifests, blobs, referrers, tags).
+                    items:
+                      type: string
+                    type: array
+                  push:
+                    default: []
+                    description: Who may push.
+                    items:
+                      type: string
+                    type: array
+                  rules:
+                    description: 'More CEL rules (`request`, `identity`): a matching one allows.'
+                    items:
+                      type: string
+                    type: array
+                type: object
+              authorizationWebhook:
+                description: |-
+                  An authorization webhook of the instance
+                  (`spec.auth.webhooks[].name`) asked for this repository's requests
+                  instead of the default one. Unset: the instance's default (Angos
+                  has no way to turn it off for one repository).
+                minLength: 1
+                nullable: true
+                type: string
+              downstreams:
+                description: Registries it replicates to (`[[downstream]]`).
+                items:
+                  properties:
+                    credentialsSecretRef:
+                      nullable: true
+                      properties:
+                        name:
+                          type: string
+                        passwordKey:
+                          default: password
+                          type: string
+                        usernameKey:
+                          default: username
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxConcurrentPushes:
+                      format: uint64
+                      minimum: 1.0
+                      nullable: true
+                      type: integer
+                    mode:
+                      description: '`EventAndReconcile` (default), `EventOnly` or `ReconcileOnly`.'
+                      enum:
+                      - EventAndReconcile
+                      - EventOnly
+                      - ReconcileOnly
+                      - null
+                      nullable: true
+                      type: string
+                    name:
+                      description: |-
+                        Unique in the repository: the replication's job key and metrics
+                        label.
+                      minLength: 1
+                      type: string
+                    namespaceFilter:
+                      description: 'Regexes of the namespaces replicated; empty: all.'
+                      items:
+                        type: string
+                      type: array
+                    prune:
+                      default: false
+                      description: |-
+                        Propagate deletions to the downstream: it needs the annotation
+                        `angos.weebo.io/allow-data-deletion: "true"` on the repository.
+                      type: boolean
+                    url:
+                      pattern: ^https?://
+                      type: string
+                  required:
+                  - name
+                  - url
+                  type: object
+                type: array
+              eventWebhooks:
+                description: |-
+                  Event webhooks of the instance (`spec.eventWebhooks[].name`) told of
+                  this repository; not empty, it **replaces** the instance's default
+                  ones.
+                items:
+                  type: string
+                type: array
+              immutableTags:
+                description: '`immutable_tags` (OR with the instance''s).'
+                nullable: true
+                type: boolean
+              immutableTagsExclusions:
+                description: |-
+                  `immutable_tags_exclusions`: regexes. Not empty, it **replaces** the
+                  instance's list.
+                items:
+                  type: string
+                type: array
+              index:
+                description: |-
+                  `index` policy: `default` (`index` or `skip`) and CEL rules on
+                  `image`; unset, the instance's.
+                nullable: true
+                properties:
+                  default:
+                    description: |-
+                      What applies when no rule matches; a matching rule does the
+                      opposite.
+                    enum:
+                    - Index
+                    - Skip
+                    - null
+                    nullable: true
+                    type: string
+                  rules:
+                    items:
+                      type: string
+                    type: array
+                type: object
+              instanceRef:
+                description: |-
+                  The instance serving it: unset, the only one of this namespace. An
+                  instance of another namespace must accept this one
+                  (`repositorySelector.namespaces`).
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              mirrorOf:
+                description: |-
+                  `namespace`: the `?ns=` value it answers to as a mirror (Docker's
+                  mirror requests name the upstream registry).
+                nullable: true
+                type: string
+              prefix:
+                description: |-
+                  The namespaces it covers: `<prefix>` and `<prefix>/…` (an OCI
+                  namespace: lowercase segments, no quote). **Immutable**: changing it
+                  would move the data out of the repository (delete and recreate).
+                maxLength: 255
+                pattern: ^[a-z0-9]+(?:(?:__|[._]|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:__|[._]|-+)[a-z0-9]+)*)*$
+                type: string
+                x-kubernetes-validations:
+                - message: 'prefix is immutable: delete the repository and create another'
+                  rule: self == oldSelf
+              retention:
+                description: |-
+                  `retention_policy`: CEL rules on `image`; a matching one keeps the
+                  image (OR with the instance's), `angos prune` deletes the others.
+                nullable: true
+                properties:
+                  rules:
+                    default: []
+                    items:
+                      type: string
+                    type: array
+                type: object
+              scan:
+                description: |-
+                  `scan` policy, replacing the instance's: needs the instance's
+                  `spec.scan`.
+                nullable: true
+                properties:
+                  default:
+                    description: |-
+                      What applies when no rule matches; a matching rule does the
+                      opposite.
+                    enum:
+                    - Scan
+                    - Skip
+                    - null
+                    nullable: true
+                    type: string
+                  rules:
+                    items:
+                      type: string
+                    type: array
+                type: object
+                x-kubernetes-validations:
+                - message: a scan policy sets a default or rules
+                  rule: has(self.default) || size(self.rules) > 0
+              upstreams:
+                default: []
+                description: |-
+                  Registries it caches from, tried in order (`[[upstream]]`): a
+                  pull-through cache, which refuses every push.
+                items:
+                  properties:
+                    connectTimeoutSecs:
+                      description: 'Angos: 30.'
+                      format: uint64
+                      minimum: 0.0
+                      nullable: true
+                      type: integer
+                    credentialsSecretRef:
+                      description: |-
+                        Basic credentials (`username`, `password` keys), in a Secret of
+                        this namespace labelled `angos.weebo.io/credential: "true"`.
+                      nullable: true
+                      properties:
+                        name:
+                          type: string
+                        passwordKey:
+                          default: password
+                          type: string
+                        usernameKey:
+                          default: username
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxRedirect:
+                      description: 'Angos: 5.'
+                      format: uint8
+                      maximum: 255.0
+                      minimum: 0.0
+                      nullable: true
+                      type: integer
+                    readTimeoutSecs:
+                      description: 'Angos: 300.'
+                      format: uint64
+                      minimum: 0.0
+                      nullable: true
+                      type: integer
+                    url:
+                      description: |-
+                        The registry, e.g. `https://registry-1.docker.io`; a path is the
+                        upstream namespace prefix.
+                      pattern: ^https?://
+                      type: string
+                  required:
+                  - url
+                  type: object
+                type: array
+            required:
+            - prefix
+            type: object
+            x-kubernetes-validations:
+            - message: 'a pull-through repository (upstreams) refuses every push: access.push and access.delete must be empty'
+              rule: size(self.upstreams) == 0 || (size(self.access.push) == 0 && size(self.access.delete) == 0)
+          status:
+            description: The status of a repository.
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: |-
+                  `Ready` and the advisories, carrying one of the operator's reason
+                  codes.
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              conflictWith:
+                description: The repository that holds its prefix instead (`namespace/name`).
+                nullable: true
+                type: string
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under the same name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              rendered:
+                default: false
+                description: The repository is in the instance's configuration.
+                type: boolean
+            type: object
+        required:
+        - spec
+        title: AngosRepository
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

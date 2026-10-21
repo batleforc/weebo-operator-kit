@@ -1,0 +1,2050 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: angoslocalinstances.angos.weebo.io
+spec:
+  group: angos.weebo.io
+  names:
+    kind: AngosLocalInstance
+    plural: angoslocalinstances
+    shortNames:
+    - ali
+    singular: angoslocalinstance
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.endpoint
+      name: Endpoint
+      type: string
+    - jsonPath: .status.version
+      name: Version
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for AngosLocalInstanceSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              An Angos registry the operator runs in this namespace: its
+              `Deployment`, its configuration (rendered from this spec, its
+              repositories and identities) and the objects around them. `Ready` tells
+              whether its pods run the desired configuration.
+            properties:
+              affinity:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              auth:
+                default: {}
+                description: '`[auth]`: who may authenticate.'
+                properties:
+                  kubernetes:
+                    description: |-
+                      The cluster's ServiceAccount tokens as an OIDC provider (workloads
+                      pull with a projected token).
+                    nullable: true
+                    properties:
+                      audience:
+                        description: The audience workload tokens must be issued for.
+                        type: string
+                      issuer:
+                        description: |-
+                          The cluster's ServiceAccount issuer. Unset: read once by the
+                          operator from the API server's discovery (required when the
+                          operator is limited to one namespace).
+                        nullable: true
+                        type: string
+                      jwksUri:
+                        description: |-
+                          Default: `https://kubernetes.default.svc/openid/v1/jwks`, read with
+                          the instance's own account token. That account must be bound to
+                          `system:service-account-issuer-discovery` (not done by the
+                          operator).
+                        nullable: true
+                        type: string
+                      name:
+                        default: kube
+                        description: |-
+                          The provider's name in `auth.oidc` and in access rules
+                          (`namespace:` and `serviceaccount:` subjects).
+                        pattern: ^[A-Za-z0-9_-]+$
+                        type: string
+                    required:
+                    - audience
+                    type: object
+                  oidc:
+                    description: '`[auth.oidc.<name>]`: OIDC providers whose tokens Angos accepts.'
+                    items:
+                      properties:
+                        allowedAlgorithms:
+                          description: '`allowed_algorithms`. Angos: `RS256`.'
+                          items:
+                            type: string
+                          type: array
+                        audience:
+                          description: '`required_audience`: the audience a token must carry.'
+                          nullable: true
+                          type: string
+                        audienceFrom:
+                          description: A key of a `Secret` in the referencing CR's own namespace.
+                          nullable: true
+                          properties:
+                            key:
+                              type: string
+                            name:
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        clockSkewTolerance:
+                          format: uint64
+                          minimum: 0.0
+                          nullable: true
+                          type: integer
+                        httpRequestTimeoutSecs:
+                          format: uint64
+                          minimum: 0.0
+                          nullable: true
+                          type: integer
+                        issuer:
+                          description: |-
+                            The issuer, compared **exactly** with the one the provider
+                            advertises (trailing slash included).
+                          nullable: true
+                          type: string
+                        issuerFrom:
+                          description: |-
+                            The issuer from a Secret of the namespace (e.g. the `AUTHENTIK_URL`
+                            a weebo-authentik application writes), labelled
+                            `angos.weebo.io/credential: "true"`.
+                          nullable: true
+                          properties:
+                            key:
+                              type: string
+                            name:
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        jwksRefreshInterval:
+                          format: uint64
+                          minimum: 0.0
+                          nullable: true
+                          type: integer
+                        jwksRefreshTimeoutSecs:
+                          format: uint64
+                          minimum: 0.0
+                          nullable: true
+                          type: integer
+                        jwksUri:
+                          description: '`jwks_uri`: unset, discovered from the issuer.'
+                          nullable: true
+                          type: string
+                        name:
+                          description: |-
+                            The provider's key: `identity.oidc.provider_name` in access rules,
+                            and never an identity's username.
+                          pattern: ^[A-Za-z0-9_-]+$
+                          type: string
+                        requiredClaims:
+                          description: '`required_claims`: claims a token must carry (non-null).'
+                          items:
+                            type: string
+                          type: array
+                        tls:
+                          description: |-
+                            The CA the provider's certificate is checked with (beside the
+                            public roots), and a client certificate.
+                          nullable: true
+                          properties:
+                            ca:
+                              description: A PEM bundle (`server_ca_bundle`).
+                              nullable: true
+                              properties:
+                                configMapKeyRef:
+                                  description: A key of a ConfigMap of the namespace.
+                                  nullable: true
+                                  properties:
+                                    key:
+                                      type: string
+                                    name:
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                secretKeyRef:
+                                  description: A key of a `Secret` in the referencing CR's own namespace.
+                                  nullable: true
+                                  properties:
+                                    key:
+                                      type: string
+                                    name:
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: a CA bundle is in a ConfigMap or a Secret
+                                rule: has(self.configMapKeyRef) != has(self.secretKeyRef)
+                            clientCertificateSecretName:
+                              description: |-
+                                A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled
+                                `angos.weebo.io/credential: "true"`, presented for mTLS.
+                              nullable: true
+                              type: string
+                          type: object
+                      required:
+                      - name
+                      type: object
+                      x-kubernetes-validations:
+                      - message: an OIDC provider sets issuer or issuerFrom
+                        rule: has(self.issuer) != has(self.issuerFrom)
+                      - message: 'an OIDC provider sets audience or audienceFrom: without one, Angos accepts any audience'
+                        rule: has(self.audience) != has(self.audienceFrom)
+                    type: array
+                  tokenService:
+                    description: |-
+                      `[auth.token_service]`: the tokens `docker login` gets from
+                      `/token`.
+                    nullable: true
+                    properties:
+                      keySecretRef:
+                        description: |-
+                          The signing key (base64, at least 32 bytes decoded). Unset: the
+                          operator generates one in `<instance>-token-key`; the annotation
+                          `angos.weebo.io/rotate` changes it — every token is then invalid.
+                        nullable: true
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      realm:
+                        description: |-
+                          `realm`: the public URL of `/token`, `https://<host>/token`
+                          (required: Angos would derive it from the request otherwise, wrong
+                          behind an ingress).
+                        pattern: ^https?://[^/]+(/.*)?/token$
+                        type: string
+                      ttlSecs:
+                        description: '`ttl_secs` of a token, 1 to 86400. Angos: 3600.'
+                        format: uint64
+                        maximum: 86400.0
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                    required:
+                    - realm
+                    type: object
+                  webhooks:
+                    description: |-
+                      `[auth.webhook.<name>]`: HTTP services asked whether a request is
+                      allowed (after the access policies). One may be the instance's
+                      `default` (`global.authorization_webhook`): it then decides every
+                      request — the probes included — and **fails closed**.
+                    items:
+                      description: '`[auth.webhook.<name>]`.'
+                      properties:
+                        basicAuthSecretRef:
+                          description: |-
+                            Basic credentials (`username`, `password` keys), from a Secret
+                            labelled `angos.weebo.io/credential: "true"`.
+                          nullable: true
+                          properties:
+                            name:
+                              type: string
+                            passwordKey:
+                              default: password
+                              type: string
+                            usernameKey:
+                              default: username
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        bearerTokenSecretRef:
+                          description: |-
+                            A bearer token, from a Secret labelled
+                            `angos.weebo.io/credential: "true"`.
+                          nullable: true
+                          properties:
+                            key:
+                              type: string
+                            name:
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        default:
+                          default: false
+                          description: |-
+                            `global.authorization_webhook`: asked for every request without a
+                            repository's own.
+                          type: boolean
+                        forwardHeaders:
+                          description: Request headers forwarded to the webhook.
+                          items:
+                            type: string
+                          type: array
+                        name:
+                          description: The key repositories name it by (`authorizationWebhook`).
+                          maxLength: 63
+                          minLength: 1
+                          pattern: ^[A-Za-z0-9_-]+$
+                          type: string
+                        timeoutMs:
+                          description: How long Angos waits for an answer (required by Angos).
+                          format: uint64
+                          minimum: 1.0
+                          type: integer
+                        tls:
+                          description: |-
+                            A client's TLS towards a service: the CA its certificate is checked
+                            with (beside the public roots) and the certificate presented. Mounted in
+                            the pods: a change rolls them.
+                          nullable: true
+                          properties:
+                            ca:
+                              description: A PEM bundle (`server_ca_bundle`).
+                              nullable: true
+                              properties:
+                                configMapKeyRef:
+                                  description: A key of a ConfigMap of the namespace.
+                                  nullable: true
+                                  properties:
+                                    key:
+                                      type: string
+                                    name:
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                secretKeyRef:
+                                  description: A key of a `Secret` in the referencing CR's own namespace.
+                                  nullable: true
+                                  properties:
+                                    key:
+                                      type: string
+                                    name:
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: a CA bundle is in a ConfigMap or a Secret
+                                rule: has(self.configMapKeyRef) != has(self.secretKeyRef)
+                            clientCertificateSecretName:
+                              description: |-
+                                A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled
+                                `angos.weebo.io/credential: "true"`, presented for mTLS.
+                              nullable: true
+                              type: string
+                          type: object
+                        url:
+                          pattern: ^https?://
+                          type: string
+                      required:
+                      - name
+                      - timeoutMs
+                      - url
+                      type: object
+                      x-kubernetes-validations:
+                      - message: an authorization webhook authenticates with a bearer token or Basic credentials, not both
+                        rule: '!(has(self.bearerTokenSecretRef) && has(self.basicAuthSecretRef))'
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-validations:
+                    - message: at most one authorization webhook is the default
+                      rule: self.filter(w, w.default).size() <= 1
+                    - message: authorization webhook names are unique
+                      rule: self.all(w, self.exists_one(o, o.name == w.name))
+                type: object
+              cache:
+                description: '`[cache]`: unset, Angos caches in memory.'
+                nullable: true
+                properties:
+                  redis:
+                    description: '`[cache.redis]`: a Redis or Valkey the operator doesn''t create.'
+                    properties:
+                      keyPrefix:
+                        description: '`key_prefix` of every key Angos writes.'
+                        minLength: 1
+                        type: string
+                      urlSecretRef:
+                        description: |-
+                          The `redis://` URL (credentials included), in a Secret of the
+                          namespace labelled `angos.weebo.io/credential: "true"`.
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    required:
+                    - keyPrefix
+                    - urlSecretRef
+                    type: object
+                required:
+                - redis
+                type: object
+              env:
+                description: |-
+                  Rarely needed (Angos reads no secret from its environment). Secrets
+                  read here must be labelled `angos.weebo.io/credential: "true"`;
+                  `RUST_LOG` is the operator's (`logLevel`).
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                type: array
+              envFrom:
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                type: array
+              eventWebhooks:
+                description: '`[event_webhook.<name>]`: told of pushes, pulls and deletions.'
+                items:
+                  description: |-
+                    `[event_webhook.<name>]`: an HTTP endpoint told of pushes, pulls and
+                    deletions.
+                  properties:
+                    default:
+                      default: false
+                      description: |-
+                        In `global.event_webhooks`: told of every repository without its
+                        own list.
+                      type: boolean
+                    events:
+                      items:
+                        enum:
+                        - manifest.push
+                        - manifest.pull
+                        - manifest.delete
+                        - blob.push
+                        - blob.pull
+                        - tag.create
+                        - tag.delete
+                        type: string
+                      minItems: 1
+                      type: array
+                    maxRetries:
+                      description: 'At most 16. Angos: 3 for `Required`, 0 otherwise.'
+                      format: uint32
+                      maximum: 16.0
+                      minimum: 0.0
+                      nullable: true
+                      type: integer
+                    name:
+                      description: The key repositories name it by (`eventWebhooks`).
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^[A-Za-z0-9_-]+$
+                      type: string
+                    policy:
+                      description: |-
+                        `Required`: the request fails when the webhook does; `Optional`:
+                        tried, never blocking; `Async`: sent in the background.
+                      enum:
+                      - Required
+                      - Optional
+                      - Async
+                      type: string
+                    repositoryFilter:
+                      description: 'Regexes of the namespaces reported; empty: all.'
+                      items:
+                        type: string
+                      type: array
+                    timeoutMs:
+                      description: 'Angos: 5000.'
+                      format: uint64
+                      minimum: 1.0
+                      nullable: true
+                      type: integer
+                    tls:
+                      description: |-
+                        A client's TLS towards a service: the CA its certificate is checked
+                        with (beside the public roots) and the certificate presented. Mounted in
+                        the pods: a change rolls them.
+                      nullable: true
+                      properties:
+                        ca:
+                          description: A PEM bundle (`server_ca_bundle`).
+                          nullable: true
+                          properties:
+                            configMapKeyRef:
+                              description: A key of a ConfigMap of the namespace.
+                              nullable: true
+                              properties:
+                                key:
+                                  type: string
+                                name:
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                            secretKeyRef:
+                              description: A key of a `Secret` in the referencing CR's own namespace.
+                              nullable: true
+                              properties:
+                                key:
+                                  type: string
+                                name:
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                          type: object
+                          x-kubernetes-validations:
+                          - message: a CA bundle is in a ConfigMap or a Secret
+                            rule: has(self.configMapKeyRef) != has(self.secretKeyRef)
+                        clientCertificateSecretName:
+                          description: |-
+                            A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled
+                            `angos.weebo.io/credential: "true"`, presented for mTLS.
+                          nullable: true
+                          type: string
+                      type: object
+                    tokenSecretRef:
+                      description: |-
+                        The bearer token Angos sends, from a Secret labelled
+                        `angos.weebo.io/credential: "true"`.
+                      properties:
+                        key:
+                          type: string
+                        name:
+                          type: string
+                      required:
+                      - key
+                      - name
+                      type: object
+                    url:
+                      pattern: ^https?://
+                      type: string
+                  required:
+                  - events
+                  - name
+                  - policy
+                  - tokenSecretRef
+                  - url
+                  type: object
+                maxItems: 32
+                type: array
+                x-kubernetes-validations:
+                - message: event webhook names are unique
+                  rule: self.all(w, self.exists_one(o, o.name == w.name))
+              extraConfig:
+                description: |-
+                  Keys of Angos's configuration no typed field renders, merged last
+                  into the hot file. Checked by Angos only (advisory
+                  `ExtraConfigUsed`).
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              extraVolumeMounts:
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                type: array
+              extraVolumes:
+                description: |-
+                  CA bundles and other files: no `hostPath`; Secrets labelled
+                  `angos.weebo.io/credential: "true"`.
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                type: array
+              global:
+                default:
+                  access: {}
+                description: '`[global]`: what applies to every repository.'
+                properties:
+                  access:
+                    default: {}
+                    description: The global access policy, checked before any repository's.
+                    properties:
+                      admin:
+                        description: |-
+                          Who may do anything, in every repository too (the rule is added to
+                          each repository's policy): named identities, groups or
+                          ServiceAccounts only.
+                        items:
+                          type: string
+                        type: array
+                      catalog:
+                        description: Who may list the catalog, the repositories and their namespaces.
+                        items:
+                          type: string
+                        type: array
+                      jobs:
+                        description: |-
+                          Who may list, retry and delete background jobs: named identities,
+                          groups or ServiceAccounts only.
+                        items:
+                          type: string
+                        type: array
+                      metrics:
+                        description: Who may scrape `/metrics`.
+                        items:
+                          type: string
+                        type: array
+                      rules:
+                        description: 'More CEL rules (`request`, `identity`): a matching one allows.'
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  allowMissingManifestReferences:
+                    description: '`allow_missing_manifest_references`. Angos: true.'
+                    nullable: true
+                    type: boolean
+                  gcGraceSecs:
+                    description: '`gc_grace_secs`. Angos: 300.'
+                    format: uint64
+                    minimum: 0.0
+                    nullable: true
+                    type: integer
+                  immutableTags:
+                    description: '`immutable_tags`: a tag can''t be moved once pushed.'
+                    nullable: true
+                    type: boolean
+                  immutableTagsExclusions:
+                    description: '`immutable_tags_exclusions`: regexes of the tags left mutable.'
+                    items:
+                      type: string
+                    type: array
+                  index:
+                    description: '`index` policy of every repository without its own.'
+                    nullable: true
+                    properties:
+                      default:
+                        description: |-
+                          What applies when no rule matches; a matching rule does the
+                          opposite.
+                        enum:
+                        - Index
+                        - Skip
+                        - null
+                        nullable: true
+                        type: string
+                      rules:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  jobs:
+                    description: '`max_concurrent_*_jobs`.'
+                    nullable: true
+                    properties:
+                      cache:
+                        format: uint64
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                      index:
+                        format: uint64
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                      replication:
+                        format: uint64
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                      scan:
+                        format: uint64
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                    type: object
+                  limits:
+                    nullable: true
+                    properties:
+                      blobStreamFrameSize:
+                        description: '`blob_stream_frame_size`. Angos: `128KiB`.'
+                        nullable: true
+                        pattern: ^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$
+                        type: string
+                      maxBlobSize:
+                        description: '`max_blob_size`. Angos: `100GiB`.'
+                        nullable: true
+                        pattern: ^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$
+                        type: string
+                      maxIndexEntries:
+                        description: '`max_index_entries`. Angos: 500000.'
+                        format: uint64
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                      maxIndexSize:
+                        description: '`max_index_size`. Angos: `50GiB`.'
+                        nullable: true
+                        pattern: ^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$
+                        type: string
+                      maxManifestSize:
+                        description: '`max_manifest_size`. Angos: `5MiB`.'
+                        nullable: true
+                        pattern: ^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$
+                        type: string
+                    type: object
+                  listing:
+                    nullable: true
+                    properties:
+                      listingReadConcurrency:
+                        format: uint64
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                      namespaceWalkConcurrency:
+                        format: uint64
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                      revisionCacheEntries:
+                        format: uint64
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                    type: object
+                  maxConcurrentRequests:
+                    description: |-
+                      `max_concurrent_requests` (Angos's worker threads). Startup only.
+                      Angos: 64.
+                    format: uint64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  pullHistory:
+                    description: '`[global.pull_history]`.'
+                    nullable: true
+                    properties:
+                      compactAfterPulls:
+                        format: uint64
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                      compactAfterSecs:
+                        format: uint64
+                        minimum: 0.0
+                        nullable: true
+                        type: integer
+                      maxAgeSecs:
+                        format: uint64
+                        minimum: 0.0
+                        nullable: true
+                        type: integer
+                      maxPulls:
+                        format: uint64
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                    type: object
+                  redirects:
+                    description: |-
+                      Blob and manifest downloads redirected to presigned S3 URLs.
+                      **Off by default** (Angos: on): the clients must then reach the
+                      bucket themselves.
+                    nullable: true
+                    properties:
+                      blob:
+                        default: false
+                        description: '`enable_blob_redirect`.'
+                        type: boolean
+                      manifest:
+                        default: false
+                        description: '`enable_manifest_redirect`.'
+                        type: boolean
+                    type: object
+                  retention:
+                    description: |-
+                      `retention_policy`: CEL rules on `image` (OR with the
+                      repositories').
+                    nullable: true
+                    properties:
+                      rules:
+                        default: []
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  shutdownDrainSecs:
+                    description: |-
+                      `shutdown_drain_secs`: how long a stopping pod drains. Startup
+                      only. Angos: 30; the pods' grace period follows it. At most an hour.
+                    format: uint64
+                    maximum: 3600.0
+                    minimum: 0.0
+                    nullable: true
+                    type: integer
+                  updatePullTime:
+                    description: |-
+                      `update_pull_time`: record when an image is pulled (needed by any
+                      rule on `last_pulled_at` or `top_pulled`). Angos: false.
+                    nullable: true
+                    type: boolean
+                type: object
+              image:
+                description: |-
+                  The Angos image. Its repository must be one the operator allows
+                  (`managedInstances.allowedImages`).
+                properties:
+                  pullPolicy:
+                    enum:
+                    - Always
+                    - IfNotPresent
+                    - Never
+                    - null
+                    nullable: true
+                    type: string
+                  repository:
+                    description: 'Default: `ghcr.io/project-angos/angos`.'
+                    nullable: true
+                    type: string
+                  tag:
+                    description: 'Default: the Angos version the operator targets.'
+                    nullable: true
+                    type: string
+                type: object
+              imagePullSecrets:
+                items:
+                  description: LocalObjectReference contains enough information to let you locate the referenced object inside the same namespace.
+                  properties:
+                    name:
+                      description: 'Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names'
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              logLevel:
+                default: info
+                description: |-
+                  `RUST_LOG` of the pods (e.g. `info`, `warn,angos=debug`); the
+                  operator always adds `angos::configuration::watcher=info`, the
+                  reload messages it reads.
+                type: string
+              networkPolicy:
+                description: 'A `NetworkPolicy` around the pods: unset, none.'
+                nullable: true
+                properties:
+                  egressTo:
+                    description: |-
+                      Where the pods may connect besides DNS (the object store, the
+                      OIDC providers, the upstream registries, the API server).
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    type: array
+                  ingressFrom:
+                    description: 'Who may reach the registry''s port; empty: anyone.'
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    type: array
+                type: object
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                type: object
+              podAnnotations:
+                additionalProperties:
+                  type: string
+                type: object
+              podLabels:
+                additionalProperties:
+                  type: string
+                type: object
+              podSecurityContext:
+                description: 'Unset: non-root 65534 (the image''s user), seccomp `RuntimeDefault`.'
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              priorityClassName:
+                nullable: true
+                type: string
+              pruneLock:
+                default:
+                  windowHours: 24
+                description: |-
+                  The prune lock (spec 6.6): no `AngosMaintenance` prune runs while a
+                  repository was released less than `windowHours` ago (its data goes
+                  at the next prune: time to notice and recreate it).
+                properties:
+                  windowHours:
+                    default: 24
+                    format: uint32
+                    minimum: 0.0
+                    type: integer
+                type: object
+              reload:
+                default:
+                  mode: Hot
+                  onUnconfirmed: Wait
+                  timeoutSeconds: 180
+                description: How a new configuration reaches the pods.
+                properties:
+                  mode:
+                    default: Hot
+                    description: |-
+                      `Hot`: Angos reloads the file in place, the operator reads in each
+                      pod's log that it did. `Rollout`: every change also rolls the pods.
+                    enum:
+                    - Hot
+                    - Rollout
+                    type: string
+                  onUnconfirmed:
+                    default: Wait
+                    description: |-
+                      When no answer came in time: `Wait` (keep reading the logs) or
+                      `Rollout` (roll the pods, which read the file at start).
+                    enum:
+                    - Wait
+                    - Rollout
+                    type: string
+                  timeoutSeconds:
+                    default: 180
+                    description: |-
+                      How long to wait for every pod's answer (the kubelet takes up to
+                      90 s to update a mounted Secret). At most a day.
+                    format: uint64
+                    maximum: 86400.0
+                    minimum: 30.0
+                    type: integer
+                type: object
+              replicas:
+                default: 1
+                description: |-
+                  The server's pods. More than one needs an S3 store and
+                  `worker.enabled`, and runs once Angos found the store's conditional
+                  writes atomic (`status.conditionalWrites`); until then, one.
+                format: int32
+                minimum: 0.0
+                type: integer
+              repositorySelector:
+                description: |-
+                  Which `AngosRepository`s (and `AngosIdentity`s) the instance
+                  serves, and from which namespaces.
+                properties:
+                  namespaces:
+                    description: |-
+                      The namespaces whose objects may attach to this instance (with an
+                      `instanceRef` naming it): its own always.
+                    properties:
+                      from:
+                        default: Same
+                        description: '`Same` (the instance''s namespace), `All`, or `Selector`.'
+                        enum:
+                        - Same
+                        - All
+                        - Selector
+                        type: string
+                      selector:
+                        description: 'The labels of the namespaces accepted, with `from: Selector`.'
+                        nullable: true
+                        properties:
+                          matchExpressions:
+                            description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                            items:
+                              description: A label selector requirement is a selector that contains values, a key, and an operator that relates the key and values.
+                              properties:
+                                key:
+                                  description: key is the label key that the selector applies to.
+                                  type: string
+                                operator:
+                                  description: operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist.
+                                  type: string
+                                values:
+                                  description: values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch.
+                                  items:
+                                    type: string
+                                  type: array
+                              required:
+                              - key
+                              - operator
+                              type: object
+                            type: array
+                          matchLabels:
+                            additionalProperties:
+                              type: string
+                            description: matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed.
+                            type: object
+                        type: object
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'namespaces.selector is required with from: Selector'
+                      rule: self.from != 'Selector' || has(self.selector)
+                  selector:
+                    description: Only the objects whose labels match; all of them when unset.
+                    nullable: true
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                        items:
+                          description: A label selector requirement is a selector that contains values, a key, and an operator that relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector applies to.
+                              type: string
+                            operator:
+                              description: operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                type: object
+              resources:
+                description: 'Unset: requests 100m CPU / 256Mi, limit 1Gi.'
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              scan:
+                description: |-
+                  `[global.scan]`: the scanner (deployed apart) and the global scan
+                  policy. The scan queue's jobs call it.
+                nullable: true
+                properties:
+                  default:
+                    description: |-
+                      What applies when no rule matches (unset: `Skip`); a matching rule
+                      does the opposite. A repository's own `scan` replaces it.
+                    enum:
+                    - Scan
+                    - Skip
+                    - null
+                    nullable: true
+                    type: string
+                  rules:
+                    description: CEL rules on `image`.
+                    items:
+                      type: string
+                    type: array
+                  timeoutSecs:
+                    description: 'Angos: 600.'
+                    format: uint64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  tls:
+                    description: |-
+                      A client's TLS towards a service: the CA its certificate is checked
+                      with (beside the public roots) and the certificate presented. Mounted in
+                      the pods: a change rolls them.
+                    nullable: true
+                    properties:
+                      ca:
+                        description: A PEM bundle (`server_ca_bundle`).
+                        nullable: true
+                        properties:
+                          configMapKeyRef:
+                            description: A key of a ConfigMap of the namespace.
+                            nullable: true
+                            properties:
+                              key:
+                                type: string
+                              name:
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          secretKeyRef:
+                            description: A key of a `Secret` in the referencing CR's own namespace.
+                            nullable: true
+                            properties:
+                              key:
+                                type: string
+                              name:
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                        type: object
+                        x-kubernetes-validations:
+                        - message: a CA bundle is in a ConfigMap or a Secret
+                          rule: has(self.configMapKeyRef) != has(self.secretKeyRef)
+                      clientCertificateSecretName:
+                        description: |-
+                          A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled
+                          `angos.weebo.io/credential: "true"`, presented for mTLS.
+                        nullable: true
+                        type: string
+                    type: object
+                  tokenSecretRef:
+                    description: |-
+                      The scanner's token, from a Secret labelled
+                      `angos.weebo.io/credential: "true"`.
+                    nullable: true
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                  url:
+                    description: The scanner's base URL (Angos posts to `<url>/scan`).
+                    pattern: ^https?://
+                    type: string
+                required:
+                - url
+                type: object
+              securityContext:
+                description: 'Unset: read-only root filesystem, no capability, no escalation.'
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              server:
+                default:
+                  port: 8000
+                description: '`[server]`: the listener.'
+                properties:
+                  handshakeTimeoutSecs:
+                    description: '`server.handshake_timeout` (seconds, > 0). Angos: 10.'
+                    format: uint64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  port:
+                    default: 8000
+                    description: |-
+                      `server.port`, and the container's port. Read at startup only: a
+                      change rolls the pods.
+                    format: uint16
+                    maximum: 65535.0
+                    minimum: 1.0
+                    type: integer
+                  queryTimeoutGracePeriodSecs:
+                    description: '`server.query_timeout_grace_period` (seconds, > 0). Angos: 60.'
+                    format: uint64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  queryTimeoutSecs:
+                    description: '`server.query_timeout` (seconds, > 0). Angos: 3600.'
+                    format: uint64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  tls:
+                    description: |-
+                      `[server.tls]`: Angos serves TLS itself, from a `kubernetes.io/tls`
+                      Secret mounted in the pods. Certificates are reloaded by Angos when
+                      the Secret changes; turning TLS on or off rolls the pods.
+                    nullable: true
+                    properties:
+                      clientAuth:
+                        default: Optional
+                        description: |-
+                          `client_auth`: `Optional` (a certificate is checked when given) or
+                          `Required`.
+                        enum:
+                        - Optional
+                        - Required
+                        type: string
+                      clientCA:
+                        description: |-
+                          The CA that client certificates must chain to
+                          (`client_ca_bundle`): a key of a Secret of the namespace, labelled
+                          `angos.weebo.io/credential: "true"`.
+                        nullable: true
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      secretName:
+                        description: |-
+                          A `kubernetes.io/tls` Secret of the namespace (`tls.crt`,
+                          `tls.key`), labelled `angos.weebo.io/credential: "true"`.
+                        type: string
+                    required:
+                    - secretName
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'clientAuth: Required needs clientCA'
+                      rule: self.clientAuth != 'Required' || has(self.clientCA)
+                  trustedProxies:
+                    description: |-
+                      `global.trusted_proxies`: the IPs or CIDRs whose forwarded headers
+                      Angos trusts. Behind an ingress, without it, the client IP Angos
+                      sees is the ingress controller's.
+                    items:
+                      type: string
+                    type: array
+                type: object
+              service:
+                default:
+                  port: 8000
+                  type: ClusterIP
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  port:
+                    default: 8000
+                    description: The Service's port (the container's is `server.port`).
+                    format: int32
+                    type: integer
+                  type:
+                    default: ClusterIP
+                    enum:
+                    - ClusterIP
+                    - NodePort
+                    - LoadBalancer
+                    type: string
+                type: object
+              serviceAccount:
+                default:
+                  create: true
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  create:
+                    default: true
+                    description: '`false`: use `name`, which must exist.'
+                    type: boolean
+                  name:
+                    description: 'Default: the instance''s name.'
+                    nullable: true
+                    type: string
+                type: object
+              storage:
+                description: |-
+                  Where Angos keeps blobs and metadata. Read at startup only: a change of
+                  the store waits for the annotation `angos.weebo.io/confirm-storage`
+                  (set to `status.pendingBootHash`), then rolls the pods. Pointing an
+                  instance at another, empty store makes it serve an empty registry: no
+                  data moves.
+                properties:
+                  fs:
+                    description: '`[blob_store.fs]`: a directory of the pods, on a volume.'
+                    nullable: true
+                    properties:
+                      rootDir:
+                        default: /data
+                        description: '`root_dir`: where the volume is mounted.'
+                        type: string
+                      syncToDisk:
+                        description: '`sync_to_disk`: fsync every write. Angos: false.'
+                        nullable: true
+                        type: boolean
+                      volume:
+                        description: |-
+                          The volume under `rootDir`: an existing claim, or one the operator
+                          creates once (never resized). Unset: an `emptyDir` — the data goes
+                          with the pod.
+                        nullable: true
+                        properties:
+                          accessMode:
+                            default: ReadWriteOnce
+                            enum:
+                            - ReadWriteOnce
+                            - ReadWriteMany
+                            - ReadWriteOncePod
+                            type: string
+                          claimName:
+                            description: An existing `PersistentVolumeClaim` of the namespace.
+                            nullable: true
+                            type: string
+                          size:
+                            description: The size of the claim the operator creates (`<instance>-data`).
+                            nullable: true
+                            type: string
+                          storageClass:
+                            nullable: true
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: volume sets claimName or size, not both
+                          rule: has(self.claimName) != has(self.size)
+                    type: object
+                  metadata:
+                    description: '`[metadata_store]`: unset, the blob store holds the metadata too.'
+                    nullable: true
+                    properties:
+                      fs:
+                        nullable: true
+                        properties:
+                          rootDir:
+                            default: /data
+                            description: '`root_dir`: where the volume is mounted.'
+                            type: string
+                          syncToDisk:
+                            description: '`sync_to_disk`: fsync every write. Angos: false.'
+                            nullable: true
+                            type: boolean
+                          volume:
+                            description: |-
+                              The volume under `rootDir`: an existing claim, or one the operator
+                              creates once (never resized). Unset: an `emptyDir` — the data goes
+                              with the pod.
+                            nullable: true
+                            properties:
+                              accessMode:
+                                default: ReadWriteOnce
+                                enum:
+                                - ReadWriteOnce
+                                - ReadWriteMany
+                                - ReadWriteOncePod
+                                type: string
+                              claimName:
+                                description: An existing `PersistentVolumeClaim` of the namespace.
+                                nullable: true
+                                type: string
+                              size:
+                                description: The size of the claim the operator creates (`<instance>-data`).
+                                nullable: true
+                                type: string
+                              storageClass:
+                                nullable: true
+                                type: string
+                            type: object
+                            x-kubernetes-validations:
+                            - message: volume sets claimName or size, not both
+                              rule: has(self.claimName) != has(self.size)
+                        type: object
+                      s3:
+                        nullable: true
+                        properties:
+                          bucket:
+                            type: string
+                          credentialsSecretRef:
+                            description: |-
+                              The access key, in a Secret of the namespace labelled
+                              `angos.weebo.io/credential: "true"`. A change of the Secret's content
+                              alone rolls the pods without confirmation.
+                            properties:
+                              accessKeyIdKey:
+                                default: access-key-id
+                                type: string
+                              name:
+                                type: string
+                              secretKeyKey:
+                                default: secret-key
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          endpoint:
+                            description: The S3 endpoint URL, e.g. `https://s3.example.com`.
+                            type: string
+                          keyPrefix:
+                            description: A prefix of every key Angos writes.
+                            nullable: true
+                            type: string
+                          region:
+                            description: The bucket's region (`us-east-1` for most S3-compatible stores).
+                            type: string
+                          transport:
+                            description: Tuning of the S3 client; Angos's defaults when unset.
+                            nullable: true
+                            properties:
+                              childrenScanConcurrency:
+                                format: uint64
+                                minimum: 1.0
+                                nullable: true
+                                type: integer
+                              circuitBreakerCooldownSecs:
+                                format: uint64
+                                minimum: 0.0
+                                nullable: true
+                                type: integer
+                              circuitBreakerThreshold:
+                                format: uint32
+                                minimum: 0.0
+                                nullable: true
+                                type: integer
+                              maxAttempts:
+                                format: uint32
+                                minimum: 0.0
+                                nullable: true
+                                type: integer
+                              multipartCopyChunkSize:
+                                nullable: true
+                                pattern: ^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$
+                                type: string
+                              multipartCopyJobs:
+                                format: uint64
+                                minimum: 1.0
+                                nullable: true
+                                type: integer
+                              multipartCopyThreshold:
+                                nullable: true
+                                pattern: ^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$
+                                type: string
+                              multipartPartSize:
+                                description: '`multipart_part_size`, at least `5MiB` (S3''s minimum part).'
+                                nullable: true
+                                pattern: ^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$
+                                type: string
+                              multipartUniformParts:
+                                nullable: true
+                                type: boolean
+                              operationAttemptTimeoutSecs:
+                                format: uint64
+                                minimum: 0.0
+                                nullable: true
+                                type: integer
+                              operationTimeoutSecs:
+                                format: uint64
+                                minimum: 0.0
+                                nullable: true
+                                type: integer
+                              presignTtlSecs:
+                                description: 'How long a presigned URL lives (redirects). Angos: 1800.'
+                                format: uint64
+                                minimum: 0.0
+                                nullable: true
+                                type: integer
+                            type: object
+                        required:
+                        - bucket
+                        - credentialsSecretRef
+                        - endpoint
+                        - region
+                        type: object
+                    type: object
+                    x-kubernetes-validations:
+                    - message: storage.metadata sets exactly one of s3 and fs
+                      rule: has(self.s3) != has(self.fs)
+                  s3:
+                    description: '`[blob_store.s3]`: an S3-compatible bucket.'
+                    nullable: true
+                    properties:
+                      bucket:
+                        type: string
+                      credentialsSecretRef:
+                        description: |-
+                          The access key, in a Secret of the namespace labelled
+                          `angos.weebo.io/credential: "true"`. A change of the Secret's content
+                          alone rolls the pods without confirmation.
+                        properties:
+                          accessKeyIdKey:
+                            default: access-key-id
+                            type: string
+                          name:
+                            type: string
+                          secretKeyKey:
+                            default: secret-key
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      endpoint:
+                        description: The S3 endpoint URL, e.g. `https://s3.example.com`.
+                        type: string
+                      keyPrefix:
+                        description: A prefix of every key Angos writes.
+                        nullable: true
+                        type: string
+                      region:
+                        description: The bucket's region (`us-east-1` for most S3-compatible stores).
+                        type: string
+                      transport:
+                        description: Tuning of the S3 client; Angos's defaults when unset.
+                        nullable: true
+                        properties:
+                          childrenScanConcurrency:
+                            format: uint64
+                            minimum: 1.0
+                            nullable: true
+                            type: integer
+                          circuitBreakerCooldownSecs:
+                            format: uint64
+                            minimum: 0.0
+                            nullable: true
+                            type: integer
+                          circuitBreakerThreshold:
+                            format: uint32
+                            minimum: 0.0
+                            nullable: true
+                            type: integer
+                          maxAttempts:
+                            format: uint32
+                            minimum: 0.0
+                            nullable: true
+                            type: integer
+                          multipartCopyChunkSize:
+                            nullable: true
+                            pattern: ^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$
+                            type: string
+                          multipartCopyJobs:
+                            format: uint64
+                            minimum: 1.0
+                            nullable: true
+                            type: integer
+                          multipartCopyThreshold:
+                            nullable: true
+                            pattern: ^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$
+                            type: string
+                          multipartPartSize:
+                            description: '`multipart_part_size`, at least `5MiB` (S3''s minimum part).'
+                            nullable: true
+                            pattern: ^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$
+                            type: string
+                          multipartUniformParts:
+                            nullable: true
+                            type: boolean
+                          operationAttemptTimeoutSecs:
+                            format: uint64
+                            minimum: 0.0
+                            nullable: true
+                            type: integer
+                          operationTimeoutSecs:
+                            format: uint64
+                            minimum: 0.0
+                            nullable: true
+                            type: integer
+                          presignTtlSecs:
+                            description: 'How long a presigned URL lives (redirects). Angos: 1800.'
+                            format: uint64
+                            minimum: 0.0
+                            nullable: true
+                            type: integer
+                        type: object
+                    required:
+                    - bucket
+                    - credentialsSecretRef
+                    - endpoint
+                    - region
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: storage sets exactly one of s3 and fs
+                  rule: has(self.s3) != has(self.fs)
+              terminationGracePeriodSeconds:
+                description: 'Unset: three times `global.shutdownDrainSecs` (30) plus 10.'
+                format: int64
+                nullable: true
+                type: integer
+              tolerations:
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                type: array
+              tracing:
+                description: '`[observability.tracing]`: OTLP traces. Startup only.'
+                nullable: true
+                properties:
+                  endpoint:
+                    description: The OTLP gRPC endpoint.
+                    type: string
+                  samplingRate:
+                    description: The share of traces kept, from 0 to 1.
+                    format: double
+                    maximum: 1.0
+                    minimum: 0.0
+                    type: number
+                required:
+                - endpoint
+                - samplingRate
+                type: object
+              ui:
+                description: '`[ui]`: Angos''s web UI.'
+                nullable: true
+                properties:
+                  enabled:
+                    default: false
+                    type: boolean
+                  name:
+                    description: 'The name the UI shows. Angos: `Angos`.'
+                    nullable: true
+                    type: string
+                  oidc:
+                    description: |-
+                      Sign-in to the UI through an OIDC provider of `auth.oidc` (a public
+                      PKCE client, no secret).
+                    nullable: true
+                    properties:
+                      clientId:
+                        nullable: true
+                        type: string
+                      clientIdFrom:
+                        description: |-
+                          The client id from a Secret of the namespace (e.g. the
+                          `AUTHENTIK_CLIENT_ID` a weebo-authentik application writes),
+                          labelled `angos.weebo.io/credential: "true"`.
+                        nullable: true
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      provider:
+                        description: The `name` of an `auth.oidc` provider.
+                        type: string
+                      scopes:
+                        description: 'The scopes asked. Angos: `openid profile email`.'
+                        items:
+                          type: string
+                        type: array
+                    required:
+                    - provider
+                    type: object
+                    x-kubernetes-validations:
+                    - message: ui.oidc sets clientId or clientIdFrom
+                      rule: has(self.clientId) != has(self.clientIdFrom)
+                type: object
+              worker:
+                description: |-
+                  `angos worker`: a `<name>-worker` Deployment draining the background
+                  jobs (cache fills, replication, scans, indexes) from a durable queue
+                  (`[global.job_queue]`) instead of the server's own loops.
+                nullable: true
+                properties:
+                  enabled:
+                    default: true
+                    description: |-
+                      Turning it on or off rolls the server (its queue is a startup
+                      setting): the worker is ready before the server hands it the jobs,
+                      and removed after the server took them back.
+                    type: boolean
+                  jobQueue:
+                    description: '`[global.job_queue]`''s tunables.'
+                    nullable: true
+                    properties:
+                      claimTtlSecs:
+                        description: |-
+                          The lease on a claimed job: a crashed worker's jobs are taken over
+                          after it. Angos: 60.
+                        format: uint64
+                        minimum: 3.0
+                        nullable: true
+                        type: integer
+                      maxAttempts:
+                        description: 'Angos: 5.'
+                        format: uint32
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                      pendingReadyHorizonSecs:
+                        description: 'Angos: 600.'
+                        format: uint64
+                        minimum: 0.0
+                        nullable: true
+                        type: integer
+                      pendingRefreshIntervalSecs:
+                        description: 'Angos: 15.'
+                        format: uint64
+                        minimum: 5.0
+                        nullable: true
+                        type: integer
+                      retryBackoffMaxMs:
+                        description: 'Angos: 10000.'
+                        format: uint64
+                        minimum: 0.0
+                        nullable: true
+                        type: integer
+                      retryBackoffMinMs:
+                        description: 'Angos: 100.'
+                        format: uint64
+                        minimum: 0.0
+                        nullable: true
+                        type: integer
+                    type: object
+                  pollIntervalSeconds:
+                    description: '`--poll-interval`: how long an idle worker waits. Angos: 1.'
+                    format: uint64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  queues:
+                    description: |-
+                      The queues drained (`--queue`): empty, Angos's default (cache,
+                      replication, index, and scan when a scanner is configured).
+                    items:
+                      enum:
+                      - cache
+                      - replication
+                      - scan
+                      - index
+                      type: string
+                    type: array
+                  replicas:
+                    default: 1
+                    format: int32
+                    minimum: 1.0
+                    type: integer
+                  resources:
+                    description: 'Unset: the server''s default (requests 100m CPU / 256Mi, limit 1Gi).'
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                type: object
+            required:
+            - storage
+            type: object
+            x-kubernetes-validations:
+            - message: 'more than one replica needs an S3 store (blobs and metadata): the pods share it'
+              rule: self.replicas <= 1 || (has(self.storage.s3) && (!has(self.storage.metadata) || has(self.storage.metadata.s3)))
+            - message: 'more than one replica needs worker.enabled: the background jobs go to a durable queue the worker drains'
+              rule: self.replicas <= 1 || (has(self.worker) && self.worker.enabled)
+          status:
+            description: |-
+              The status of an `AngosLocalInstance`: what runs, and where the last
+              configuration stands.
+            nullable: true
+            properties:
+              appliedConfigHash:
+                description: The hash of the last hot layer every ready pod confirmed loading.
+                nullable: true
+                type: string
+              availableReplicas:
+                format: int32
+                nullable: true
+                type: integer
+              availableWorkers:
+                description: The worker's available pods.
+                format: int32
+                nullable: true
+                type: integer
+              bootHash:
+                description: The hash of the startup layer the pods run.
+                nullable: true
+                type: string
+              bootHistory:
+                description: |-
+                  The startup layers the instance ran, newest first: their `Secret`s
+                  (`<name>-boot-<hash8>`) are kept for a rollback, the older ones
+                  removed.
+                items:
+                  type: string
+                type: array
+              conditionalWrites:
+                description: |-
+                  What Angos found of the metadata store's conditional writes when the
+                  durable queue started: more than one server pod runs only on a store
+                  found atomic.
+                nullable: true
+                properties:
+                  atomic:
+                    description: |-
+                      `true`: a second create of the same key failed (`If-None-Match: *`
+                      honoured); `false`: Angos fell back to advisory claims.
+                    type: boolean
+                  observedTime:
+                    type: string
+                  pod:
+                    description: The pod read, and when.
+                    type: string
+                  store:
+                    description: |-
+                      The store probed (endpoint, bucket, prefix), as the startup layer
+                      names it.
+                    type: string
+                required:
+                - atomic
+                - observedTime
+                - pod
+                - store
+                type: object
+              conditions:
+                default: []
+                description: |-
+                  `Ready` and the advisories, carrying one of the operator's reason
+                  codes.
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              configHash:
+                description: The hash of the hot layer desired.
+                nullable: true
+                type: string
+              configWrittenTime:
+                description: |-
+                  When the hot layer being confirmed was written (RFC 3339): the logs
+                  are read from then.
+                nullable: true
+                type: string
+              endpoint:
+                description: |-
+                  Where the instance answers in the cluster:
+                  `<service>.<namespace>.svc:<port>`.
+                nullable: true
+                type: string
+              identities:
+                additionalProperties:
+                  description: What an instance made of an identity bound to it.
+                  properties:
+                    appliedVersion:
+                      description: |-
+                        The password version every pod of the instance confirmed loading:
+                        what the identity's targets may get.
+                      format: uint64
+                      minimum: 0.0
+                      nullable: true
+                      type: integer
+                    conflictWith:
+                      nullable: true
+                      type: string
+                    message:
+                      nullable: true
+                      type: string
+                    state:
+                      enum:
+                      - Rendered
+                      - Conflict
+                      - SecretMissing
+                      - SecretNotAllowed
+                      - Invalid
+                      type: string
+                    username:
+                      type: string
+                    version:
+                      description: The password version rendered.
+                      format: uint64
+                      minimum: 0.0
+                      nullable: true
+                      type: integer
+                  required:
+                  - state
+                  - username
+                  type: object
+                description: |-
+                  The identities bound to the instance and what became of each
+                  (`namespace/name`).
+                type: object
+              lastAppliedTime:
+                nullable: true
+                type: string
+              lastRejectionTime:
+                nullable: true
+                type: string
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              pendingBootHash:
+                description: |-
+                  A startup layer that changes the storage, waiting for the annotation
+                  `angos.weebo.io/confirm-storage` set to this value.
+                nullable: true
+                type: string
+              pods:
+                description: Each pod's answer while a hot layer is being confirmed.
+                items:
+                  description: A pod's answer to a hot layer.
+                  properties:
+                    name:
+                      type: string
+                    since:
+                      description: Since when (RFC 3339).
+                      nullable: true
+                      type: string
+                    state:
+                      enum:
+                      - Pending
+                      - Applied
+                      - Rejected
+                      - Restarted
+                      type: string
+                  required:
+                  - name
+                  - state
+                  type: object
+                type: array
+              rejectedConfigHash:
+                description: The last hot layer a pod refused, and why (keys and paths only).
+                nullable: true
+                type: string
+              rejectionMessage:
+                nullable: true
+                type: string
+              releasedRepositories:
+                additionalProperties:
+                  type: string
+                description: |-
+                  The repositories that left the configuration, and when
+                  (`namespace/name`): a prune waits `pruneLock.windowHours` after.
+                type: object
+              repositories:
+                additionalProperties:
+                  description: What an instance made of a repository bound to it.
+                  properties:
+                    appliedGeneration:
+                      description: |-
+                        The `metadata.generation` every pod of the instance confirmed
+                        loading.
+                      format: int64
+                      nullable: true
+                      type: integer
+                    conflictWith:
+                      description: The repository holding its prefix (`namespace/name`), in conflict.
+                      nullable: true
+                      type: string
+                    generation:
+                      description: The `metadata.generation` rendered.
+                      format: int64
+                      nullable: true
+                      type: integer
+                    message:
+                      description: Why it isn't rendered.
+                      nullable: true
+                      type: string
+                    prefix:
+                      type: string
+                    state:
+                      enum:
+                      - Rendered
+                      - Conflict
+                      - SecretMissing
+                      - SecretNotAllowed
+                      - Invalid
+                      type: string
+                  required:
+                  - prefix
+                  - state
+                  type: object
+                description: |-
+                  The repositories bound to the instance and what became of each
+                  (`namespace/name`): rendered, or why not.
+                type: object
+              rolledOutFor:
+                description: When the operator last rolled the pods for an unconfirmed reload.
+                nullable: true
+                type: string
+              upgrade:
+                description: |-
+                  An Angos upgrade in progress (spec 6.8): the store scrubbed on the
+                  old version, the pods rolled, checked on the new one.
+                nullable: true
+                properties:
+                  attempt:
+                    default: 0
+                    description: How many times the step was tried.
+                    format: uint32
+                    minimum: 0.0
+                    type: integer
+                  failure:
+                    description: |-
+                      Why the step failed: it waits for `angos.weebo.io/retry-upgrade`
+                      (a new value), or for the tag to go back.
+                    nullable: true
+                    type: string
+                  from:
+                    description: The tags, from and to.
+                    type: string
+                  job:
+                    description: The step's `Job`, when it runs one.
+                    nullable: true
+                    type: string
+                  retried:
+                    description: The `retry-upgrade` value last retried for.
+                    nullable: true
+                    type: string
+                  since:
+                    description: When the step started (RFC 3339).
+                    type: string
+                  step:
+                    description: The steps of an upgrade, in order.
+                    enum:
+                    - ScrubDryRun
+                    - Scrub
+                    - Rollout
+                    - Verify
+                    - ReconcileIndex
+                    type: string
+                  to:
+                    type: string
+                required:
+                - from
+                - since
+                - step
+                - to
+                type: object
+              version:
+                description: The Angos tag the ready pods run.
+                nullable: true
+                type: string
+              writtenConfigHash:
+                description: |-
+                  The hash the hot layer had when written (what `configWrittenTime`
+                  is about).
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: AngosLocalInstance
+        type: object
+        x-kubernetes-validations:
+        - message: 'the instance''s name names its Service: a DNS-1035 label (lowercase letters, digits and ''-'', starting with a letter), at most 63 characters'
+          rule: size(self.metadata.name) <= 63 && self.metadata.name.matches('^[a-z]([-a-z0-9]*[a-z0-9])?$')
+    served: true
+    storage: true
+    subresources:
+      status: {}

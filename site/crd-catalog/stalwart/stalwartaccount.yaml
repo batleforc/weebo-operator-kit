@@ -1,0 +1,244 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: stalwartaccounts.stalwart.weebo.io
+spec:
+  group: stalwart.weebo.io
+  names:
+    kind: StalwartAccount
+    plural: stalwartaccounts
+    singular: stalwartaccount
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.instance.name
+      name: Instance
+      type: string
+    - jsonPath: .status.address
+      name: Address
+      type: string
+    - jsonPath: .spec.state
+      name: State
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for StalwartAccountSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A person's mailbox (`x:Account` of type `User`), without any
+              credential: its owner logs in through the instance's OpenID Connect
+              provider, which finds the account by local-part and domain, and creates
+              App Passwords in the web interface. The name, aliases, quota, locale and
+              time zone are the operator's; the description and the group memberships
+              are left to the OpenID Connect login.
+
+              `state: Locked` keeps the mailbox, its address and its App Passwords,
+              but refuses every login (App Passwords included), sending and delivery;
+              `Active` gives them back. A locked account that reached that state is
+              `Ready: True`.
+
+              The account is read by `status.remoteId`, never adopted by name: an
+              address already taken in Stalwart (an account the OpenID Connect login
+              created first) fails (`StalwartObjectAlreadyExists`) until
+              `weebo-stalwart-importer` links it to this CR.
+            properties:
+              aliases:
+                description: |-
+                  Other local-parts delivering to this mailbox, in the same domain.
+                  Compared as a set.
+                items:
+                  type: string
+                maxItems: 32
+                type: array
+              deletionPolicy:
+                default: Orphan
+                description: |-
+                  `Orphan` (default): deleting the CR leaves the mailbox in Stalwart.
+                  `Delete`: deleting the CR deletes the mailbox and its mail.
+                enum:
+                - Delete
+                - Orphan
+                type: string
+              domainRef:
+                description: |-
+                  The `StalwartDomain` (cluster-scoped, by `metadata.name`) the
+                  account's address and aliases are in. It must be `Ready` on the
+                  same instance.
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+              instanceRef:
+                description: |-
+                  The `StalwartInstance` (or `StalwartLocalInstance`) the account
+                  lives on. Unset: the only `StalwartInstance`, else the only
+                  `StalwartLocalInstance` of the namespace.
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              locale:
+                description: 'Locale of the account (`fr-FR`). Unset: no opinion.'
+                nullable: true
+                type: string
+              name:
+                description: |-
+                  The local-part of the account's address (`<name>@<domain>`),
+                  lowercased: the user's login name at the OpenID Connect provider.
+                  Defaults to the CR's `metadata.name`. Changing it moves the address:
+                  only applied with the annotation
+                  `stalwart.weebo.io/allow-disruptive-update: "true"`.
+                nullable: true
+                type: string
+              quota:
+                description: |-
+                  Disk quota of the mailbox (`2Gi`). Unset: no opinion, the server's
+                  value is kept.
+                nullable: true
+                x-kubernetes-int-or-string: true
+              state:
+                default: Active
+                description: |-
+                  `Active`, or `Locked`: logins (App Passwords included), sending and
+                  delivery refused, the mailbox, its address and its App Passwords
+                  kept.
+                enum:
+                - Active
+                - Locked
+                type: string
+              timeZone:
+                description: 'Time zone of the account (`Europe/Paris`). Unset: no opinion.'
+                nullable: true
+                type: string
+            required:
+            - domainRef
+            type: object
+          status:
+            nullable: true
+            properties:
+              address:
+                description: |-
+                  The address (or, for a domain, the name) Stalwart confirmed at the
+                  last reconcile. A read by `remoteId` answering another one is taken
+                  as the object being gone — its id reused by another object after a
+                  reset — never patched.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                description: '`Ready`, carrying one of the operator''s reason codes.'
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under the same name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastRotation:
+                description: |-
+                  Value of the `stalwart.weebo.io/rotate-secret` annotation the last
+                  emitted secret was issued for: the same nonce never rotates twice.
+                  Only on kinds that emit a secret.
+                nullable: true
+                type: string
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              remoteId:
+                description: |-
+                  Identifier of the remote object, as Stalwart returned it. Its
+                  presence means this CR created (and owns) that object: the remote
+                  object is read by this id, never looked up by name, and the
+                  finalizer only deletes what is recorded here. Set once at creation,
+                  or by `weebo-stalwart-importer`.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: StalwartAccount
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,234 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: forgejonamespacepolicies.forgejo.weebo.io
+spec:
+  group: forgejo.weebo.io
+  names:
+    kind: ForgejoNamespacePolicy
+    plural: forgejonamespacepolicies
+    shortNames:
+    - fjnp
+    singular: forgejonamespacepolicy
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for ForgejoNamespacePolicySpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              Namespace allow-list for the namespaced kinds, enforced by the
+              admission webhook (CREATE/UPDATE) and re-checked by every reconciler.
+              It governs the CRs bound to a `ForgejoInstance` (shared by every
+              namespace); a CR bound to a `ForgejoLocalInstance` is bounded by its
+              namespace's own token instead.
+
+              While no `ForgejoNamespacePolicy` exists, everything is allowed. As soon
+              as one exists, a namespaced CR is only accepted if some `Allow` rule
+              matches its namespace and kind and covers the organizations, users and
+              templates it references — and no `Deny` rule matches. Rules of every
+              policy are pooled; deny always wins.
+            properties:
+              rules:
+                items:
+                  properties:
+                    allowedKinds:
+                      items:
+                        enum:
+                        - ForgejoUser
+                        - ForgejoUserKey
+                        - ForgejoOrganization
+                        - ForgejoTeam
+                        - ForgejoRepository
+                        - ForgejoWebhook
+                        - ForgejoDeployKey
+                        - ForgejoOAuth2Application
+                        - ForgejoAccessToken
+                        type: string
+                      type: array
+                    allowedOrganizations:
+                      description: |-
+                        Organizations (Forgejo names) the namespace may manage or reference —
+                        a `ForgejoOrganization`'s own name, the owner of its repositories
+                        and teams, the target of its org webhooks — whether through a CR or
+                        a `remoteName`. Unset: any. On a `Deny` rule: only deny requests
+                        referencing one of these.
+                      items:
+                        type: string
+                      nullable: true
+                      type: array
+                    allowedTemplates:
+                      description: |-
+                        Template repositories (Forgejo `owner/name`, `*`, or a prefix glob
+                        like `batlehub/*`) the namespace may generate repositories from by
+                        name (`fromTemplate.repository`). Unset: any. A template referenced
+                        as a same-namespace CR (`fromTemplate.repositoryRef`) isn't
+                        governed by this list. On a `Deny` rule: only deny requests
+                        referencing one of these.
+                      items:
+                        type: string
+                      nullable: true
+                      type: array
+                    allowedUsers:
+                      description: |-
+                        Users (Forgejo logins) the namespace may manage or reference — a
+                        `ForgejoUser`'s own login, the owner of a repository, organization
+                        or OAuth2 application, a team member, the holder of an access token
+                        or SSH key — whether through a CR or a `remoteName`. Unset: any.
+                        Restricting this is what stops a namespace from minting tokens for
+                        a privileged account. On a `Deny` rule: only deny requests
+                        referencing one of these.
+                      items:
+                        type: string
+                      nullable: true
+                      type: array
+                    effect:
+                      default: Allow
+                      enum:
+                      - Allow
+                      - Deny
+                      type: string
+                    namespaces:
+                      description: Namespace names, `*` for all, or a prefix glob like `team-*`.
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - allowedKinds
+                  - namespaces
+                  type: object
+                type: array
+            required:
+            - rules
+            type: object
+          status:
+            nullable: true
+            properties:
+              appliedSecretHash:
+                description: |-
+                  SHA-256 of the write-only inputs last sent to Forgejo (webhook
+                  secret and authorization header), so a changed `Secret` value is
+                  re-applied even though Forgejo never returns it.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              forgejoId:
+                description: |-
+                  The Forgejo-side identifier. Presence means this CR actually
+                  owns/created the corresponding Forgejo object — set once on first
+                  successful create (or seeded by the importer), never inferred by
+                  name-matching. For `managementPolicy: Observe` users it is the id
+                  of the observed user.
+                nullable: true
+                type: string
+              forgejoName:
+                description: |-
+                  Current Forgejo-side name the API addresses the object by (user
+                  login, organization or team name). Kept so a rename in `spec` knows
+                  the old name to rename *from*.
+                nullable: true
+                type: string
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under that name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastRotation:
+                description: |-
+                  Value of the `forgejo.weebo.io/rotate-secret` annotation the last
+                  secret was issued for, so the same nonce never rotates twice. Only
+                  used by kinds that emit a secret (a `rotationPeriod` renewal shows
+                  as a new `forgejoId` instead).
+                nullable: true
+                type: string
+              observedGeneration:
+                format: int64
+                nullable: true
+                type: integer
+              ownerId:
+                description: |-
+                  Forgejo id of the account owning the object (an access token's
+                  user, an OAuth2 application's owner), so a renamed owner isn't
+                  mistaken for a different one.
+                nullable: true
+                type: string
+              passwordEmitted:
+                description: |-
+                  A `ForgejoUser`'s generated password was handed out to its
+                  `secretTargets`: turning it into a bot (or an external account) then
+                  replaces the password, so the one handed out stops working. Never
+                  set on an adopted account: its password isn't the operator's.
+                nullable: true
+                type: boolean
+              secretPending:
+                description: |-
+                  A secret (token, client secret, password) was issued in Forgejo but
+                  not written to every target: the targets may hold a revoked value,
+                  so the next reconcile issues a new one instead of trusting them.
+                nullable: true
+                type: boolean
+            type: object
+        required:
+        - spec
+        title: ForgejoNamespacePolicy
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

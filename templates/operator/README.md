@@ -20,7 +20,7 @@ Hexagonal, one crate per layer, same rules as every weebo operator:
 | `adapters-outbound` | the {{product}} HTTP gateway — **the placeholder to replace with the real client** — and its factory |
 | `adapters-inbound`  | the controllers and the webhook router (health routes only for now)       |
 | `operator`          | the binary: telemetry, leader election, webhook server, controllers      |
-| `crdgen`            | writes `deploy/crd/` from `api`                                           |
+| `crdgen`            | writes `deploy/crd/` from `api` (CRDs, and `links.json` for the CRD IDE)  |
 | `testkit`           | envtest and fakes for the integration tests                               |
 
 `deploy/charts/{{project-name}}` is a thin chart on the kit's library

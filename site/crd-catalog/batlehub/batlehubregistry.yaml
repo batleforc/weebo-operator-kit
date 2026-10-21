@@ -1,0 +1,218 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: batlehubregistries.batlehub.weebo.io
+spec:
+  group: batlehub.weebo.io
+  names:
+    kind: BatleHubRegistry
+    plural: batlehubregistries
+    shortNames:
+    - bhr
+    singular: batlehubregistry
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.registryName
+      name: Registry
+      type: string
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .status.instance.name
+      name: Instance
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for BatleHubRegistrySpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              One `[[registries]]` entry of an instance's configuration, as its own
+              object, so each team manages its registries. The instance renders
+              every registry it accepts after its `configLayers`, sorted by
+              namespace then name, and pushes the result (`external.manageConfig`);
+              `Ready` tells whether that configuration was applied.
+
+              A registry of another namespace than the instance's attaches only when
+              the instance accepts that namespace (`registrySelector.namespaces`),
+              may not contain a `${VAR}` placeholder (they resolve from the
+              instance's environment), and may not complete an entry of the
+              instance's own configuration.
+            properties:
+              config:
+                description: |-
+                  Every other key of the `[[registries]]` table, written in YAML key
+                  for key (`mode`, `upstreams`, `rbac`, `rules`, `cache`, `hosts`…).
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              configFrom:
+                description: |-
+                  TOML fragments of the table merged over `config` (`upstream_auth`,
+                  `tls`…), from this namespace. A fragment may not set `type` nor
+                  `name`.
+                items:
+                  description: |-
+                    A TOML document in a `ConfigMap` or a `Secret` of this object's
+                    namespace. A `Secret` must be labelled
+                    `batlehub.weebo.io/credential: "true"`: its content is sent to
+                    BatleHub, so it has to opt in.
+                  properties:
+                    configMapRef:
+                      description: A key of a `ConfigMap`.
+                      nullable: true
+                      properties:
+                        key:
+                          default: config.toml
+                          description: Defaults to `config.toml`.
+                          type: string
+                        name:
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    secretRef:
+                      description: 'A key of a `Secret` labelled `batlehub.weebo.io/credential: "true"`.'
+                      nullable: true
+                      properties:
+                        key:
+                          default: config.toml
+                          description: Defaults to `config.toml`.
+                          type: string
+                        name:
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                  type: object
+                  x-kubernetes-validations:
+                  - message: set exactly one of configMapRef and secretRef
+                    rule: has(self.configMapRef) != has(self.secretRef)
+                type: array
+              instanceRef:
+                description: |-
+                  The `BatleHubLocalInstance` serving this registry; unset, the only
+                  one of this namespace. Another namespace's instance must accept
+                  this one (its `registrySelector.namespaces`).
+                properties:
+                  kind:
+                    description: '`LocalInstance`, the only kind (may be left out).'
+                    enum:
+                    - LocalInstance
+                    type: string
+                  name:
+                    description: '`metadata.name` of the `BatleHubLocalInstance`.'
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: Namespace of the instance; defaults to this registry's own. Another namespace's instance must accept this one (its `registrySelector.namespaces`).
+                    type: string
+                required:
+                - name
+                type: object
+              name:
+                description: The name BatleHub serves it under; defaults to this object's name.
+                minLength: 1
+                nullable: true
+                type: string
+              suspend:
+                description: Keep the object, leave the registry out of the configuration.
+                type: boolean
+              type:
+                description: |-
+                  The registry's type: `npm`, `cargo`, `pypi`… (validated by
+                  BatleHub's parser).
+                minLength: 1
+                type: string
+            required:
+            - type
+            type: object
+          status:
+            description: What the operator rendered of the registry.
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: '`Ready`, carrying one of the operator''s reason codes.'
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              instance:
+                description: The instance this registry was resolved to and stays bound to.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              instanceConfigHash:
+                description: The instance's `configHash` this registry was rendered into.
+                nullable: true
+                type: string
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              registryName:
+                description: The name BatleHub serves it under.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: BatleHubRegistry
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

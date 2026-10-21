@@ -1,0 +1,340 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: authentikapplications.authentik.weebo.io
+spec:
+  group: authentik.weebo.io
+  names:
+    categories: []
+    kind: AuthentikApplication
+    plural: authentikapplications
+    shortNames: []
+    singular: authentikapplication
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for AuthentikApplicationSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              Mirrors `authentik_application` + its `protocol_provider`. Namespaced —
+              owned by whichever team/namespace created it, governed by
+              `AuthentikNamespacePolicy`.
+            properties:
+              instanceRef:
+                description: |-
+                  The `AuthentikInstance` or `AuthentikLocalInstance` this application
+                  lives on.
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              metaIcon:
+                nullable: true
+                type: string
+              name:
+                type: string
+              provider:
+                description: |-
+                  `oauth2`/`proxy` are implemented in v1 (both are in real use in the
+                  Terraform module being replaced — `longhorn.tf` uses `proxy`).
+                  `saml`/`ldap` are schema-only stubs: accepted by the schema so a future
+                  addition isn't a breaking change, but rejected by the reconciler with
+                  an explicit error, never silently ignored. See `.prompt/plan.md`
+                  decision 2.
+
+                  Deliberately **not** a Rust sum type (`enum Foo { Oauth2(..),
+                  Proxy(..) }`) even though that's what it conceptually is: kube-core's
+                  CRD schema generation cannot merge an internally-tagged enum whose
+                  variants carry different literal discriminator values — each variant's
+                  `kind` property gets a different `enum: [...]` schema and
+                  `CustomResourceExt::crd()` panics ("Property 'kind' ... must be
+                  identical"). This flat-struct-plus-discriminator shape is the standard
+                  kube.rs workaround; "exactly one of `oauth2`/`proxy` set, matching
+                  `kind`" is validated by the reconciler, not the schema.
+                properties:
+                  kind:
+                    enum:
+                    - oauth2
+                    - proxy
+                    - saml
+                    - ldap
+                    type: string
+                  oauth2:
+                    nullable: true
+                    properties:
+                      accessTokenValidity:
+                        description: |-
+                          How long an access token stays valid, in Authentik's duration
+                          spelling: `"minutes=30"`, `"hours=1"`, `"days=1"`, or several joined
+                          by `;`. It governs the ID token minted alongside it too, which is what
+                          makes it worth setting: a consumer that replays an ID token as a
+                          credential -- `docker login` against a registry that validates OIDC
+                          bearers, for one -- lives exactly this long before it has to get
+                          another.
+
+                          Omitted leaves the value alone: the field is not sent, so a provider
+                          tuned by hand keeps its setting and a new one takes Authentik's
+                          default. That is deliberate, and it is what keeps adopting an existing
+                          provider free of surprises.
+                        nullable: true
+                        type: string
+                      allowedRedirectUris:
+                        default: []
+                        items:
+                          properties:
+                            matchingMode:
+                              enum:
+                              - strict
+                              - regex
+                              type: string
+                            url:
+                              type: string
+                          required:
+                          - matchingMode
+                          - url
+                          type: object
+                        type: array
+                      authorizationFlow:
+                        type: string
+                      clientId:
+                        nullable: true
+                        type: string
+                      clientType:
+                        default: confidential
+                        description: |-
+                          Public clients cannot safely keep a client secret. Existing CRs that
+                          omit this field retain the historical confidential-client behavior.
+                        enum:
+                        - public
+                        - confidential
+                        type: string
+                      grantTypes:
+                        default: []
+                        items:
+                          type: string
+                        type: array
+                      invalidationFlow:
+                        type: string
+                      propertyMappings:
+                        default: []
+                        items:
+                          type: string
+                        type: array
+                      signingKey:
+                        default: authentik Self-signed Certificate
+                        description: |-
+                          Name of an existing Authentik certificate key pair used to sign
+                          tokens. Resolved by name at reconcile time (never created by this
+                          operator). Defaults to Authentik's built-in
+                          `"authentik Self-signed Certificate"` when the field is omitted;
+                          set it explicitly to `null` to create a provider with no signing
+                          key. The default is only applied on *absence* — an explicit `null`
+                          is preserved — so the importer, which emits `null` for a provider
+                          that genuinely has no signing key, keeps migration parity.
+                        nullable: true
+                        type: string
+                    required:
+                    - authorizationFlow
+                    - invalidationFlow
+                    type: object
+                  proxy:
+                    nullable: true
+                    properties:
+                      authorizationFlow:
+                        type: string
+                      externalHost:
+                        type: string
+                      internalHost:
+                        type: string
+                      invalidationFlow:
+                        type: string
+                      outpostRef:
+                        description: |-
+                          `None` => attach to Authentik's embedded outpost by name (default,
+                          matches current `longhorn.tf` behavior). `Some(name)` => must
+                          resolve to an `AuthentikOutpost` CR.
+                        nullable: true
+                        type: string
+                    required:
+                    - authorizationFlow
+                    - externalHost
+                    - internalHost
+                    - invalidationFlow
+                    type: object
+                required:
+                - kind
+                type: object
+              secretTargets:
+                description: |-
+                  Where this application's oauth2 credentials are written. When empty
+                  (the default), they go to one target named after this CR, in its
+                  namespace, on the `AuthentikInstance`'s `secretStore.backend`. When
+                  non-empty, they are **fanned out** to every listed target;
+                  Kubernetes and Vault targets may be mixed. A target stays in this
+                  CR's namespace, and a Vault `path` under
+                  `<pathPrefix>/<namespace>/` unless the instance's `pathGrants`
+                  open it to this namespace. Only meaningful for
+                  `provider.kind: oauth2` — proxy providers carry no client secret, so
+                  this is ignored for them.
+                items:
+                  description: |-
+                    Where an emitted secret (generated password or key, OAuth2 credentials,
+                    access token) is written. A CR may list several targets — the same
+                    value is fanned out to each.
+                  properties:
+                    backend:
+                      default: kubernetes
+                      description: |-
+                        `kubernetes` (default) or `vault`. A Vault target reuses the Vault
+                        connection (address, mount, auth) the instance configures, which it
+                        must then do.
+                      enum:
+                      - kubernetes
+                      - vault
+                      type: string
+                    name:
+                      description: |-
+                        Kubernetes: the `Secret` name. Vault: names the default path
+                        `<pathPrefix>/<namespace>/<name>` when `path` is unset.
+                      type: string
+                    namespace:
+                      description: |-
+                        Kubernetes `Secret` namespace (Vault: the namespace segment of the
+                        default path). Defaults to the CR's own namespace; required on
+                        cluster-scoped CRs. A namespaced CR may only name its own namespace.
+                      nullable: true
+                      type: string
+                    path:
+                      description: |-
+                        Vault only: explicit KV v2 path under the instance's mount. It must
+                        stay under `<pathPrefix>/<namespace>/` (this object's namespace, or
+                        the target's on a cluster-scoped object), unless the instance's
+                        `pathGrants` open it to this object.
+                      nullable: true
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              slug:
+                description: |-
+                  The application's slug: its URL in Authentik and its identity there
+                  (`status.authentikId`). Changing it renames the application in
+                  place; its access policies follow.
+                type: string
+            required:
+            - instanceRef
+            - name
+            - provider
+            - slug
+            type: object
+          status:
+            nullable: true
+            properties:
+              authentikId:
+                description: |-
+                  The Authentik-side primary key. Presence means this CR actually
+                  owns/created the corresponding Authentik object — set once on
+                  first successful create (or seeded by the import tool), never
+                  inferred by name-matching. See `.prompt/plan.md`.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to
+                  (`AuthentikApplication`, and the `AuthentikAccessPolicy`s through
+                  their application): a `spec.instanceRef` by name only never
+                  silently moves to another instance created later under that name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              observedGeneration:
+                format: int64
+                nullable: true
+                type: integer
+              providerId:
+                description: |-
+                  Set on `AuthentikApplication` only: the pk of the provider its
+                  application points at. Kept so that provider is reused, or deleted
+                  with the CR, even after the application itself was deleted out of
+                  band in Authentik.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: AuthentikApplication
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
