@@ -14,3 +14,6 @@ rustls = { workspace = true }
 serde = { workspace = true }
 serde_norway = { workspace = true }
 tokio = { workspace = true }
+
+[lints]
+workspace = true

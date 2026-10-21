@@ -4,6 +4,8 @@
 //! any write, an owned object is applied with its owner reference, and
 //! logs are read bounded, with timestamps.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use serde_json::json;
 use weebo_kit_adapters::{KubeOwnedObjects, KubePodLogs, WorkloadSettings};
 use weebo_kit_application::workload::{
@@ -15,7 +17,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const LABEL: &str = "example.weebo.io/credential";
 
 fn client(server: &MockServer) -> kube::Client {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Err: another test installed it first, which is as good.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let config = kube::Config::new(server.uri().parse().unwrap());
     kube::Client::try_from(config).unwrap()
 }

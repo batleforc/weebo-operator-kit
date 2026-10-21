@@ -48,7 +48,7 @@ mod tests {
     async fn every_clone_sees_the_trigger() {
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let shutdown = Shutdown::new(async move {
-            let _ = rx.await;
+            rx.await.unwrap();
         });
         let waiter = tokio::spawn(shutdown.clone().wait());
         tx.send(()).unwrap();

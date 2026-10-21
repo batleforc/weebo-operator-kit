@@ -58,10 +58,14 @@ pub trait Admission: Send + Sync + 'static {
     fn undecidable(&self) -> Self::Reason;
 }
 
+/// A review's object that isn't the CR it claims to be.
+#[derive(Debug, thiserror::Error)]
+#[error("object does not match the CRD: {0}")]
+pub struct NotTheCrd(#[from] serde_json::Error);
+
 /// The typed CR behind a review's `DynamicObject`.
-pub fn typed<K: DeserializeOwned>(object: &DynamicObject) -> Result<K, String> {
-    let value = serde_json::to_value(object).map_err(|e| e.to_string())?;
-    serde_json::from_value(value).map_err(|e| format!("object does not match the CRD: {e}"))
+pub fn typed<K: DeserializeOwned>(object: &DynamicObject) -> Result<K, NotTheCrd> {
+    Ok(serde_json::from_value(serde_json::to_value(object)?)?)
 }
 
 struct AdmissionState<A> {
@@ -504,7 +508,7 @@ mod tests {
         let thing: Thing = typed(req.object.as_ref().unwrap()).unwrap();
         assert_eq!(thing.spec["v"], 3);
         #[derive(Debug, serde::Deserialize)]
-        #[allow(dead_code)]
+        #[expect(dead_code, reason = "only deserialized, to be refused")]
         struct Strict {
             missing: String,
         }

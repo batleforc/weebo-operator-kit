@@ -26,7 +26,7 @@ pub mod telemetry;
 pub mod webhook_server;
 
 pub use health::Health;
-pub use scope::WatchScope;
+pub use scope::{ScopeError, WatchScope};
 pub use shutdown::Shutdown;
 
 /// The docs package quotes these values on every operator's site (its

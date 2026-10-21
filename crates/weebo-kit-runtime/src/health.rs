@@ -103,7 +103,7 @@ impl Health {
     }
 
     /// `Err` names the components failing past the threshold.
-    pub fn live(&self) -> Result<(), String> {
+    pub fn live(&self) -> Result<(), Unhealthy> {
         let failing = self.failing.lock().unwrap_or_else(|p| p.into_inner());
         let dead: Vec<String> = failing
             .iter()
@@ -119,10 +119,16 @@ impl Health {
         if dead.is_empty() {
             Ok(())
         } else {
-            Err(dead.join("\n"))
+            Err(Unhealthy(dead))
         }
     }
 }
+
+/// The components failing past the threshold, one
+/// `<component>: failing for <n>s: <why>` per line.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", .0.join("\n"))]
+pub struct Unhealthy(pub Vec<String>);
 
 /// `GET /readyz`, `GET /livez`, and `GET /healthz` (alias of `/readyz`).
 pub fn routes<S>(health: Arc<Health>) -> Router<S> {
@@ -144,7 +150,7 @@ async fn readyz(State(health): State<Arc<Health>>) -> (StatusCode, &'static str)
 async fn livez(State(health): State<Arc<Health>>) -> (StatusCode, String) {
     match health.live() {
         Ok(()) => (StatusCode::OK, "ok".to_string()),
-        Err(why) => (StatusCode::SERVICE_UNAVAILABLE, why),
+        Err(why) => (StatusCode::SERVICE_UNAVAILABLE, why.to_string()),
     }
 }
 
@@ -160,7 +166,7 @@ mod tests {
         assert!(health.live().is_ok());
         std::thread::sleep(Duration::from_millis(30));
         health.failed("watch", "boom again");
-        let why = health.live().unwrap_err();
+        let why = health.live().unwrap_err().to_string();
         assert!(why.contains("watch") && why.contains("boom again"), "{why}");
         health.ok("watch");
         assert!(health.live().is_ok());

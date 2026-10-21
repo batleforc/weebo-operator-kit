@@ -2,6 +2,12 @@
 //! rules) accepts a path pattern if and only if the domain's `validate`
 //! does: the apiserver and the stores never disagree.
 
+#![expect(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test helpers fail the test on purpose"
+)]
+
 use regex::Regex;
 use weebo_kit_api::VaultPathGrant;
 use weebo_kit_domain::vault_paths::{self, PathGrant};

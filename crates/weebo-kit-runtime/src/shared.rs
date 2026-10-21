@@ -105,9 +105,11 @@ where
                         Ok(event) => {
                             health.ok(name);
                             let (change, done) = change(event);
-                            if let Some(change) = change {
-                                // No subscriber yet (standby): dropped.
-                                let _ = sender.send(change);
+                            if let Some(change) = change
+                                && sender.send(change).is_err()
+                            {
+                                // No subscriber yet (standby): the store has it.
+                                tracing::trace!("{name}: change dropped, no subscriber");
                             }
                             if done {
                                 listed_tx.send_replace(true);
@@ -350,7 +352,9 @@ impl SharedWatches {
     /// Resolves once every shared watch has listed (or is gone).
     pub async fn listed(&self) {
         for mut listed in self.listed.iter().cloned() {
-            let _ = listed.wait_for(|listed| *listed).await;
+            if listed.wait_for(|listed| *listed).await.is_err() {
+                tracing::debug!("a shared watch ended before it listed");
+            }
         }
     }
 
@@ -515,7 +519,8 @@ mod tests {
         fed.writer.apply_watcher_event(&event);
         let (change, done) = change(event);
         if let Some(change) = change {
-            let _ = fed.shared.changes.send(change);
+            // A test without a subscriber drops it, as the real task does.
+            fed.shared.changes.send(change).ok();
         }
         if done {
             fed.listed.send_replace(true);
@@ -642,7 +647,10 @@ mod tests {
 
     /// A client that never connects: building streams and controllers only.
     fn offline() -> Client {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        // Err: another test installed it first, which is as good.
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         Client::try_from(kube::Config::new("http://127.0.0.1:1".parse().unwrap())).unwrap()
     }
 

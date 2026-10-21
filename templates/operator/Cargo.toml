@@ -42,7 +42,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_norway = "0.9"
 thiserror = "2.0"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 kube = { version = "4.0", features = ["derive", "runtime", "client", "unstable-runtime"] }
@@ -64,3 +64,18 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 # disk mid-build over this without it.
 [profile.test]
 debug = false
+
+# Most of target/ is debug info nobody reads: line tables keep file:line in
+# panics and backtraces. Tests inherit dev; overflow checks stay on.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# The binary the image ships: smaller to pull, no symbols. `panic` stays
+# `unwind`, the default: `abort` would change how a panic ends the process.
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

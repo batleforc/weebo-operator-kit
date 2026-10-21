@@ -16,3 +16,6 @@ serde = { workspace = true }
 # The version the kit is tested with (RFC 0005).
 k8s-openapi = { workspace = true, features = ["v1_36"] }
 serde_json = { workspace = true }
+
+[lints]
+workspace = true

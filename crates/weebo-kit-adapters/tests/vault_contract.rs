@@ -4,6 +4,8 @@
 //! identical data), existence checks, deletes, and re-logins only on a
 //! stale token.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use std::collections::BTreeMap;
 
 use serde_json::json;

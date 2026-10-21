@@ -132,14 +132,20 @@ impl OperatorProcess {
     pub async fn stop(mut self, timeout: Duration) -> Duration {
         let started = Instant::now();
         let pid = self.pid();
-        let _ = std::process::Command::new("kill")
+        if let Err(e) = std::process::Command::new("kill")
             .args(["-TERM", &pid.to_string()])
-            .status();
+            .status()
+        {
+            // The wait below times out and kills it instead.
+            tracing::warn!(error = %e, "sending SIGTERM to the operator");
+        }
         match tokio::time::timeout(timeout, self.child.wait()).await {
             Ok(_) => started.elapsed(),
             Err(_) => {
                 tracing::warn!(?timeout, "the operator ignored SIGTERM, killing it");
-                let _ = self.child.kill().await;
+                if let Err(e) = self.child.kill().await {
+                    tracing::warn!(error = %e, "killing the operator");
+                }
                 timeout
             }
         }

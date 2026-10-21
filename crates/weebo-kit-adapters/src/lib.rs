@@ -21,12 +21,14 @@ pub mod secret_routing;
 pub mod secret_vault;
 pub mod workloads;
 
-pub use adopt::{Adopter, Adoption, Summary};
-pub use instance::{InstanceResolver, SelectError, select, wait_synced};
+pub use adopt::{AdoptError, Adopter, Adoption, Summary};
+pub use instance::{InstanceResolver, LookupError, SelectError, select, wait_synced};
 pub use instances::{Instances, Resolved, SharesItself};
 pub use local_instances::LocalInstances;
 pub use secret_k8s::{K8sSecretStore, MANAGED_BY_LABEL};
 pub use secret_ref::{TokenSecretError, read_local_instance_token, read_secret_key};
 pub use secret_routing::{RoutingSecretStore, VaultResolver};
-pub use secret_vault::{CasWrite, PathMetadata, VaultConfig, VaultLogins, VaultSecretStore};
+pub use secret_vault::{
+    CasWrite, PathMetadata, VaultConfig, VaultLoginError, VaultLogins, VaultSecretStore,
+};
 pub use workloads::{KubeOwnedObjects, KubePodLogs, WorkloadSettings, is_ours};

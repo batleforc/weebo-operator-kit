@@ -42,5 +42,5 @@ async fn reconcile(obj: Arc<Instance>, ctx: Arc<Ctx>) -> Result<Action, Error> {
     };
     super::record_reconcile(KIND, started, &outcome);
     super::publish(&api, &ctx.recorder, obj.as_ref(), &outcome).await?;
-    Ok(super::requeue_after(&outcome))
+    Ok(super::requeue_after(obj.as_ref(), &outcome))
 }

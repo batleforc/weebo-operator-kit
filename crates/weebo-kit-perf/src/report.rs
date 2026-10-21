@@ -232,14 +232,25 @@ impl Report {
     /// The report as Markdown: the checks, then one row per phase, with
     /// the change from `baseline` (a previous run's JSON) when given.
     pub fn to_markdown(&self, budget: &Budget, baseline: Option<&Report>) -> String {
+        let mut md = String::new();
+        self.write_markdown(&mut md, budget, baseline)
+            .expect("writing to a String can't fail");
+        md
+    }
+
+    fn write_markdown(
+        &self,
+        md: &mut String,
+        budget: &Budget,
+        baseline: Option<&Report>,
+    ) -> std::fmt::Result {
         let checks = self.check(budget);
         let failed = checks.iter().filter(|c| !c.ok).count();
-        let mut md = String::new();
-        let _ = writeln!(md, "## Operator resources — `{}`\n", self.label);
+        writeln!(md, "## Operator resources — `{}`\n", self.label)?;
         if let (Some(at), Some(kit)) = (&self.measured_at, &self.kit_version) {
-            let _ = writeln!(md, "Measured {at} with weebo-kit-perf {kit}.\n");
+            writeln!(md, "Measured {at} with weebo-kit-perf {kit}.\n")?;
         }
-        let _ = writeln!(
+        writeln!(
             md,
             "{} — startup {:.1} s, shutdown {:.1} s.\n",
             if failed == 0 {
@@ -249,30 +260,30 @@ impl Report {
             },
             self.startup_secs,
             self.shutdown_secs
-        );
-        let _ = writeln!(
+        )?;
+        writeln!(
             md,
             "| check | measured | limit | |\n| --- | ---: | ---: | --- |"
-        );
+        )?;
         for c in &checks {
-            let _ = writeln!(
+            writeln!(
                 md,
                 "| {} | {:.2} | {:.2} | {} |",
                 c.name,
                 c.measured,
                 c.limit,
                 if c.ok { "ok" } else { "**over**" }
-            );
+            )?;
         }
-        let _ = writeln!(
+        writeln!(
             md,
             "\n| phase | s | objects | RSS median / peak (MiB) | RSS slope (MiB/min) | CPU mean / peak (m) | fds | threads | reconciles (errors) | p95 (s) | API req (/min) | converged (s) |\n\
              | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
-        );
+        )?;
         for p in &self.phases {
             let was = baseline.and_then(|b| b.phase(&p.name));
             let u = p.usage;
-            let _ = writeln!(
+            writeln!(
                 md,
                 "| {} | {:.0} | {} | {:.1}{} / {:.1} | {:.2} | {:.1}{} / {:.0} | {} | {} | {:.0} ({:.0}) | {} | {:.0} ({:.1}) | {} |",
                 p.name,
@@ -297,26 +308,26 @@ impl Report {
                 p.api_requests,
                 p.api_requests_per_min,
                 p.convergence_secs.map_or("".into(), |v| format!("{v:.1}")),
-            );
+            )?;
         }
         if baseline.is_some() {
-            let _ = writeln!(md, "\n_(±%: change from the baseline run, report-only.)_");
+            writeln!(md, "\n_(±%: change from the baseline run, report-only.)_")?;
         }
-        let _ = writeln!(
+        writeln!(
             md,
             "\n<details><summary>apiserver requests by verb and resource (harness included, background of {:.0}/min removed)</summary>\n",
             self.background_api_requests_per_min
-        );
+        )?;
         for p in &self.phases {
             let top: Vec<String> = p
                 .api_top
                 .iter()
                 .map(|(k, v)| format!("{k} {v:.0}"))
                 .collect();
-            let _ = writeln!(md, "- **{}**: {}", p.name, top.join(", "));
+            writeln!(md, "- **{}**: {}", p.name, top.join(", "))?;
         }
-        let _ = writeln!(md, "\n</details>");
-        md
+        writeln!(md, "\n</details>")?;
+        Ok(())
     }
 
     /// Writes `<label>.json` and `<label>.md` into `$WEEBO_PERF_OUT`, else

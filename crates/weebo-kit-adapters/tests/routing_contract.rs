@@ -4,6 +4,8 @@
 //! ownership recorded in the KV custom metadata, and Vault resolved only
 //! when a target needs it.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -65,7 +67,10 @@ async fn vault_with(
 /// A Kubernetes client pointed at `server` (only Kubernetes targets reach
 /// it).
 fn kubernetes(server: &MockServer) -> Arc<K8sSecretStore> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Err: another test installed it first, which is as good.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let config = kube::Config::new(server.uri().parse().unwrap());
     let client = kube::Client::try_from(config).unwrap();
     Arc::new(K8sSecretStore::new(

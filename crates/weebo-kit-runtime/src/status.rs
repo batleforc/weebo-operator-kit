@@ -127,9 +127,10 @@ where
         match op().await {
             Ok(done) => return Ok(done),
             Err(err) if attempt < STATUS_RETRIES && transient(&err) => {
-                attempt += 1;
+                attempt = attempt.saturating_add(1);
                 tracing::warn!(error = %err, attempt, "status patch failed, retrying");
-                tokio::time::sleep(Duration::from_millis(250 * 2u64.pow(attempt))).await;
+                let backoff = 250u64.saturating_mul(2u64.saturating_pow(attempt));
+                tokio::time::sleep(Duration::from_millis(backoff)).await;
             }
             Err(err) => return Err(err),
         }

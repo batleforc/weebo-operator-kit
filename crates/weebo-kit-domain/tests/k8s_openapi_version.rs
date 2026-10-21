@@ -4,6 +4,12 @@
 //! otherwise hit k8s-openapi's "Both v1_x and v1_y features are enabled".
 //! Only a `[dev-dependencies]` may pick one, for the kit's own tests.
 
+#![expect(
+    clippy::arithmetic_side_effects,
+    clippy::expect_used,
+    reason = "test helpers fail the test on purpose"
+)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

@@ -3,6 +3,8 @@
 //! clock, whatever its `renewTime` says), leaving a live one alone, losing
 //! a race on the `resourceVersion`, renewing, and stepping down.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -15,7 +17,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const LEASE: &str = "/apis/coordination.k8s.io/v1/namespaces/ops/leases/op-leader";
 
 fn lock(server: &MockServer, holder: &str) -> LeaseLock {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Err: another test installed it first, which is as good.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let config = kube::Config::new(server.uri().parse().unwrap());
     let client = kube::Client::try_from(config).unwrap();
     lease(
