@@ -1,0 +1,221 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: stalwartdomains.stalwart.weebo.io
+spec:
+  group: stalwart.weebo.io
+  names:
+    kind: StalwartDomain
+    plural: stalwartdomains
+    singular: stalwartdomain
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.address
+      name: Domain
+      type: string
+    - jsonPath: .status.instance.name
+      name: Instance
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for StalwartDomainSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A mail domain of a Stalwart instance (`x:Domain`). Cluster-scoped: a
+              domain is shared by every namespace's accounts, which reference it by
+              name (`domainRef`). Created when missing, then compared on every
+              reconcile and written only when a field the operator owns drifted. Never
+              deleted by the operator: deleting the CR leaves the domain in Stalwart
+              (`deletionPolicy: Orphan`); a domain is removed by hand.
+
+              Stalwart also refuses a name whose top-level label it doesn't know: the
+              special-use ones (`.internal`, `.lan`, `.home.arpa`, `.test`) are
+              accepted, an arbitrary one is not.
+            properties:
+              aliases:
+                description: |-
+                  Other domain names delivering to the same mailboxes, compared as a
+                  set.
+                items:
+                  type: string
+                maxItems: 64
+                type: array
+              catchAll:
+                description: |-
+                  Local-part receiving mail sent to an unknown address of the domain
+                  (`<catchAll>@<name>`). Unset: no opinion, the catch-all is left as
+                  it is.
+                nullable: true
+                type: string
+              deletionPolicy:
+                default: Orphan
+                description: |-
+                  Only `Orphan`: the operator's API key may not destroy domains, and a
+                  domain is removed by hand.
+                enum:
+                - Delete
+                - Orphan
+                type: string
+                x-kubernetes-validations:
+                - message: 'a StalwartDomain is never deleted by the operator: deletionPolicy must be Orphan'
+                  rule: self == 'Orphan'
+              dkim:
+                default: Automatic
+                description: |-
+                  `Automatic`: Stalwart generates the domain's DKIM keys (Ed25519 and
+                  RSA, its default parameters) and signs with them; their DNS records
+                  are published by hand. `Manual`: keys are managed outside the
+                  operator.
+                enum:
+                - Automatic
+                - Manual
+                type: string
+              instanceRef:
+                description: |-
+                  The `StalwartInstance` (or shared `StalwartLocalInstance`) the
+                  domain lives on. Unset: the only `StalwartInstance`.
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              name:
+                description: |-
+                  The domain name (lowercased by Stalwart). Defaults to the CR's
+                  `metadata.name`. Changing it moves every address of the domain: it
+                  is only applied with the annotation
+                  `stalwart.weebo.io/allow-disruptive-update: "true"`.
+                nullable: true
+                type: string
+              subAddressing:
+                default: Enabled
+                description: Plus-addressing (`name+tag@domain` delivered to `name@domain`).
+                enum:
+                - Enabled
+                - Disabled
+                type: string
+            type: object
+          status:
+            nullable: true
+            properties:
+              address:
+                description: |-
+                  The address (or, for a domain, the name) Stalwart confirmed at the
+                  last reconcile. A read by `remoteId` answering another one is taken
+                  as the object being gone — its id reused by another object after a
+                  reset — never patched.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                description: '`Ready`, carrying one of the operator''s reason codes.'
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under the same name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastRotation:
+                description: |-
+                  Value of the `stalwart.weebo.io/rotate-secret` annotation the last
+                  emitted secret was issued for: the same nonce never rotates twice.
+                  Only on kinds that emit a secret.
+                nullable: true
+                type: string
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              remoteId:
+                description: |-
+                  Identifier of the remote object, as Stalwart returned it. Its
+                  presence means this CR created (and owns) that object: the remote
+                  object is read by this id, never looked up by name, and the
+                  finalizer only deletes what is recorded here. Set once at creation,
+                  or by `weebo-stalwart-importer`.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: StalwartDomain
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

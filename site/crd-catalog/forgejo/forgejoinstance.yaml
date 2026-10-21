@@ -1,0 +1,370 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: forgejoinstances.forgejo.weebo.io
+spec:
+  group: forgejo.weebo.io
+  names:
+    kind: ForgejoInstance
+    plural: forgejoinstances
+    shortNames:
+    - fji
+    singular: forgejoinstance
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.url
+      name: URL
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for ForgejoInstanceSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              Connection to a real Forgejo server (v16 or later). Cluster-scoped — an
+              org-wide, shared piece of infrastructure, not owned by a single
+              namespace. CRs without an `instanceRef` use the cluster's only
+              `ForgejoInstance`.
+            properties:
+              secretStore:
+                default:
+                  backend: kubernetes
+                description: |-
+                  Default destination of the secrets this instance's CRs emit (OAuth2
+                  credentials, access tokens, generated passwords and deploy keys) when
+                  a CR sets no `secretTargets`. Defaults to a Kubernetes `Secret`.
+                properties:
+                  backend:
+                    default: kubernetes
+                    enum:
+                    - kubernetes
+                    - vault
+                    type: string
+                  vault:
+                    nullable: true
+                    properties:
+                      address:
+                        description: Vault server address, e.g. `https://vault.example.com:8200`.
+                        type: string
+                      caSecretRef:
+                        description: |-
+                          Optional custom CA certificate to verify Vault's TLS with, read from
+                          a Kubernetes `Secret` (the referenced `key` must hold a PEM bundle).
+                          Use this to trust a private CA without mounting
+                          it into the operator pod — the operator reads the Secret via the
+                          API and hands the PEM to its Vault client. When unset, the system
+                          trust store is used. Only consulted for `https://` Vault addresses.
+                        nullable: true
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        - namespace
+                        type: object
+                      kubernetesAuthMount:
+                        default: kubernetes
+                        description: |-
+                          Mount path of Vault's Kubernetes auth backend. Defaults to
+                          `kubernetes`, Vault's own default mount name.
+                        type: string
+                      kubernetesAuthRole:
+                        description: |-
+                          Vault Kubernetes-auth role this operator authenticates as — its own
+                          ServiceAccount JWT is exchanged for a Vault token via
+                          `auth/<kubernetesAuthMount>/login`.
+                        type: string
+                      mount:
+                        description: |-
+                          KV v2 secrets engine mount (e.g. `secret`) credentials are written
+                          under.
+                        type: string
+                      pathGrants:
+                        description: |-
+                          Vault paths this instance's CRs may write to outside their
+                          namespace's subtree `<pathPrefix>/<namespace>/`, per namespace
+                          (`clusterScoped` is refused: every object writing credentials is
+                          namespaced). A grant opens its paths to everyone allowed
+                          to create an emitting CR in a covered namespace, and may let such a
+                          CR take over a value no CR owns yet: prefer exact paths. The Vault
+                          policy of the operator's role stays the hard bound.
+                        items:
+                          description: |-
+                            Paths of the instance's secret backend that objects may write to
+                            outside their namespace's subtree `<pathPrefix>/<namespace>/`. Opens
+                            them to every subject allowed to create an emitting object in a
+                            covered namespace, and cannot hand over a value another object owns.
+                          properties:
+                            clusterScoped:
+                              description: |-
+                                The grant opens `paths` to cluster-scoped objects (instead of
+                                `namespaces`).
+                              type: boolean
+                            namespaces:
+                              description: |-
+                                Namespaces whose objects may write `paths`: exact names, `*`, or a
+                                prefix glob such as `team-*`. `team-*` opens the paths to every
+                                matching namespace.
+                              items:
+                                maxLength: 64
+                                minLength: 1
+                                type: string
+                              maxItems: 64
+                              type: array
+                            paths:
+                              description: |-
+                                Path patterns under the mount, compared segment by segment: a
+                                literal segment matches itself, `+` exactly one segment, and a last
+                                `*` one or more. Each holds at least one literal segment, e.g.
+                                `shared/auth`, `+/auth`, `platform/*`. Prefer exact paths where
+                                values not written by the operator live: a covered object may take
+                                over a value no object owns yet.
+                              items:
+                                maxLength: 512
+                                pattern: ^(?:(?:[^/*+]+|\+)/)*(?:[^/*+]+|\+|\*)$
+                                type: string
+                                x-kubernetes-validations:
+                                - message: a path pattern has no "." or ".." segment
+                                  rule: '!self.matches(''(^|/)\\.\\.?(/|$)'')'
+                                - message: a path pattern has at least one literal segment
+                                  rule: self.matches('(^|/)[^/*+]+(/|$)')
+                              maxItems: 64
+                              minItems: 1
+                              type: array
+                          required:
+                          - paths
+                          type: object
+                          x-kubernetes-validations:
+                          - message: a grant names namespaces or is clusterScoped, not both
+                            rule: (has(self.namespaces) && size(self.namespaces) > 0) != (has(self.clusterScoped) && self.clusterScoped)
+                        maxItems: 32
+                        type: array
+                      pathPrefix:
+                        default: weebo-forgejo
+                        description: |-
+                          Path prefix under `mount` — the default KV path is
+                          `<pathPrefix>/<namespace>/<name>`, one secret per emitting CR
+                          (same convention as the Kubernetes backend's Secret naming). Empty:
+                          `<namespace>/<name>`. A CR's explicit `path` must stay under
+                          `<pathPrefix>/<namespace>/` unless `pathGrants` opens it.
+
+                          An empty prefix makes every namespace's subtree a top-level folder
+                          of the mount: a namespace named like a folder that holds other
+                          values (one a grant opens, `shared/` say) owns that folder — its
+                          CRs write there without any grant. Keep a prefix unless the mount
+                          is reserved to per-namespace folders and no namespace can be
+                          created with the name of another top-level folder.
+                        type: string
+                    required:
+                    - address
+                    - kubernetesAuthRole
+                    - mount
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'pathGrants name namespaces: every object writing credentials is namespaced, clusterScoped grants never apply'
+                      rule: '!has(self.pathGrants) || self.pathGrants.all(g, !has(g.clusterScoped) || !g.clusterScoped)'
+                type: object
+              tls:
+                default:
+                  insecureSkipVerify: false
+                description: |-
+                  TLS verification for the API connection above — a private CA to trust
+                  (`tls.caSecretRef`), or the `tls.insecureSkipVerify` escape hatch.
+                  Defaults to plain platform-trust-store verification.
+                properties:
+                  caSecretRef:
+                    description: |-
+                      Optional custom CA certificate to verify the instance's TLS with,
+                      read from a Kubernetes `Secret` (the referenced `key` must hold a PEM
+                      bundle). Use this to trust a private CA without mounting it into the
+                      operator pod — the operator reads the Secret via the API and hands the
+                      PEM to its HTTP client. It is added *on top of* the platform trust
+                      store, so publicly-signed endpoints keep working. When unset, only the
+                      platform trust store (plus the usual `SSL_CERT_FILE`/`SSL_CERT_DIR`
+                      env vars) is used.
+                    nullable: true
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                  insecureSkipVerify:
+                    default: false
+                    description: |-
+                      Skip certificate verification entirely — insecure, intended only for
+                      throwaway/self-signed instances. Prefer `caSecretRef` below, which
+                      trusts a private CA without turning verification off.
+                    type: boolean
+                type: object
+              tokenSecretRef:
+                description: |-
+                  `Secret` key holding an API token of a Forgejo **site admin**. The
+                  operator acts as that admin, and through the `Sudo` header as other
+                  users for per-user objects (OAuth2 applications). The token needs the
+                  scopes covering every kind it manages — `write:admin`,
+                  `write:organization`, `write:repository`, `write:user` at least.
+                  Re-read on every gateway call, so rotating it needs no restart.
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - key
+                - name
+                - namespace
+                type: object
+              url:
+                description: |-
+                  Base web URL of the Forgejo instance, e.g. `https://git.example.com`
+                  — not the `/api/v1` REST endpoint, which is derived from it (see
+                  [`split_urls`]). Written as `FORGEJO_URL` into emitted secrets.
+                type: string
+            required:
+            - tokenSecretRef
+            - url
+            type: object
+          status:
+            nullable: true
+            properties:
+              appliedSecretHash:
+                description: |-
+                  SHA-256 of the write-only inputs last sent to Forgejo (webhook
+                  secret and authorization header), so a changed `Secret` value is
+                  re-applied even though Forgejo never returns it.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              forgejoId:
+                description: |-
+                  The Forgejo-side identifier. Presence means this CR actually
+                  owns/created the corresponding Forgejo object — set once on first
+                  successful create (or seeded by the importer), never inferred by
+                  name-matching. For `managementPolicy: Observe` users it is the id
+                  of the observed user.
+                nullable: true
+                type: string
+              forgejoName:
+                description: |-
+                  Current Forgejo-side name the API addresses the object by (user
+                  login, organization or team name). Kept so a rename in `spec` knows
+                  the old name to rename *from*.
+                nullable: true
+                type: string
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under that name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastRotation:
+                description: |-
+                  Value of the `forgejo.weebo.io/rotate-secret` annotation the last
+                  secret was issued for, so the same nonce never rotates twice. Only
+                  used by kinds that emit a secret (a `rotationPeriod` renewal shows
+                  as a new `forgejoId` instead).
+                nullable: true
+                type: string
+              observedGeneration:
+                format: int64
+                nullable: true
+                type: integer
+              ownerId:
+                description: |-
+                  Forgejo id of the account owning the object (an access token's
+                  user, an OAuth2 application's owner), so a renamed owner isn't
+                  mistaken for a different one.
+                nullable: true
+                type: string
+              passwordEmitted:
+                description: |-
+                  A `ForgejoUser`'s generated password was handed out to its
+                  `secretTargets`: turning it into a bot (or an external account) then
+                  replaces the password, so the one handed out stops working. Never
+                  set on an adopted account: its password isn't the operator's.
+                nullable: true
+                type: boolean
+              secretPending:
+                description: |-
+                  A secret (token, client secret, password) was issued in Forgejo but
+                  not written to every target: the targets may hold a revoked value,
+                  so the next reconcile issues a new one instead of trusting them.
+                nullable: true
+                type: boolean
+            type: object
+        required:
+        - spec
+        title: ForgejoInstance
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

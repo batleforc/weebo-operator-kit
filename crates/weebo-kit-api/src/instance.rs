@@ -40,6 +40,7 @@ impl InstanceKind {
     "rule": "!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'",
     "message": "namespace only applies to kind LocalInstance"
 }]))]
+#[schemars(extend("x-weebo-link" = { "to": [{ "role": "Instance" }, { "role": "LocalInstance" }] }))]
 pub struct InstanceRef {
     /// `metadata.name` of the instance.
     pub name: String,

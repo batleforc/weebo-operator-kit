@@ -7,9 +7,10 @@ comes from here:
 
 | Entry point                        | What it gives the site                                                                                       |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `weebo-crd-docs` (bin)             | CRD YAML → `content/docs/crds/*.mdx` (+ `index.mdx`, `meta.json`) and `public/crd-schemas/*.json` (+ `index.json`); with a `reference` section, the operator reference pages too |
+| `weebo-crd-docs` (bin)             | CRD YAML → `content/docs/crds/*.mdx` (+ `index.mdx`, `meta.json`) and `public/crd-schemas/*.json` (+ `index.json`, `links.json`); with a `reference` section, the operator reference pages too |
 | `@weebo/operator-docs/crd-docs`    | the same generator as a function (`generateCrdDocs`), `defineConfig` for its config file                     |
 | `@weebo/operator-docs/crd-form`    | the manifest builder: `CrdForm`, `CrdBuilder`, `ChoicePicker`, fields, schema utils, guided-choice types       |
+| `@weebo/operator-docs/crd-ide/model` | the CRD IDE's pure model: catalog, project, graph of references, validation, YAML import/export, zip, layout |
 | `@weebo/operator-docs/site`        | `defineSite`, `baseOptions`, `DocsRootProvider`, `siteMetadata`, `createDocsPage`, `OperatorHome`, `docsMdxComponents`, source helpers, `withBasePath` |
 | `@weebo/operator-docs/routes`      | handlers of the search, `llms.txt`, `llms-full.txt`, per-page Markdown and OG image routes                   |
 | `@weebo/operator-docs/config`      | the route constants alone (`docsRoute`, …), for `proxy.ts`                                                  |
@@ -182,9 +183,61 @@ export function getMDXComponents(components?: MDXComponents) {
 ```
 
 `docsMdxComponents` brings Fumadocs' defaults, `Accordion(s)`, `Step(s)`,
-`Tab(s)`, `<CrdForm kind="…" />` (on every generated page) and
+`Tab(s)`, `<CrdForm kind="…" />` (on every generated page),
 `<CrdBuilder />` (a kind picker in front of the same form, for a "build a
-manifest" guide), both bound to the operator's guided choices.
+manifest" guide) and `<CrdIde />` (see below), all bound to the operator's
+guided choices.
+
+## The CRD IDE
+
+`<CrdIde />` composes a project of manifests linked to each other: an
+instance, the Secret its token comes from, the objects that live on it.
+Put it on a page of its own (`full: true` in the frontmatter): its code
+loads only there, and the graph's `@xyflow/react` with the project's first
+resource.
+
+```tsx
+// src/components/mdx.tsx — schema directories (weebo-crd-docs output);
+// the default is the site's own /crd-schemas
+docsMdxComponents(CHOICES, { sources: [{ base: '/crd-schemas' }] });
+```
+
+```mdx
+{/* content/docs/ide.mdx — recipes: ready-made projects, multi-document
+    YAML with `<…>` marking what to fill in. Passed here, on the IDE's page:
+    given to docsMdxComponents, they would ship with every page. */}
+import { RECIPES } from '@/lib/recipes';
+
+<CrdIde recipes={RECIPES} />
+```
+
+A recipe is `{ id, label, description?, yaml }`.
+
+- **Resources**: add one of any catalog kind, import YAML (files or
+  paste), or add a recipe. A manifest in another served version of a kind,
+  or of a kind outside the catalog, is kept read-only and exported as is.
+- **Import a cluster's objects**: `kubectl get <kinds> -A -o yaml` (a
+  `List`) imports as is, several files at once. What the server sets
+  (`status`, `uid`, `resourceVersion`, `managedFields`, the
+  last-applied annotation…) is dropped; a `Secret` becomes an external
+  object with its keys, never its values (neither in the page nor in the
+  draft); an object already in the project is replaced, not duplicated.
+- **Links** come from `links.json` (see [Links](#links)): under each
+  resource, every reference field is a select of the objects it may point
+  at — the project's resources, the objects they make (the Secret of an
+  external secret) and the external objects declared by hand (never
+  exported). The graph, above, shows them; the list is the keyboard way,
+  with every action.
+- **Issues**, as you type: the schema (required, type, enum, pattern,
+  bounds, unknown fields), the recipe's blanks, references to nothing or to
+  the wrong kind, a missing key, a local instance not shared with the
+  referencing namespace, duplicates. CEL rules are left to the API server.
+- **Out**: multi-document YAML in dependency order (copy or `.yaml`), or a
+  `.zip` of one file per resource. The project is kept in the browser's
+  storage between visits.
+
+The model behind it (`@weebo/operator-docs/crd-ide/model`) is plain
+TypeScript, without React, for scripts and tests.
 
 ## The CRD reference generator
 
@@ -217,6 +270,8 @@ export default defineConfig({
   // required for every kind: a minimal spec, checked against the schema
   // (every required field present, every key a real field)
   examples: { '<Prefix>Instance': { url: 'https://…' } },
+  // what the crdgen's links.json cannot say (see "Links" below)
+  links: {},
 });
 ```
 
@@ -254,6 +309,57 @@ escaped, so a description can never become a JS expression (evaluated at
 build time), a JSX element or an image fetched at build time. Names,
 defaults, enum values and rules are shown as code, fenced past any backtick
 they contain.
+
+### Links
+
+`public/crd-schemas/links.json` tells the CRD IDE which fields name another
+object and which objects a kind makes. It merges two sources:
+
+- `<crdDir>/links.json`, written by the operator's `crdgen` from the
+  markers of its `api` types (`weebo_kit_api::links`): `x-weebo-link` on a
+  reference field, `x-weebo-produces` on the kit's `SecretTarget` (one
+  Secret per Kubernetes target), `x-weebo-keys` on the field listing them
+  (the keys those Secrets hold). An operator whose crdgen predates it has
+  no links there.
+- The config's `links` (`CrdLinks`), per kind: `references` a CRD written by
+  another tool cannot carry, and `produces`, the objects a resource of the
+  kind makes:
+
+```js
+links: {
+  ExternalSecret: {
+    produces: [{
+      kind: { kind: 'Secret' },
+      // the first field set names it
+      name: ['spec.target.name', 'metadata.name'],
+      // the field listing its keys; or `keyNames: ['tls.crt', …]`, fixed
+      keys: 'spec.data[].secretKey',
+    }],
+  },
+},
+```
+
+A production may also make one object per item (`each: 'spec.targets[]'`,
+the other paths then relative to the item), name its namespace's field
+(`namespace`, default the resource's) and skip items (`unless: { path:
+'backend', equals: 'vault' }`).
+
+Paths are dotted from the object's root (`spec.instanceRef`), `[]` stepping
+into an array's items and `*` into a map's values. The output is
+`{ version: 1, kinds: { <Kind>: { references: [{ path, to: [{ group, kind }] }], produces: [...] } } }`,
+`group: ""` being the core group. Generation fails, writing nothing, on a
+kind that is not one of the CRDs (a stale `links.json`: rerun the crdgen),
+a path that is not a field of the CRD, or a reference declared twice.
+
+### Schemas only
+
+`pages: false` writes `public/crd-schemas/` (schemas, `index.json`,
+`links.json`) and no page, with no example needed: a catalog of CRDs
+another tool owns, for the CRD IDE (the kit's site builds its catalog of
+every operator's and some third-party CRDs this way). `index.json` lists
+each kind's storage `apiVersion` and served versions: the IDE lists every
+kind from it and fetches a kind's schema only once the project holds a
+resource of that kind.
 
 ## The operator reference
 

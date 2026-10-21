@@ -1,0 +1,436 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: batlehubmaintenances.batlehub.weebo.io
+spec:
+  group: batlehub.weebo.io
+  names:
+    kind: BatleHubMaintenance
+    plural: batlehubmaintenances
+    shortNames:
+    - bhm
+    singular: batlehubmaintenance
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.instance.name
+      name: Instance
+      type: string
+    - jsonPath: .spec.action
+      name: Action
+      type: string
+    - jsonPath: .spec.schedule
+      name: Schedule
+      type: string
+    - jsonPath: .status.lastRun.state
+      name: Last Run
+      type: string
+    - jsonPath: .status.runCount
+      name: Runs
+      type: integer
+    - jsonPath: .status.nextRunTime
+      name: Next
+      type: date
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for BatleHubMaintenanceSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              An administrative action against the instance of this namespace, run
+              once or on a schedule: warming or clearing a cache, a retention pass, a
+              configuration reload, blocking an IP…
+
+              The operator is the scheduler (no Job, no pod): it calls BatleHub's
+              admin API at the time due, at most once per run — a run interrupted by
+              a restart of the operator is closed as failed, never replayed. Actions
+              that respect `params.dryRun` only report unless it is set to `false`.
+            properties:
+              action:
+                description: What to run (the guide lists each action's endpoint and params).
+                enum:
+                - configReload
+                - configValidate
+                - configApplyPending
+                - configDiscardPending
+                - cacheWarm
+                - cacheClearMetadata
+                - cacheClearArtifacts
+                - cacheEvict
+                - cacheCoherence
+                - packageInvalidate
+                - exploreInvalidate
+                - retentionRun
+                - tombstonesCompact
+                - vulnerabilityRescan
+                - verdictBackfill
+                - upstreamRecheck
+                - auditLogPurge
+                - airGapMissingPurge
+                - releaseImport
+                - ipBlock
+                - ipUnblock
+                - userBlock
+                - userUnblock
+                - packageBlock
+                - packageUnblock
+                - quotaReset
+                - bannerSet
+                - bannerClear
+                - restart
+                - healthCheck
+                type: string
+              instanceRef:
+                description: |-
+                  The `BatleHubLocalInstance` of this namespace to act on; unset, the
+                  only one of this namespace. Immutable.
+                properties:
+                  kind:
+                    description: '`LocalInstance`, the only kind (may be left out).'
+                    enum:
+                    - LocalInstance
+                    type: string
+                  name:
+                    description: '`metadata.name` of the `BatleHubLocalInstance`.'
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: 'Not allowed: the instance is in this object''s namespace.'
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: instanceRef is immutable
+                  rule: self == oldSelf
+                - message: the instance must be in this object's namespace
+                  rule: '!has(self.__namespace__)'
+              params:
+                default: {}
+                description: |-
+                  The action's parameters: which ones an action needs is checked
+                  when the object is written.
+                properties:
+                  artifact:
+                    nullable: true
+                    type: string
+                  before:
+                    description: 'RFC 3339: purge what is older.'
+                    format: date-time
+                    nullable: true
+                    type: string
+                  dryRun:
+                    description: Report only (default `true`) for the actions that respect it.
+                    nullable: true
+                    type: boolean
+                  durationSeconds:
+                    description: '`ipBlock`: how long; unset, until unblocked.'
+                    format: int64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  ip:
+                    minLength: 1
+                    nullable: true
+                    type: string
+                  level:
+                    description: '`bannerSet`.'
+                    enum:
+                    - info
+                    - warning
+                    - error
+                    - null
+                    nullable: true
+                    type: string
+                  message:
+                    description: '`bannerSet`.'
+                    maxLength: 2048
+                    minLength: 1
+                    nullable: true
+                    type: string
+                  olderThanDays:
+                    description: Purge what is older than this many days (instead of `before`).
+                    format: int64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  package:
+                    maxLength: 1024
+                    minLength: 1
+                    nullable: true
+                    type: string
+                  packages:
+                    description: Packages to warm.
+                    items:
+                      type: string
+                    type: array
+                  path:
+                    nullable: true
+                    type: string
+                  paths:
+                    description: Paths to warm (registries addressed by path).
+                    items:
+                      type: string
+                    type: array
+                  reason:
+                    nullable: true
+                    type: string
+                  registry:
+                    description: A registry's name on the instance.
+                    maxLength: 253
+                    minLength: 1
+                    nullable: true
+                    type: string
+                  repo:
+                    description: '`releaseImport`: the repository.'
+                    nullable: true
+                    type: string
+                  state:
+                    description: |-
+                      `vulnerabilityRescan`, `verdictBackfill`: only the verdicts in this
+                      state.
+                    enum:
+                    - allowed
+                    - warned
+                    - quarantined
+                    - denied
+                    - null
+                    nullable: true
+                    type: string
+                  tag:
+                    description: '`releaseImport`: the release tag.'
+                    nullable: true
+                    type: string
+                  user:
+                    description: A user id, as the instance stores it (`oidc:alice`).
+                    minLength: 1
+                    nullable: true
+                    type: string
+                  version:
+                    maxLength: 256
+                    minLength: 1
+                    nullable: true
+                    type: string
+                  versions:
+                    description: '`cacheWarm`: how many of the latest versions.'
+                    format: int64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                type: object
+              schedule:
+                description: |-
+                  A 5-field cron expression (minute hour day-of-month month
+                  day-of-week, UTC; day-of-week 0-7 from Sunday). Unset: one run.
+                maxLength: 128
+                minLength: 1
+                nullable: true
+                type: string
+              suspend:
+                default: false
+                description: Pauses the schedule.
+                type: boolean
+              timeoutSeconds:
+                default: 600
+                description: Bounds the run, and the request to BatleHub.
+                format: int64
+                maximum: 86400.0
+                minimum: 1.0
+                type: integer
+              ttlSecondsAfterFinished:
+                description: Deletes a single run's object this long after it finished.
+                format: int64
+                minimum: 0.0
+                nullable: true
+                type: integer
+            required:
+            - action
+            type: object
+            x-kubernetes-validations:
+            - message: cacheWarm needs params registry
+              rule: self.action != 'cacheWarm' || (has(self.params) && has(self.params.registry))
+            - message: cacheClearMetadata needs params registry
+              rule: self.action != 'cacheClearMetadata' || (has(self.params) && has(self.params.registry))
+            - message: cacheClearArtifacts needs params registry
+              rule: self.action != 'cacheClearArtifacts' || (has(self.params) && has(self.params.registry))
+            - message: cacheEvict needs params registry
+              rule: self.action != 'cacheEvict' || (has(self.params) && has(self.params.registry))
+            - message: cacheCoherence needs params registry
+              rule: self.action != 'cacheCoherence' || (has(self.params) && has(self.params.registry))
+            - message: packageInvalidate needs params registry, package, version
+              rule: self.action != 'packageInvalidate' || (has(self.params) && has(self.params.registry) && has(self.params.package) && has(self.params.version))
+            - message: retentionRun needs params registry
+              rule: self.action != 'retentionRun' || (has(self.params) && has(self.params.registry))
+            - message: tombstonesCompact needs params registry
+              rule: self.action != 'tombstonesCompact' || (has(self.params) && has(self.params.registry))
+            - message: vulnerabilityRescan needs params registry
+              rule: self.action != 'vulnerabilityRescan' || (has(self.params) && has(self.params.registry))
+            - message: verdictBackfill needs params registry
+              rule: self.action != 'verdictBackfill' || (has(self.params) && has(self.params.registry))
+            - message: upstreamRecheck needs params registry, package
+              rule: self.action != 'upstreamRecheck' || (has(self.params) && has(self.params.registry) && has(self.params.package))
+            - message: auditLogPurge needs params one of before, olderThanDays
+              rule: self.action != 'auditLogPurge' || (has(self.params) && (has(self.params.before) || has(self.params.olderThanDays)))
+            - message: releaseImport needs params registry
+              rule: self.action != 'releaseImport' || (has(self.params) && has(self.params.registry))
+            - message: ipBlock needs params ip
+              rule: self.action != 'ipBlock' || (has(self.params) && has(self.params.ip))
+            - message: ipUnblock needs params ip
+              rule: self.action != 'ipUnblock' || (has(self.params) && has(self.params.ip))
+            - message: userBlock needs params user
+              rule: self.action != 'userBlock' || (has(self.params) && has(self.params.user))
+            - message: userUnblock needs params user
+              rule: self.action != 'userUnblock' || (has(self.params) && has(self.params.user))
+            - message: packageBlock needs params registry, package, version, reason
+              rule: self.action != 'packageBlock' || (has(self.params) && has(self.params.registry) && has(self.params.package) && has(self.params.version) && has(self.params.reason))
+            - message: packageUnblock needs params registry, package, version
+              rule: self.action != 'packageUnblock' || (has(self.params) && has(self.params.registry) && has(self.params.package) && has(self.params.version))
+            - message: quotaReset needs params registry, user
+              rule: self.action != 'quotaReset' || (has(self.params) && has(self.params.registry) && has(self.params.user))
+            - message: bannerSet needs params message, level
+              rule: self.action != 'bannerSet' || (has(self.params) && has(self.params.message) && has(self.params.level))
+            - message: instanceRef is immutable
+              rule: has(self.instanceRef) == has(oldSelf.instanceRef)
+          status:
+            description: The runs.
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: |-
+                  `Ready`: `True` when the last run succeeded or the schedule is
+                  armed.
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              failureCount:
+                default: 0
+                format: int64
+                type: integer
+              instance:
+                description: The instance this object was resolved to and stays bound to.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastRun:
+                description: The last run.
+                nullable: true
+                properties:
+                  completionTime:
+                    nullable: true
+                    type: string
+                  generation:
+                    default: 0
+                    description: The `metadata.generation` it ran for.
+                    format: int64
+                    type: integer
+                  message:
+                    description: The scalar fields of the instance's answer, or the error.
+                    nullable: true
+                    type: string
+                  reason:
+                    description: |-
+                      Why it failed: a reason code (`MaintenanceFailed`,
+                      `MaintenanceTimeout`, `MaintenanceInterrupted`).
+                    nullable: true
+                    type: string
+                  result:
+                    description: The instance's answer, replaced by a summary beyond 32 KiB.
+                    x-kubernetes-preserve-unknown-fields: true
+                  startTime:
+                    type: string
+                  state:
+                    description: Where a run stands.
+                    enum:
+                    - Running
+                    - Succeeded
+                    - Failed
+                    type: string
+                required:
+                - startTime
+                - state
+                type: object
+              nextRunTime:
+                description: When the schedule runs next.
+                nullable: true
+                type: string
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              resumedTime:
+                description: |-
+                  When the schedule was last seen running again after a suspension:
+                  it counts from there, the runs missed meanwhile are skipped.
+                nullable: true
+                type: string
+              runCount:
+                default: 0
+                format: int64
+                type: integer
+              runNow:
+                description: |-
+                  The last value of the `batlehub.weebo.io/run-now` annotation a run
+                  answered.
+                nullable: true
+                type: string
+              suspendedTime:
+                description: |-
+                  When the schedule was first seen suspended; cleared once it runs
+                  again.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: BatleHubMaintenance
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

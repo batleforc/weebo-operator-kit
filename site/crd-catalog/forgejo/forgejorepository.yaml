@@ -1,0 +1,591 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: forgejorepositories.forgejo.weebo.io
+spec:
+  group: forgejo.weebo.io
+  names:
+    kind: ForgejoRepository
+    plural: forgejorepositories
+    shortNames:
+    - fjrepo
+    singular: forgejorepository
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.forgejoName
+      name: Repository
+      type: string
+    - jsonPath: .status.forgejoId
+      name: ID
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for ForgejoRepositorySpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A Forgejo repository, owned by a `ForgejoOrganization` or a
+              `ForgejoUser`. Created empty (optionally initialized), from a template
+              repository, or by migrating/mirroring a remote.
+
+              Set exactly one of `organizationRef`/`userRef`, at most one of
+              `init`/`fromTemplate`/`migrate`, and exactly one of
+              `fromTemplate.repositoryRef`/`fromTemplate.repository`; anything else
+              reports `InvalidSpec`.
+            properties:
+              archived:
+                default: false
+                description: |-
+                  Archived repositories are read-only; their settings, branch
+                  protections and teams are left alone until unarchived.
+                type: boolean
+              branchProtections:
+                description: |-
+                  Branch protection rules. Unset: the repository's rules are left
+                  alone (those copied from a template, or set in Forgejo). Set:
+                  authoritative — a rule not listed here is deleted, and `[]` deletes
+                  them all.
+                items:
+                  description: |-
+                    One branch protection rule. Allow-lists name Forgejo users and teams
+                    directly (not CRs); each `enable*Whitelist` switch is derived from
+                    whether its lists are non-empty.
+                  properties:
+                    applyToAdmins:
+                      default: false
+                      type: boolean
+                    approvalsWhitelistTeams:
+                      items:
+                        type: string
+                      type: array
+                    approvalsWhitelistUsernames:
+                      items:
+                        type: string
+                      type: array
+                    blockOnOfficialReviewRequests:
+                      default: false
+                      type: boolean
+                    blockOnOutdatedBranch:
+                      default: false
+                      type: boolean
+                    blockOnRejectedReviews:
+                      default: false
+                      type: boolean
+                    dismissStaleApprovals:
+                      default: false
+                      type: boolean
+                    enablePush:
+                      default: false
+                      description: Allow pushing at all; with push allow-lists, only those may push.
+                      type: boolean
+                    ignoreStaleApprovals:
+                      default: false
+                      type: boolean
+                    mergeWhitelistTeams:
+                      items:
+                        type: string
+                      type: array
+                    mergeWhitelistUsernames:
+                      items:
+                        type: string
+                      type: array
+                    protectedFilePatterns:
+                      nullable: true
+                      type: string
+                    pushWhitelistDeployKeys:
+                      default: false
+                      type: boolean
+                    pushWhitelistTeams:
+                      items:
+                        type: string
+                      type: array
+                    pushWhitelistUsernames:
+                      items:
+                        type: string
+                      type: array
+                    requireSignedCommits:
+                      default: false
+                      type: boolean
+                    requiredApprovals:
+                      default: 0
+                      format: int64
+                      type: integer
+                    ruleName:
+                      description: Branch name or glob (`main`, `release/*`).
+                      type: string
+                    statusCheckContexts:
+                      description: Required status checks; enables the check when non-empty.
+                      items:
+                        type: string
+                      type: array
+                    unprotectedFilePatterns:
+                      nullable: true
+                      type: string
+                  required:
+                  - ruleName
+                  type: object
+                nullable: true
+                type: array
+              defaultBranch:
+                nullable: true
+                type: string
+              deletionPolicy:
+                default: Orphan
+                description: 'Defaults to `Orphan`: deleting the CR never deletes git history.'
+                enum:
+                - Delete
+                - Orphan
+                type: string
+              description:
+                nullable: true
+                type: string
+              fromTemplate:
+                description: |-
+                  Generate the repository from a template repository: a
+                  `ForgejoRepository` in the same namespace, or any Forgejo template
+                  by name (gated by the namespace policy's `allowedTemplates`).
+                  Creation-time only.
+                nullable: true
+                properties:
+                  avatar:
+                    default: false
+                    type: boolean
+                  gitContent:
+                    default: true
+                    type: boolean
+                  gitHooks:
+                    default: false
+                    type: boolean
+                  labels:
+                    default: false
+                    type: boolean
+                  protectedBranches:
+                    default: false
+                    description: |-
+                      Copy the template's branch protections. Leave `branchProtections`
+                      unset to keep them: when set, it is authoritative and a copied rule
+                      it doesn't list is deleted right after.
+                    type: boolean
+                  repository:
+                    description: |-
+                      Template repository by its Forgejo name, `owner/name` (e.g.
+                      `batlehub/weebo-base`) — one shared by every namespace, managed by a
+                      CR elsewhere or not at all. It must be marked as a template in
+                      Forgejo. A `ForgejoNamespacePolicy` restricts which ones a namespace
+                      may use with `allowedTemplates`.
+                    nullable: true
+                    type: string
+                  repositoryRef:
+                    description: |-
+                      Template `ForgejoRepository` in the same namespace (must have
+                      `isTemplate: true`).
+                    nullable: true
+                    properties:
+                      name:
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  topics:
+                    default: false
+                    type: boolean
+                  webhooks:
+                    default: false
+                    type: boolean
+                type: object
+              init:
+                description: Creation-time initialization of an empty repository.
+                nullable: true
+                properties:
+                  autoInit:
+                    default: true
+                    description: Create an initial commit (README, and the files below).
+                    type: boolean
+                  gitignores:
+                    description: '`.gitignore` template names, comma-separated (e.g. `Rust,Node`).'
+                    nullable: true
+                    type: string
+                  license:
+                    description: License template name (e.g. `MIT`).
+                    nullable: true
+                    type: string
+                  objectFormat:
+                    description: '`sha1` (default) or `sha256`.'
+                    nullable: true
+                    type: string
+                  readme:
+                    description: README template name (`Default`).
+                    nullable: true
+                    type: string
+                type: object
+              instanceRef:
+                description: |-
+                  The `ForgejoInstance` or `ForgejoLocalInstance` this object lives
+                  on. Unset: the cluster's only `ForgejoInstance`, else the only
+                  `ForgejoLocalInstance` of this namespace.
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              isTemplate:
+                default: false
+                description: Mark the repository as a template others can be generated from.
+                type: boolean
+              migrate:
+                description: |-
+                  Migrate (or pull-mirror) a remote repository. Creation-time only,
+                  except `mirrorInterval`, which stays in sync.
+                nullable: true
+                properties:
+                  authSecretRef:
+                    description: |-
+                      Credentials for the remote, from a `Secret` in this namespace.
+                      The `Secret` must carry the label `forgejo.weebo.io/credential: "true"`.
+                    nullable: true
+                    properties:
+                      name:
+                        type: string
+                      passwordKey:
+                        nullable: true
+                        type: string
+                      tokenKey:
+                        nullable: true
+                        type: string
+                      usernameKey:
+                        nullable: true
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  cloneAddr:
+                    description: URL to clone from.
+                    type: string
+                  issues:
+                    default: false
+                    type: boolean
+                  labels:
+                    default: false
+                    type: boolean
+                  lfs:
+                    default: false
+                    type: boolean
+                  milestones:
+                    default: false
+                    type: boolean
+                  mirror:
+                    default: false
+                    description: Keep the repository as a pull mirror of `cloneAddr`.
+                    type: boolean
+                  mirrorInterval:
+                    description: |-
+                      Pull-mirror sync interval, a Go duration (`8h`, `30m`). Kept in sync
+                      after creation; `0` disables periodic sync.
+                    nullable: true
+                    type: string
+                  pullRequests:
+                    default: false
+                    type: boolean
+                  releases:
+                    default: false
+                    type: boolean
+                  service:
+                    default: git
+                    description: |-
+                      `git` (default), `github`, `gitea`, `gitlab`, `gogs`, `onedev`,
+                      `gitbucket`, `codebase`, `forgejo` or `pagure`. Non-`git` services
+                      can also bring issues, PRs, releases... (flags below).
+                    type: string
+                  wiki:
+                    default: false
+                    type: boolean
+                required:
+                - cloneAddr
+                type: object
+              name:
+                description: |-
+                  Repository name. Changing it renames in place (Forgejo keeps a
+                  redirect from the old name). Changing the owner transfers the
+                  repository, which needs the
+                  `forgejo.weebo.io/allow-disruptive-update: "true"` annotation.
+                type: string
+              organizationRef:
+                description: Owning organization.
+                nullable: true
+                properties:
+                  name:
+                    description: '`metadata.name` of the CR.'
+                    nullable: true
+                    type: string
+                  namespace:
+                    description: Namespace of the CR; defaults to this object's own.
+                    nullable: true
+                    type: string
+                  remoteName:
+                    description: |-
+                      Forgejo name of an object no CR manages (a user's login, an
+                      organization's or team's name).
+                    nullable: true
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: set exactly one of name and remoteName
+                  rule: has(self.name) != has(self.remoteName)
+                - message: namespace only applies with name
+                  rule: '!has(self.namespace) || has(self.name)'
+              private:
+                default: false
+                type: boolean
+              teamRefs:
+                description: |-
+                  `ForgejoTeam`s granted access (organization-owned repositories only;
+                  the teams must belong to the owning organization). Authoritative,
+                  except for the `Owners` team and teams with
+                  `includesAllRepositories`, which Forgejo always grants.
+                items:
+                  description: |-
+                    A user, organization or team: a CR (`name`) — of this object's
+                    namespace, or of `namespace` when cross-namespace references are
+                    enabled for the operator and the target lists this namespace in its
+                    `sharedWith` — or an object that exists in Forgejo but no CR manages
+                    (`remoteName`, its Forgejo name). The operator never creates, changes
+                    nor deletes a `remoteName` object.
+                  properties:
+                    name:
+                      description: '`metadata.name` of the CR.'
+                      nullable: true
+                      type: string
+                    namespace:
+                      description: Namespace of the CR; defaults to this object's own.
+                      nullable: true
+                      type: string
+                    remoteName:
+                      description: |-
+                        Forgejo name of an object no CR manages (a user's login, an
+                        organization's or team's name).
+                      nullable: true
+                      type: string
+                  type: object
+                  x-kubernetes-validations:
+                  - message: set exactly one of name and remoteName
+                    rule: has(self.name) != has(self.remoteName)
+                  - message: namespace only applies with name
+                    rule: '!has(self.namespace) || has(self.name)'
+                type: array
+              units:
+                default: {}
+                description: Repository units to enable or disable. Unset = Forgejo's default.
+                properties:
+                  actions:
+                    nullable: true
+                    type: boolean
+                  issues:
+                    nullable: true
+                    type: boolean
+                  packages:
+                    nullable: true
+                    type: boolean
+                  projects:
+                    nullable: true
+                    type: boolean
+                  pullRequests:
+                    nullable: true
+                    type: boolean
+                  releases:
+                    nullable: true
+                    type: boolean
+                  wiki:
+                    nullable: true
+                    type: boolean
+                type: object
+              userRef:
+                description: Owning user.
+                nullable: true
+                properties:
+                  name:
+                    description: '`metadata.name` of the CR.'
+                    nullable: true
+                    type: string
+                  namespace:
+                    description: Namespace of the CR; defaults to this object's own.
+                    nullable: true
+                    type: string
+                  remoteName:
+                    description: |-
+                      Forgejo name of an object no CR manages (a user's login, an
+                      organization's or team's name).
+                    nullable: true
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: set exactly one of name and remoteName
+                  rule: has(self.name) != has(self.remoteName)
+                - message: namespace only applies with name
+                  rule: '!has(self.namespace) || has(self.name)'
+              website:
+                nullable: true
+                type: string
+            required:
+            - name
+            type: object
+          status:
+            nullable: true
+            properties:
+              appliedSecretHash:
+                description: |-
+                  SHA-256 of the write-only inputs last sent to Forgejo (webhook
+                  secret and authorization header), so a changed `Secret` value is
+                  re-applied even though Forgejo never returns it.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              forgejoId:
+                description: |-
+                  The Forgejo-side identifier. Presence means this CR actually
+                  owns/created the corresponding Forgejo object — set once on first
+                  successful create (or seeded by the importer), never inferred by
+                  name-matching. For `managementPolicy: Observe` users it is the id
+                  of the observed user.
+                nullable: true
+                type: string
+              forgejoName:
+                description: |-
+                  Current Forgejo-side name the API addresses the object by (user
+                  login, organization or team name). Kept so a rename in `spec` knows
+                  the old name to rename *from*.
+                nullable: true
+                type: string
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under that name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastRotation:
+                description: |-
+                  Value of the `forgejo.weebo.io/rotate-secret` annotation the last
+                  secret was issued for, so the same nonce never rotates twice. Only
+                  used by kinds that emit a secret (a `rotationPeriod` renewal shows
+                  as a new `forgejoId` instead).
+                nullable: true
+                type: string
+              observedGeneration:
+                format: int64
+                nullable: true
+                type: integer
+              ownerId:
+                description: |-
+                  Forgejo id of the account owning the object (an access token's
+                  user, an OAuth2 application's owner), so a renamed owner isn't
+                  mistaken for a different one.
+                nullable: true
+                type: string
+              passwordEmitted:
+                description: |-
+                  A `ForgejoUser`'s generated password was handed out to its
+                  `secretTargets`: turning it into a bot (or an external account) then
+                  replaces the password, so the one handed out stops working. Never
+                  set on an adopted account: its password isn't the operator's.
+                nullable: true
+                type: boolean
+              secretPending:
+                description: |-
+                  A secret (token, client secret, password) was issued in Forgejo but
+                  not written to every target: the targets may hold a revoked value,
+                  so the next reconcile issues a new one instead of trusting them.
+                nullable: true
+                type: boolean
+            type: object
+        required:
+        - spec
+        title: ForgejoRepository
+        type: object
+        x-kubernetes-validations:
+        - message: set exactly one of spec.organizationRef and spec.userRef
+          rule: has(self.spec.organizationRef) != has(self.spec.userRef)
+        - message: set at most one of spec.init, spec.fromTemplate and spec.migrate
+          rule: '(has(self.spec.init) ? 1 : 0) + (has(self.spec.fromTemplate) ? 1 : 0) + (has(self.spec.migrate) ? 1 : 0) <= 1'
+        - message: set exactly one of spec.fromTemplate.repositoryRef and spec.fromTemplate.repository
+          rule: '!has(self.spec.fromTemplate) || has(self.spec.fromTemplate.repositoryRef) != has(self.spec.fromTemplate.repository)'
+        - message: spec.fromTemplate.repository must be owner/name
+          rule: '!has(self.spec.fromTemplate) || !has(self.spec.fromTemplate.repository) || self.spec.fromTemplate.repository.matches(''^[^/]+/[^/]+$'')'
+        - message: spec.teamRefs only applies to organization-owned repositories
+          rule: '!has(self.spec.userRef) || !has(self.spec.teamRefs) || size(self.spec.teamRefs) == 0'
+    served: true
+    storage: true
+    subresources:
+      status: {}

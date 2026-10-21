@@ -8,7 +8,7 @@ read it before any non-trivial change.
 ## Rules
 
 - Hexagonal layering, same as the operators: `weebo-kit-domain` has no
-  dependency; `weebo-kit-api` only serde/schemars/k8s-openapi;
+  dependency; `weebo-kit-api` only serde/serde_json/schemars/k8s-openapi;
   `weebo-kit-application` has no adapter or Kubernetes client;
   adapters/runtime/testkit hold the `kube`/Vault/otel code.
 - Nothing in the kit names a product (Forgejo, Authentik…) or a concrete

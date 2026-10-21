@@ -1,0 +1,139 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: authentikgroups.authentik.weebo.io
+spec:
+  group: authentik.weebo.io
+  names:
+    categories: []
+    kind: AuthentikGroup
+    plural: authentikgroups
+    shortNames: []
+    singular: authentikgroup
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for AuthentikGroupSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              Mirrors `authentik_group`. Cluster-scoped — group hierarchy is an
+              org-wide identity concept, not owned by a namespace. Only reachable via
+              cluster-scoped RBAC (no `AuthentikNamespacePolicy` governs this kind).
+            properties:
+              attributes:
+                additionalProperties:
+                  type: string
+                default: {}
+                type: object
+              isSuperuser:
+                default: false
+                type: boolean
+              name:
+                type: string
+              parentRef:
+                description: |-
+                  Parent group, for hierarchy (`weebo_user` -> `weebo_moderator` ->
+                  `weebo_admin` in the Terraform module).
+
+                  This is the parent's **Authentik** name — its `spec.name`, the value
+                  Authentik itself stores — not the name of the `AuthentikGroup` CR
+                  describing it. It is resolved with a `/core/groups/?name=` query
+                  against the instance, and no Kubernetes object is read: a CR named
+                  `weebo-user` whose `spec.name` is `weebo_user` must be referenced
+                  here as `weebo_user`. A miss fails the reconcile with
+                  `GroupRefNotFound`, it never creates the parent.
+                nullable: true
+                type: string
+            required:
+            - name
+            type: object
+          status:
+            nullable: true
+            properties:
+              authentikId:
+                description: |-
+                  The Authentik-side primary key. Presence means this CR actually
+                  owns/created the corresponding Authentik object — set once on
+                  first successful create (or seeded by the import tool), never
+                  inferred by name-matching. See `.prompt/plan.md`.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to
+                  (`AuthentikApplication`, and the `AuthentikAccessPolicy`s through
+                  their application): a `spec.instanceRef` by name only never
+                  silently moves to another instance created later under that name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              observedGeneration:
+                format: int64
+                nullable: true
+                type: integer
+              providerId:
+                description: |-
+                  Set on `AuthentikApplication` only: the pk of the provider its
+                  application points at. Kept so that provider is reused, or deleted
+                  with the CR, even after the application itself was deleted out of
+                  band in Authentik.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: AuthentikGroup
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

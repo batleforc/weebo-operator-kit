@@ -1,0 +1,215 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: batlehubnamespaceclaims.batlehub.weebo.io
+spec:
+  group: batlehub.weebo.io
+  names:
+    kind: BatleHubNamespaceClaim
+    plural: batlehubnamespaceclaims
+    shortNames:
+    - bhnc
+    singular: batlehubnamespaceclaim
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.registry
+      name: Registry
+      type: string
+    - jsonPath: .spec.prefix
+      name: Prefix
+      type: string
+    - jsonPath: .spec.group
+      name: Group
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for BatleHubNamespaceClaimSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A team namespace of a registry: a package name prefix reserved to a
+              group of the instance's auth providers. Only its members (and admins)
+              may publish `prefix`, or a package under it (`prefix/…`, with the
+              registry's own separator), and the group is the audience of the `team`
+              visibility there.
+
+              BatleHub keeps these claims in its database, not in its configuration:
+              the operator claims the prefix through the admin API, checks it again
+              on every pass, and releases it when this object is deleted (unless
+              `deletionPolicy: Orphan`). A prefix already claimed by anything else
+              is never taken over.
+            properties:
+              deletionPolicy:
+                default: Delete
+                description: |-
+                  `Delete` (default) releases the prefix when this object is deleted;
+                  `Orphan` leaves the claim on the instance.
+                enum:
+                - Delete
+                - Orphan
+                type: string
+              group:
+                description: |-
+                  The group owning the prefix, as the instance's auth providers name
+                  it: `oidc:frontend-team`, `kubernetes:system:serviceaccounts:ci`…
+                  Changing it releases the prefix then claims it for the new group.
+                maxLength: 512
+                minLength: 1
+                pattern: ^\S+$
+                type: string
+              instanceRef:
+                description: |-
+                  The `BatleHubLocalInstance` of this namespace holding the registry;
+                  unset, the only one of this namespace. Immutable.
+                properties:
+                  kind:
+                    description: '`LocalInstance`, the only kind (may be left out).'
+                    enum:
+                    - LocalInstance
+                    type: string
+                  name:
+                    description: '`metadata.name` of the `BatleHubLocalInstance`.'
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: 'Not allowed: the instance is in this object''s namespace.'
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: instanceRef is immutable
+                  rule: self == oldSelf
+                - message: the instance must be in this object's namespace
+                  rule: '!has(self.__namespace__)'
+              prefix:
+                description: |-
+                  The package name prefix, in the ecosystem's own spelling: an npm
+                  scope (`@acme`), a Go module or Maven path, an OpenVSX publisher… A
+                  claim covers `prefix` itself and every package under it. No part
+                  between slashes may be `.` or `..`. Immutable.
+                maxLength: 1024
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: prefix is immutable
+                  rule: self == oldSelf
+                - message: prefix may not be blank, have a `.` or `..` part between slashes, nor start or end with a space
+                  rule: self == self.trim() && self.split('/').all(s, s != '.' && s != '..')
+              registry:
+                description: |-
+                  The registry's name on the instance (a `[[registries]]` entry, from
+                  the instance's configuration or a `BatleHubRegistry`). Immutable.
+                maxLength: 253
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: registry is immutable
+                  rule: self == oldSelf
+                - message: registry must be a registry name
+                  rule: self != '.' && self != '..' && !self.contains('/')
+            required:
+            - group
+            - prefix
+            - registry
+            type: object
+            x-kubernetes-validations:
+            - message: instanceRef is immutable
+              rule: has(self.instanceRef) == has(oldSelf.instanceRef)
+          status:
+            description: What the operator claimed.
+            nullable: true
+            properties:
+              claimedGroup:
+                description: |-
+                  The group the operator last claimed the prefix for: the claim on
+                  the instance is this object's while it names this group.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                description: '`Ready`, carrying one of the operator''s reason codes.'
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              instance:
+                description: The instance this claim was resolved to and stays bound to.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastSyncTime:
+                description: The last pass that changed something on the instance.
+                nullable: true
+                type: string
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              packageCount:
+                description: |-
+                  How many packages the namespace holds, as the instance counted
+                  them on the last pass.
+                format: int64
+                nullable: true
+                type: integer
+            type: object
+        required:
+        - spec
+        title: BatleHubNamespaceClaim
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

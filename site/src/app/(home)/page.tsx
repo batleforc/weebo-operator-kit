@@ -46,6 +46,9 @@ export default function HomePage() {
           <Link href="/docs" className="action">
             Read the docs
           </Link>
+          <Link href="/docs/ide" className="ctl">
+            Access the CRD IDE
+          </Link>
           <Link href="/docs/operators" className="ctl">
             Operators using it
           </Link>

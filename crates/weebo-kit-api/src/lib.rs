@@ -8,6 +8,7 @@
 
 pub mod annotations;
 pub mod instance;
+pub mod links;
 pub mod refs;
 pub mod secret;
 pub mod status;

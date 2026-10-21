@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// cluster-scoped CRDs, which have no namespace of their own to default to.
 #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("x-weebo-link" = { "to": [{ "kind": "Secret" }] }))]
 pub struct SecretKeyRef {
     pub name: String,
     pub namespace: String,
@@ -16,6 +17,7 @@ pub struct SecretKeyRef {
 /// A key of a `Secret` in the referencing CR's own namespace.
 #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("x-weebo-link" = { "to": [{ "kind": "Secret" }] }))]
 pub struct LocalSecretKeyRef {
     pub name: String,
     pub key: String,

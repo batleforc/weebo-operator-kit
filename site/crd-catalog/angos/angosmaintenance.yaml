@@ -1,0 +1,288 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: angosmaintenances.angos.weebo.io
+spec:
+  group: angos.weebo.io
+  names:
+    kind: AngosMaintenance
+    plural: angosmaintenances
+    shortNames:
+    - amaint
+    singular: angosmaintenance
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.task
+      name: Task
+      type: string
+    - jsonPath: .spec.schedule
+      name: Schedule
+      type: string
+    - jsonPath: .status.lastRun.state
+      name: Last
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for AngosMaintenanceSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A task of Angos's CLI on an instance of this namespace (`angos scrub`,
+              `prune`, `reconcile …`), once or on a schedule, run as a `Job` with the
+              instance's image and configuration. The operator schedules it: at most
+              one run per due time, never two writing tasks at once on an instance,
+              none while it rolls out — and a prune never while a repository could
+              lose its data (spec 6.6). Every task runs as a dry run unless
+              `params.dryRun` is `false`.
+            properties:
+              instanceRef:
+                description: 'The instance, of this namespace: unset, its only one.'
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              params:
+                default:
+                  deleteUnknown: false
+                  dryRun: true
+                  force: false
+                  uploadTimeout: 24h
+                properties:
+                  concurrency:
+                    description: '`--concurrency`.'
+                    format: uint32
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  deleteUnknown:
+                    default: false
+                    description: 'Scrub: `--delete-unknown` (delete instead of quarantining).'
+                    type: boolean
+                  dryRun:
+                    default: true
+                    description: '`-d`: report only. **True unless set to false.**'
+                    type: boolean
+                  force:
+                    default: false
+                    description: 'Reconcile scan/index: `--force`.'
+                    type: boolean
+                  uploadTimeout:
+                    default: 24h
+                    description: 'Prune: `-u`, the age of the upload leftovers reclaimed.'
+                    type: string
+                type: object
+              resources:
+                description: |-
+                  The Job's resources (the tasks spawn up to 64 threads; `concurrency`
+                  bounds the work).
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              schedule:
+                description: |-
+                  A 5-field cron expression, in UTC (`15 * * * *`). Unset: one run.
+                  A time missed (the operator down) is not caught up.
+                nullable: true
+                type: string
+              suspend:
+                default: false
+                description: No run while true.
+                type: boolean
+              task:
+                enum:
+                - Scrub
+                - Prune
+                - ReconcileReplication
+                - ReconcileScan
+                - ReconcileIndex
+                type: string
+              timeoutSeconds:
+                default: 3600
+                description: The Job's `activeDeadlineSeconds`.
+                format: int64
+                minimum: 60.0
+                type: integer
+              ttlSecondsAfterFinished:
+                default: 86400
+                description: How long a finished Job is kept.
+                format: int32
+                type: integer
+            required:
+            - task
+            type: object
+          status:
+            description: The status every CR bound to an instance shares.
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: |-
+                  `Ready` and the advisories, carrying one of the operator's reason
+                  codes.
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              failureCount:
+                default: 0
+                format: uint64
+                minimum: 0.0
+                type: integer
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under the same name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastDryRun:
+                description: |-
+                  The last dry run's report (its last lines), to read before running
+                  for real.
+                nullable: true
+                properties:
+                  summary:
+                    type: string
+                  time:
+                    type: string
+                required:
+                - summary
+                - time
+                type: object
+              lastRun:
+                nullable: true
+                properties:
+                  completionTime:
+                    nullable: true
+                    type: string
+                  dryRun:
+                    default: false
+                    type: boolean
+                  exitCode:
+                    format: int32
+                    nullable: true
+                    type: integer
+                  jobName:
+                    type: string
+                  message:
+                    description: The end of its log (redacted), or why it didn't run.
+                    nullable: true
+                    type: string
+                  startTime:
+                    type: string
+                  state:
+                    enum:
+                    - Running
+                    - Succeeded
+                    - Failed
+                    - TimedOut
+                    - Interrupted
+                    type: string
+                required:
+                - jobName
+                - startTime
+                - state
+                type: object
+              lastSkipTime:
+                description: |-
+                  When a due run was last skipped (prune lock, write lock, suspended):
+                  the schedule moves on from there.
+                nullable: true
+                type: string
+              nextRunTime:
+                nullable: true
+                type: string
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              runCount:
+                default: 0
+                format: uint64
+                minimum: 0.0
+                type: integer
+              runNow:
+                description: The `angos.weebo.io/run-now` value last run for.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: AngosMaintenance
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

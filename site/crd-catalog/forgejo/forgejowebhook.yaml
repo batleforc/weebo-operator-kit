@@ -1,0 +1,314 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: forgejowebhooks.forgejo.weebo.io
+spec:
+  group: forgejo.weebo.io
+  names:
+    kind: ForgejoWebhook
+    plural: forgejowebhooks
+    shortNames:
+    - fjhook
+    singular: forgejowebhook
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.forgejoName
+      name: Target
+      type: string
+    - jsonPath: .spec.url
+      name: URL
+      type: string
+    - jsonPath: .status.forgejoId
+      name: ID
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for ForgejoWebhookSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A webhook on a `ForgejoRepository` (same namespace) or a
+              `ForgejoOrganization` — exactly one of the two refs.
+            properties:
+              active:
+                default: true
+                type: boolean
+              authorizationHeaderSecretRef:
+                description: |-
+                  Value sent as the `Authorization` header (write-only as well).
+                  The `Secret` must carry the label `forgejo.weebo.io/credential: "true"`.
+                nullable: true
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                required:
+                - key
+                - name
+                type: object
+              branchFilter:
+                description: Glob limiting push/branch events, e.g. `main` or `{main,release/*}`.
+                nullable: true
+                type: string
+              contentType:
+                default: json
+                description: '`json` (default) or `form`.'
+                type: string
+              deletionPolicy:
+                default: Delete
+                description: What happens to the Forgejo object when its CR is deleted.
+                enum:
+                - Delete
+                - Orphan
+                type: string
+              events:
+                default:
+                - push
+                description: |-
+                  Trigger events (`push`, `pull_request`, `issues`, `release`,
+                  `create`, `delete`, ...).
+                items:
+                  type: string
+                type: array
+              extraConfig:
+                additionalProperties:
+                  type: string
+                description: Type-specific settings (e.g. `username`/`channel` for Slack).
+                type: object
+              httpMethod:
+                nullable: true
+                type: string
+              instanceRef:
+                description: |-
+                  The `ForgejoInstance` or `ForgejoLocalInstance` this object lives
+                  on. Unset: the cluster's only `ForgejoInstance`, else the only
+                  `ForgejoLocalInstance` of this namespace.
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              organizationRef:
+                description: |-
+                  A user, organization or team: a CR (`name`) — of this object's
+                  namespace, or of `namespace` when cross-namespace references are
+                  enabled for the operator and the target lists this namespace in its
+                  `sharedWith` — or an object that exists in Forgejo but no CR manages
+                  (`remoteName`, its Forgejo name). The operator never creates, changes
+                  nor deletes a `remoteName` object.
+                nullable: true
+                properties:
+                  name:
+                    description: '`metadata.name` of the CR.'
+                    nullable: true
+                    type: string
+                  namespace:
+                    description: Namespace of the CR; defaults to this object's own.
+                    nullable: true
+                    type: string
+                  remoteName:
+                    description: |-
+                      Forgejo name of an object no CR manages (a user's login, an
+                      organization's or team's name).
+                    nullable: true
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: set exactly one of name and remoteName
+                  rule: has(self.name) != has(self.remoteName)
+                - message: namespace only applies with name
+                  rule: '!has(self.namespace) || has(self.name)'
+              repositoryRef:
+                description: |-
+                  Reference to another CR of this operator, by `metadata.name`. Always a
+                  CR, never a raw remote name: a cluster-scoped target is looked up
+                  cluster-wide, a namespaced one in the referencing CR's own namespace only.
+                nullable: true
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+              secretRef:
+                description: |-
+                  HMAC secret signing the payloads. Write-only in Forgejo: a change of
+                  the Secret's value is detected through `status.appliedSecretHash`.
+                  The `Secret` must carry the label `forgejo.weebo.io/credential: "true"`.
+                nullable: true
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                required:
+                - key
+                - name
+                type: object
+              type:
+                default: forgejo
+                description: |-
+                  `forgejo` (default), `gitea`, `gogs`, `slack`, `discord`,
+                  `dingtalk`, `telegram`, `msteams`, `feishu`, `wechatwork` or
+                  `packagist`. Changing it recreates the hook.
+                type: string
+              url:
+                description: Payload URL.
+                type: string
+            required:
+            - url
+            type: object
+          status:
+            nullable: true
+            properties:
+              appliedSecretHash:
+                description: |-
+                  SHA-256 of the write-only inputs last sent to Forgejo (webhook
+                  secret and authorization header), so a changed `Secret` value is
+                  re-applied even though Forgejo never returns it.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              forgejoId:
+                description: |-
+                  The Forgejo-side identifier. Presence means this CR actually
+                  owns/created the corresponding Forgejo object — set once on first
+                  successful create (or seeded by the importer), never inferred by
+                  name-matching. For `managementPolicy: Observe` users it is the id
+                  of the observed user.
+                nullable: true
+                type: string
+              forgejoName:
+                description: |-
+                  Current Forgejo-side name the API addresses the object by (user
+                  login, organization or team name). Kept so a rename in `spec` knows
+                  the old name to rename *from*.
+                nullable: true
+                type: string
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under that name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastRotation:
+                description: |-
+                  Value of the `forgejo.weebo.io/rotate-secret` annotation the last
+                  secret was issued for, so the same nonce never rotates twice. Only
+                  used by kinds that emit a secret (a `rotationPeriod` renewal shows
+                  as a new `forgejoId` instead).
+                nullable: true
+                type: string
+              observedGeneration:
+                format: int64
+                nullable: true
+                type: integer
+              ownerId:
+                description: |-
+                  Forgejo id of the account owning the object (an access token's
+                  user, an OAuth2 application's owner), so a renamed owner isn't
+                  mistaken for a different one.
+                nullable: true
+                type: string
+              passwordEmitted:
+                description: |-
+                  A `ForgejoUser`'s generated password was handed out to its
+                  `secretTargets`: turning it into a bot (or an external account) then
+                  replaces the password, so the one handed out stops working. Never
+                  set on an adopted account: its password isn't the operator's.
+                nullable: true
+                type: boolean
+              secretPending:
+                description: |-
+                  A secret (token, client secret, password) was issued in Forgejo but
+                  not written to every target: the targets may hold a revoked value,
+                  so the next reconcile issues a new one instead of trusting them.
+                nullable: true
+                type: boolean
+            type: object
+        required:
+        - spec
+        title: ForgejoWebhook
+        type: object
+        x-kubernetes-validations:
+        - message: set exactly one of spec.repositoryRef and spec.organizationRef
+          rule: has(self.spec.repositoryRef) != has(self.spec.organizationRef)
+    served: true
+    storage: true
+    subresources:
+      status: {}

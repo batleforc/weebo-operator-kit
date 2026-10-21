@@ -177,6 +177,13 @@ tasks:
     cmds:
       - mise exec -- npm run dev
 
+  site:catalog:
+    desc: "Download the CRD IDE's catalog (site/crd-catalog.config.mjs: the operators' CRDs at their pinned tags, the third-party ones at their pinned releases) into site/crd-catalog/, committed"
+    deps: [site:deps]
+    dir: site
+    cmds:
+      - mise exec -- node scripts/catalog.mjs
+
   site:build:
     desc: "Lint + static export of the kit's documentation site into site/out/ (DOCS_BASE_PATH for a sub-path)"
     deps: [site:deps]

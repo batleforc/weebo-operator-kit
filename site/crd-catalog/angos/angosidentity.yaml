@@ -1,0 +1,257 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: angosidentities.angos.weebo.io
+spec:
+  group: angos.weebo.io
+  names:
+    kind: AngosIdentity
+    plural: angosidentities
+    shortNames:
+    - aid
+    singular: angosidentity
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.instance.name
+      name: Instance
+      type: string
+    - jsonPath: .status.username
+      name: Username
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for AngosIdentitySpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A Basic identity of an Angos instance (`[auth.identity]`): a robot, a
+              CI, a scanner. The operator generates its password (or adopts one),
+              hashes it with Argon2id for the instance's configuration, and writes the
+              clear password to its targets once every pod of the instance accepts
+              it. Angos verifies a Basic password on every request (≈ 19 MiB and tens
+              of milliseconds each): workloads should rather use their
+              ServiceAccount's token (`auth.kubernetes`).
+            properties:
+              adoptSecretRef:
+                description: |-
+                  An existing password to keep (an identity moved from another tool),
+                  in a Secret of this namespace labelled
+                  `angos.weebo.io/credential: "true"`: read once, at creation.
+                nullable: true
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                required:
+                - key
+                - name
+                type: object
+              instanceRef:
+                description: |-
+                  The instance: unset, the only one of this namespace. An instance of
+                  another namespace must accept this one
+                  (`repositorySelector.namespaces`).
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              registryHost:
+                description: |-
+                  The registry's public host (e.g. `registry.example.com`): adds a
+                  `.dockerconfigjson` key to the targets.
+                nullable: true
+                type: string
+              rotationDays:
+                description: |-
+                  A new password every this many days; the annotation
+                  `angos.weebo.io/rotate` (a new value) rotates it at once.
+                format: uint32
+                minimum: 1.0
+                nullable: true
+                type: integer
+              secretTargets:
+                description: |-
+                  Where the credentials are written (keys `username`, `password`, and
+                  `.dockerconfigjson` with `registryHost`). Unset: the Secret
+                  `<name>-credentials` of this namespace.
+                items:
+                  description: |-
+                    Where an emitted secret (generated password or key, OAuth2 credentials,
+                    access token) is written. A CR may list several targets — the same
+                    value is fanned out to each.
+                  properties:
+                    backend:
+                      default: kubernetes
+                      description: |-
+                        `kubernetes` (default) or `vault`. A Vault target reuses the Vault
+                        connection (address, mount, auth) the instance configures, which it
+                        must then do.
+                      enum:
+                      - kubernetes
+                      - vault
+                      type: string
+                    name:
+                      description: |-
+                        Kubernetes: the `Secret` name. Vault: names the default path
+                        `<pathPrefix>/<namespace>/<name>` when `path` is unset.
+                      type: string
+                    namespace:
+                      description: |-
+                        Kubernetes `Secret` namespace (Vault: the namespace segment of the
+                        default path). Defaults to the CR's own namespace; required on
+                        cluster-scoped CRs. A namespaced CR may only name its own namespace.
+                      nullable: true
+                      type: string
+                    path:
+                      description: |-
+                        Vault only: explicit KV v2 path under the instance's mount. It must
+                        stay under `<pathPrefix>/<namespace>/` (this object's namespace, or
+                        the target's on a cluster-scoped object), unless the instance's
+                        `pathGrants` open it to this object.
+                      nullable: true
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              username:
+                description: |-
+                  The username (`identity:<username>` in access rules). Default: the
+                  CR's name. Unique on the instance, never an OIDC provider's name.
+                nullable: true
+                pattern: ^[A-Za-z0-9._-]+$
+                type: string
+            type: object
+          status:
+            description: The status of an identity.
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: |-
+                  `Ready` and the advisories, carrying one of the operator's reason
+                  codes.
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              conflictWith:
+                description: The identity holding the username instead (`namespace/name`).
+                nullable: true
+                type: string
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under the same name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastRotationTime:
+                nullable: true
+                type: string
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              passwordVersion:
+                description: |-
+                  The password version written to the targets (1, then one more per
+                  rotation).
+                format: uint64
+                minimum: 0.0
+                nullable: true
+                type: integer
+              pendingPasswordVersion:
+                description: |-
+                  A password version the instance hasn't confirmed yet (written to
+                  the targets once it has).
+                format: uint64
+                minimum: 0.0
+                nullable: true
+                type: integer
+              username:
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: AngosIdentity
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,265 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: batlehubpackagegrants.batlehub.weebo.io
+spec:
+  group: batlehub.weebo.io
+  names:
+    kind: BatleHubPackageGrant
+    plural: batlehubpackagegrants
+    shortNames:
+    - bhpg
+    singular: batlehubpackagegrant
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.registry
+      name: Registry
+      type: string
+    - jsonPath: .spec.package
+      name: Package
+      type: string
+    - jsonPath: .spec.version
+      name: Version
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for BatleHubPackageGrantSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              The grants of a package, or of one version of it, in a registry of the
+              instance: who may do what there, beyond what the instance's and the
+              registry's configuration grant (`grants`, `registries[].grants`).
+
+              BatleHub keeps these grants in its database: the operator writes each
+              subject's grant through the admin API, reads them again on every pass
+              (rewriting what drifted), and revokes what it wrote when this object
+              is deleted (unless `deletionPolicy: Orphan`). It only ever touches the
+              grants it wrote: a subject already holding a grant on that node is a
+              conflict, never taken over.
+            properties:
+              deletionPolicy:
+                default: Delete
+                description: |-
+                  `Delete` (default) revokes the grants this object wrote when it is
+                  deleted; `Orphan` leaves them on the instance.
+                enum:
+                - Delete
+                - Orphan
+                type: string
+              grants:
+                description: One grant per subject.
+                items:
+                  description: What one subject may do on the node.
+                  properties:
+                    actions:
+                      description: |-
+                        Action patterns: `releases:read`, `releases:*`… BatleHub expands a
+                        pattern when it stores the grant (`status.applied[].stored`).
+                      items:
+                        maxLength: 128
+                        minLength: 1
+                        pattern: ^\S+$
+                        type: string
+                      maxItems: 64
+                      minItems: 1
+                      type: array
+                    subject:
+                      description: |-
+                        Who, as BatleHub spells it: `user:alice`, `group:oidc1:eng`,
+                        `role:user`, `*`.
+                      maxLength: 512
+                      minLength: 1
+                      pattern: ^\S+$
+                      type: string
+                  required:
+                  - actions
+                  - subject
+                  type: object
+                maxItems: 256
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - subject
+                x-kubernetes-list-type: map
+              instanceRef:
+                description: |-
+                  The `BatleHubLocalInstance` of this namespace holding the registry;
+                  unset, the only one of this namespace. Immutable.
+                properties:
+                  kind:
+                    description: '`LocalInstance`, the only kind (may be left out).'
+                    enum:
+                    - LocalInstance
+                    type: string
+                  name:
+                    description: '`metadata.name` of the `BatleHubLocalInstance`.'
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: 'Not allowed: the instance is in this object''s namespace.'
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: instanceRef is immutable
+                  rule: self == oldSelf
+                - message: the instance must be in this object's namespace
+                  rule: '!has(self.__namespace__)'
+              package:
+                description: The package, as the registry names it (`@acme/billing`). Immutable.
+                maxLength: 1024
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: package is immutable
+                  rule: self == oldSelf
+                - message: package may not be blank, have a `.` or `..` part between slashes, nor start or end with a space
+                  rule: self == self.trim() && self.split('/').all(s, s != '.' && s != '..')
+              registry:
+                description: The registry's name on the instance. Immutable.
+                maxLength: 253
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: registry is immutable
+                  rule: self == oldSelf
+                - message: registry must be a registry name
+                  rule: self != '.' && self != '..' && !self.contains('/')
+              version:
+                description: |-
+                  One version of the package (it must exist); unset, the package
+                  itself (every version). Immutable.
+                maxLength: 256
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: version is immutable
+                  rule: self == oldSelf
+                - message: version may not be `.`, contain `..`, `/` or `\`, nor start or end with a space
+                  rule: self == self.trim() && self != '.' && !self.contains('..') && !self.contains('/') && !self.contains('\\')
+            required:
+            - grants
+            - package
+            - registry
+            type: object
+            x-kubernetes-validations:
+            - message: instanceRef is immutable
+              rule: has(self.instanceRef) == has(oldSelf.instanceRef)
+            - message: version is immutable
+              rule: has(self.version) == has(oldSelf.version)
+          status:
+            description: What the operator wrote.
+            nullable: true
+            properties:
+              applied:
+                description: |-
+                  The grants the operator wrote, one per subject, recorded right
+                  after each write: what it may rewrite and revoke.
+                items:
+                  description: One grant the operator wrote.
+                  properties:
+                    requested:
+                      description: The actions asked for, as written in the spec then.
+                      items:
+                        type: string
+                      type: array
+                    stored:
+                      description: The actions BatleHub stored (the patterns expanded).
+                      items:
+                        type: string
+                      type: array
+                    subject:
+                      type: string
+                    warnings:
+                      description: What BatleHub found legal but probably unintended in it.
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - requested
+                  - stored
+                  - subject
+                  type: object
+                type: array
+              conditions:
+                default: []
+                description: '`Ready`, carrying one of the operator''s reason codes.'
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              instance:
+                description: The instance this object was resolved to and stays bound to.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              lastSyncTime:
+                description: The last pass that changed something on the instance.
+                nullable: true
+                type: string
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+            type: object
+        required:
+        - spec
+        title: BatleHubPackageGrant
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

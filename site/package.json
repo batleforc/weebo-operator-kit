@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/crd-schemas.mjs",
+    "prebuild": "node scripts/crd-schemas.mjs",
     "build": "next build",
     "dev": "next dev",
     "start": "next start",
@@ -29,6 +31,7 @@
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.4.0",
+    "js-yaml": "^5.2.1",
     "postcss": "^8.5.17",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
