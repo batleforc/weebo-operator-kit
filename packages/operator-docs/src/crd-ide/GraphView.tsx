@@ -48,11 +48,13 @@ export default function GraphView({
         position: positions.get(n.id) ?? { x: 0, y: 0 },
         data: { label },
         ariaLabel: label,
-        selected: n.id === selected || n.from === selected,
         // What is depended on sits on the left: references leave on the left.
         sourcePosition: Position.Left,
         targetPosition: Position.Right,
-        className: `crd-ide-node crd-ide-node-${n.origin}`,
+        // The current resource (and what it makes) is marked by a class, not
+        // xyflow's `selected`: the IDE's selection and xyflow's would answer
+        // each other without end.
+        className: `crd-ide-node crd-ide-node-${n.origin}${n.id === selected || n.from === selected ? " crd-ide-current" : ""}`,
       };
     });
   }, [graph, positions, selected]);
@@ -76,7 +78,12 @@ export default function GraphView({
         key={graph.nodes.length}
         nodes={flowNodes}
         edges={edges}
-        onNodesChange={(changes) => setFlowNodes((current) => applyNodeChanges(changes, current))}
+        onNodesChange={(changes) => {
+          setFlowNodes((current) => applyNodeChanges(changes, current));
+          // A node picked with the mouse or the keyboard opens its resource.
+          const picked = changes.find((c) => c.type === "select" && c.selected);
+          if (picked?.type === "select") open(picked.id);
+        }}
         fitView
         fitViewOptions={{ padding: 0.1 }}
         // A chain of a dozen columns still fits the docs' width.
@@ -85,10 +92,6 @@ export default function GraphView({
         nodesConnectable={false}
         elementsSelectable
         onNodeClick={(_, node) => open(node.id)}
-        onSelectionChange={({ nodes: picked }) => {
-          const [first] = picked;
-          if (first && first.id !== selected) open(first.id);
-        }}
       >
         <Background />
         <Controls showInteractive={false} />

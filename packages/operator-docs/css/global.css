@@ -469,7 +469,7 @@ body {
   cursor: pointer;
 }
 
-.crd-ide-graph .react-flow__node.selected {
+.crd-ide-graph .react-flow__node.crd-ide-current {
   border-color: var(--accent);
   box-shadow: inset 3px 0 0 var(--accent);
 }
