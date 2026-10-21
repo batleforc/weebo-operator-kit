@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.23.0](https://github.com/batleforc/weebo-operator-kit/compare/090e4c68d6f426802e6a237400dfd617f03fc0d9..v0.23.0) - 2026-10-21
+#### Features
+- (**operator-docs**) the CRD IDE, a visual editor of linked manifests (#27) - ([090e4c6](https://github.com/batleforc/weebo-operator-kit/commit/090e4c68d6f426802e6a237400dfd617f03fc0d9)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.22.1](https://github.com/batleforc/weebo-operator-kit/compare/e37fb1953052895f5ea9345e4a046435047f7800..v0.22.1) - 2026-10-21
 #### Bug Fixes
 - (**runtime**) only retries back off, not watch events (#26) - ([e37fb19](https://github.com/batleforc/weebo-operator-kit/commit/e37fb1953052895f5ea9345e4a046435047f7800)) - Maxime, Claude Opus 5.5 (1M context)
