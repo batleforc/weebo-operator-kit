@@ -2,6 +2,17 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.22.0](https://github.com/batleforc/weebo-operator-kit/compare/556d423283d52783fe1e481a0c1b34c5d332375f..v0.22.0) - 2026-10-21
+#### Features
+- ![BREAKING](https://img.shields.io/badge/BREAKING-red) (**kit**) house lints, retry backoff, typed errors, accessible manifest builder (#25) - ([45604c9](https://github.com/batleforc/weebo-operator-kit/commit/45604c945062774cd973668474ffa980941e7590)) - Maxime, Claude Opus 5.5 (1M context)
+- (**site**) the kit's own documentation site (#23) - ([02a2ad2](https://github.com/batleforc/weebo-operator-kit/commit/02a2ad2571ed4f67b032c8bb31829e0b006deb2a)) - Maxime, Claude Opus 5.5 (1M context)
+#### Bug Fixes
+- (**operator-docs**) a long site name no longer overflows the sidebar header (#24) - ([5ef7261](https://github.com/batleforc/weebo-operator-kit/commit/5ef7261965f4b33b97e80e5b656987f4d3a9288c)) - Maxime, Claude Opus 5.5 (1M context)
+#### Documentation
+- (**plan**) a spec cause for remote writes, to do (#22) - ([556d423](https://github.com/batleforc/weebo-operator-kit/commit/556d423283d52783fe1e481a0c1b34c5d332375f)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.21.0](https://github.com/batleforc/weebo-operator-kit/compare/9b723a33954b1decf516291cd404d16c0727fdb8..v0.21.0) - 2026-10-19
 #### Features
 - (**runtime**) shared watches per label selector, filtered watches_in (#21) - ([83d9f9c](https://github.com/batleforc/weebo-operator-kit/commit/83d9f9c83027333889c4d4ee51a3e8c51d05d191)) - Maxime, Claude Opus 5.5 (1M context)
