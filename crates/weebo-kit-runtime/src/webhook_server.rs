@@ -30,23 +30,48 @@ pub const DEFAULT_PORT: u16 = 8443;
 /// In-flight requests get this long to finish once draining is over.
 pub const GRACEFUL_SHUTDOWN: Duration = Duration::from_secs(10);
 
+/// A request still running after this gets a 503: the apiserver waits 30 s
+/// at most (`timeoutSeconds`), nobody reads a later answer.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+async fn bounded(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    match tokio::time::timeout(REQUEST_TIMEOUT, next.run(request)).await {
+        Ok(response) => response,
+        Err(_) => {
+            tracing::warn!(timeout = ?REQUEST_TIMEOUT, "admission request timed out");
+            axum::response::IntoResponse::into_response(axum::http::StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }
+}
+
 /// The running server; [`WebhookServer::stopped`] resolves once it has
 /// drained after shutdown (immediately when nothing is served).
 pub struct WebhookServer(Option<JoinHandle<()>>);
 
 impl WebhookServer {
     pub async fn stopped(self) {
-        if let Some(task) = self.0 {
-            let _ = task.await;
+        if let Some(task) = self.0
+            && let Err(e) = task.await
+        {
+            tracing::error!(error = %e, "the webhook server task panicked");
         }
     }
 }
 
 fn drain() -> Duration {
-    std::env::var("WEEBO_SHUTDOWN_DRAIN_SECONDS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .map_or(DEFAULT_DRAIN, Duration::from_secs)
+    let Ok(raw) = std::env::var("WEEBO_SHUTDOWN_DRAIN_SECONDS") else {
+        return DEFAULT_DRAIN;
+    };
+    raw.parse().map_or_else(
+        |e| {
+            tracing::warn!(value = %raw, error = %e, "invalid WEEBO_SHUTDOWN_DRAIN_SECONDS, using the default");
+            DEFAULT_DRAIN
+        },
+        Duration::from_secs,
+    )
 }
 
 /// Serves `router` over TLS when the certificate is mounted
@@ -63,7 +88,7 @@ pub async fn spawn(
     router: axum::Router,
     health: Arc<Health>,
     shutdown: Shutdown,
-) -> anyhow::Result<WebhookServer> {
+) -> std::io::Result<WebhookServer> {
     let cert = std::env::var("WEBHOOK_TLS_CERT_FILE")
         .unwrap_or_else(|_| "/etc/webhook/certs/tls.crt".to_string());
     let key = std::env::var("WEBHOOK_TLS_KEY_FILE")
@@ -116,6 +141,7 @@ pub async fn spawn(
         }
     });
 
+    let router = router.layer(axum::middleware::from_fn(bounded));
     let server = axum_server::bind_rustls(addr, tls).handle(handle.clone());
     let task = tokio::spawn(async move {
         if let Err(err) = server.serve(router.into_make_service()).await {
@@ -129,4 +155,33 @@ pub async fn spawn(
         health.set_ready(true);
     }
     Ok(WebhookServer(Some(task)))
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::routing::post;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_request_past_the_timeout_gets_a_503() {
+        let router = axum::Router::new()
+            .route(
+                "/validate",
+                post(|| async {
+                    tokio::time::sleep(REQUEST_TIMEOUT * 2).await;
+                    "late"
+                }),
+            )
+            .layer(axum::middleware::from_fn(bounded));
+        let request = axum::http::Request::post("/validate")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
 }

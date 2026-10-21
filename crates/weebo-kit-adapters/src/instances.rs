@@ -9,6 +9,7 @@
 //! label selector, the namespace it is limited to, and whether it watches
 //! cluster-scoped kinds at all (no `I` then).
 
+use crate::instance::{LookupError, list_all, lookup};
 use std::fmt::Debug;
 
 use k8s_openapi::api::core::v1::Namespace;
@@ -128,7 +129,7 @@ where
     }
 
     /// Every cluster-scoped instance in scope (none without cluster kinds).
-    pub async fn cluster_instances(&self) -> Result<Vec<I>, String> {
+    pub async fn cluster_instances(&self) -> Result<Vec<I>, LookupError> {
         let Some(store) = &self.cluster else {
             return Ok(Vec::new());
         };
@@ -140,15 +141,13 @@ where
                 .map(|i| (**i).clone())
                 .collect());
         }
-        Api::<I>::all(self.client.clone())
-            .list(&self.params())
+        list_all(&Api::<I>::all(self.client.clone()), &self.params())
             .await
-            .map(|l| l.items)
-            .map_err(|e| format!("listing {}: {e}", I::kind(&())))
+            .map_err(lookup(format!("listing {}", I::kind(&()))))
     }
 
     /// The local instances of `namespace` in scope.
-    pub async fn local_instances(&self, namespace: &str) -> Result<Vec<L>, String> {
+    pub async fn local_instances(&self, namespace: &str) -> Result<Vec<L>, LookupError> {
         if let Some(store) = Self::ready(self.local.as_ref()).await {
             return Ok(store
                 .state()
@@ -157,16 +156,17 @@ where
                 .map(|l| (**l).clone())
                 .collect());
         }
-        Api::<L>::namespaced(self.client.clone(), namespace)
-            .list(&self.params())
-            .await
-            .map(|l| l.items)
-            .map_err(|e| format!("listing {} in {namespace:?}: {e}", L::kind(&())))
+        list_all(
+            &Api::<L>::namespaced(self.client.clone(), namespace),
+            &self.params(),
+        )
+        .await
+        .map_err(lookup(format!("listing {} in {namespace:?}", L::kind(&()))))
     }
 
     /// The instance `bound` designates, `None` when it is gone (or out of
     /// scope).
-    pub async fn get(&self, bound: &BoundInstance) -> Result<Option<Resolved<I, L>>, String> {
+    pub async fn get(&self, bound: &BoundInstance) -> Result<Option<Resolved<I, L>>, LookupError> {
         Ok(match (bound.kind, bound.namespace.as_deref()) {
             (InstanceKind::Instance, _) => self
                 .cluster_instances()
@@ -188,7 +188,7 @@ where
     /// ones of the CR's namespace and of the one it names (within the
     /// namespace the operator is limited to), and the CR namespace's
     /// labels when a foreign local instance shares through a selector.
-    async fn candidates(&self, request: Request<'_>) -> Result<Candidates<'_>, String> {
+    async fn candidates(&self, request: Request<'_>) -> Result<Candidates<'_>, LookupError> {
         let mut candidates = Candidates {
             watched_namespace: self.watched_namespace.as_deref(),
             ..Default::default()
@@ -222,7 +222,7 @@ where
             let namespace = Api::<Namespace>::all(self.client.clone())
                 .get_opt(cr_ns)
                 .await
-                .map_err(|e| format!("reading namespace {cr_ns:?}: {e}"))?;
+                .map_err(lookup(format!("reading namespace {cr_ns:?}")))?;
             candidates.cr_namespace_labels = namespace.and_then(|n| n.metadata.labels);
         }
         Ok(candidates)
@@ -258,10 +258,7 @@ where
             cr_namespace,
             instance_ref,
         };
-        let candidates = self
-            .candidates(request)
-            .await
-            .map_err(InstanceError::Kubernetes)?;
+        let candidates = self.candidates(request).await?;
         Ok(resolve_bound(request, &candidates, recorded)?)
     }
 }

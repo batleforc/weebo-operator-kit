@@ -16,6 +16,27 @@ use serde::de::DeserializeOwned;
 /// list before reading from the API instead.
 pub const STORE_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Objects per page when a list is read from the API: no response holds a
+/// whole kind at once.
+pub const LIST_PAGE: u32 = 500;
+
+/// Every object `params` selects, read [`LIST_PAGE`] at a time.
+pub(crate) async fn list_all<K>(api: &Api<K>, params: &ListParams) -> Result<Vec<K>, kube::Error>
+where
+    K: Clone + DeserializeOwned + Debug,
+{
+    let mut params = params.clone().limit(LIST_PAGE);
+    let mut items = Vec::new();
+    loop {
+        let page = api.list(&params).await?;
+        items.extend(page.items);
+        match page.metadata.continue_.filter(|c| !c.is_empty()) {
+            Some(token) => params = params.continue_token(&token),
+            None => return Ok(items),
+        }
+    }
+}
+
 /// How often [`wait_synced`] re-checks a store that hasn't listed.
 pub const STORE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
@@ -32,11 +53,11 @@ pub async fn wait_synced<K: Resource<DynamicType = ()> + Clone + 'static>(
     store: &Store<K>,
     timeout: std::time::Duration,
 ) -> bool {
-    let deadline = tokio::time::Instant::now() + timeout;
+    let start = tokio::time::Instant::now();
     loop {
         match tokio::time::timeout(STORE_POLL, store.wait_until_ready()).await {
             Ok(ready) => return ready.is_ok(),
-            Err(_) if tokio::time::Instant::now() >= deadline => {
+            Err(_) if start.elapsed() >= timeout => {
                 tracing::warn!(
                     kind = %K::kind(&()),
                     "the watch has not listed yet: reading from the API"
@@ -97,7 +118,7 @@ where
     }
 
     /// Every instance in the cluster.
-    pub async fn list(&self) -> Result<Vec<I>, String> {
+    pub async fn list(&self) -> Result<Vec<I>, LookupError> {
         if let Some(store) = self.ready_store().await {
             return Ok(store
                 .state()
@@ -110,15 +131,13 @@ where
             Some(selector) => ListParams::default().labels_from(selector),
             None => ListParams::default(),
         };
-        Api::<I>::all(self.client.clone())
-            .list(&params)
+        list_all(&Api::<I>::all(self.client.clone()), &params)
             .await
-            .map(|l| l.items)
-            .map_err(|e| format!("listing {}: {e}", I::kind(&())))
+            .map_err(lookup(format!("listing {}", I::kind(&()))))
     }
 
     /// The instance `name`. `Ok(None)`: it doesn't exist.
-    pub async fn get(&self, name: &str) -> Result<Option<I>, String> {
+    pub async fn get(&self, name: &str) -> Result<Option<I>, LookupError> {
         if let Some(store) = self.ready_store().await {
             return Ok(store
                 .find(|i| i.name_any() == name && self.selects(i))
@@ -128,7 +147,31 @@ where
             .get_opt(name)
             .await
             .map(|i| i.filter(|i| self.selects(i)))
-            .map_err(|e| format!("reading {} {name:?}: {e}", I::kind(&())))
+            .map_err(lookup(format!("reading {} {name:?}", I::kind(&()))))
+    }
+}
+
+/// A Kubernetes read an instance lookup needed failed: `what` it was
+/// doing (`listing <Kind>`, `reading <Kind> "<name>"`) and why.
+#[derive(Debug, thiserror::Error)]
+#[error("{what}: {source}")]
+pub struct LookupError {
+    pub what: String,
+    /// Boxed: a `kube::Error` would make every lookup's `Result` large.
+    #[source]
+    pub source: Box<kube::Error>,
+}
+
+pub(crate) fn lookup(what: String) -> impl FnOnce(kube::Error) -> LookupError {
+    |source| LookupError {
+        what,
+        source: Box::new(source),
+    }
+}
+
+impl From<LookupError> for weebo_kit_application::instances::InstanceError {
+    fn from(e: LookupError) -> Self {
+        Self::Kubernetes(e.to_string())
     }
 }
 

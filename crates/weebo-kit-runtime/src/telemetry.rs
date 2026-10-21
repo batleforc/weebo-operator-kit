@@ -33,7 +33,23 @@ pub struct Telemetry {
 /// unconditionally — the global API is a no-op recorder until a real
 /// `MeterProvider` is installed. `service` names the tracer (e.g.
 /// `weebo-example-operator`).
-pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
+/// Why [`init`] could not set the telemetry up: the start fails.
+#[derive(Debug, thiserror::Error)]
+pub enum TelemetryError {
+    #[error("building the OTLP exporter: {0}")]
+    Otlp(#[from] opentelemetry_otlp::ExporterBuildError),
+    #[error("building the Prometheus exporter: {0}")]
+    Prometheus(#[from] opentelemetry_sdk::error::OTelSdkError),
+    #[error("installing the tracing subscriber: {0}")]
+    Subscriber(#[from] tracing_subscriber::util::TryInitError),
+    #[error("WEEBO_METRICS_ADDR {addr:?}: {source}")]
+    MetricsAddr {
+        addr: String,
+        source: std::net::AddrParseError,
+    },
+}
+
+pub fn init(service: &'static str) -> Result<Telemetry, TelemetryError> {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let json = std::env::var("LOG_FORMAT").is_ok_and(|f| f.eq_ignore_ascii_case("json"));
     let otlp = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok();
@@ -63,10 +79,15 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
         .try_init()?;
 
     let metrics_addr = match std::env::var("WEEBO_METRICS_ADDR") {
-        Ok(addr) if !addr.is_empty() => Some(
-            addr.parse::<SocketAddr>()
-                .map_err(|e| anyhow::anyhow!("WEEBO_METRICS_ADDR {addr:?}: {e}"))?,
-        ),
+        Ok(addr) if !addr.is_empty() => {
+            Some(
+                addr.parse::<SocketAddr>()
+                    .map_err(|source| TelemetryError::MetricsAddr {
+                        addr: addr.clone(),
+                        source,
+                    })?,
+            )
+        }
         _ => None,
     };
     if otlp || metrics_addr.is_some() {
@@ -97,7 +118,7 @@ impl Telemetry {
     /// `WEEBO_METRICS_ADDR` when it is set; on every replica, so a standby
     /// shows up too (with its leader gauge at 0). The process exits if the
     /// server stops.
-    pub async fn serve_metrics(&self) -> anyhow::Result<()> {
+    pub async fn serve_metrics(&self) -> std::io::Result<()> {
         let Some((addr, registry)) = self.prometheus.clone() else {
             return Ok(());
         };

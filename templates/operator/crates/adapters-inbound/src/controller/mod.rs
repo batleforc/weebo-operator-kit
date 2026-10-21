@@ -130,7 +130,8 @@ impl Error {
 }
 
 /// Every reconcile that errors out is announced by a `Warning` Event on
-/// its CR, then retried in ~30s (the kit's).
+/// its CR, then retried in ~30s, backing off while it keeps failing (the
+/// kit's).
 pub fn error_policy<K>(obj: Arc<K>, err: &Error, ctx: Arc<Ctx>) -> Action
 where
     K: Resource<DynamicType = ()>,
@@ -146,9 +147,9 @@ where
 }
 
 /// Steady-state drift check after a success, a quick retry after a
-/// failure (both jittered — the kit's).
-pub fn requeue_after(outcome: &Outcome) -> Action {
-    weebo_kit_runtime::controller::requeue_after(outcome.ready.is_ok(), None)
+/// failure, backing off while `obj` keeps failing (jittered — the kit's).
+pub fn requeue_after<K: Resource>(obj: &K, outcome: &Outcome) -> Action {
+    weebo_kit_runtime::controller::requeue_after(obj, outcome.ready.is_ok(), None)
 }
 
 /// The kit's `ReconcileMetrics`. A no-op until the telemetry installs a

@@ -76,7 +76,7 @@ impl GatewayFactory for HttpGatewayFactory {
             .instances
             .get(bound)
             .await
-            .map_err(GatewayFactoryError::Kubernetes)?
+            .map_err(|e| GatewayFactoryError::Kubernetes(e.to_string()))?
             .ok_or_else(|| GatewayFactoryError::InstanceNotFound(bound.clone()))?;
         // A local instance's token lives in its own namespace.
         let (url, secret_ref, local) = match &instance {

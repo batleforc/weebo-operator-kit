@@ -1,8 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Callout } from "fumadocs-ui/components/callout";
 import {
+  asArray,
+  asRecord,
   defaultForSchema,
   discriminatedVariants,
   isDiscriminatedUnion,
@@ -11,41 +13,80 @@ import {
 import type { FieldSchema } from "./types";
 
 const inputClass =
-  "w-full border border-(--rule-strong) bg-(--ground-sunk) px-3 py-2 text-[15px] text-fd-foreground outline-none placeholder:text-fd-muted-foreground focus:border-(--accent)";
+  "w-full border border-(--rule-strong) bg-(--ground-sunk) px-3 py-2 text-[15px] text-fd-foreground placeholder:text-fd-muted-foreground focus:border-(--accent)";
 
 const labelClass = "text-[12px] font-semibold uppercase tracking-[0.14em] text-fd-muted-foreground";
 
 const ghostButtonClass = "ctl";
 
-function firstParagraph(description?: string): string {
-  if (!description) return "";
-  return description
-    .split(/\n\s*\n/)[0]
-    .replace(/\s*\n\s*/g, " ")
-    .trim();
+function splitDescription(description?: string): [string, string] {
+  if (!description) return ["", ""];
+  const [first = "", ...rest] = description.split(/\n\s*\n/);
+  return [first.replace(/\s*\n\s*/g, " ").trim(), rest.join("\n\n").trim()];
 }
 
+// The id of the field's description, for the input's `aria-describedby`;
+// undefined when there is none to point at.
+function descriptionId(id: string, description?: string): string | undefined {
+  return splitDescription(description)[0] ? `${id}-desc` : undefined;
+}
+
+// Joins `aria-describedby` ids, undefined when none is left.
+function describedBy(...ids: (string | undefined)[]): string | undefined {
+  return ids.filter(Boolean).join(" ") || undefined;
+}
+
+// The first paragraph, clamped to two lines; a longer one or the following
+// paragraphs unfold under it (a <details>, keyboard reachable). The id goes
+// on the first paragraph, which is what `aria-describedby` reads.
+function FieldDescription({ id, description }: { id: string; description?: string | undefined }) {
+  const [summary, rest] = splitDescription(description);
+  if (!summary) return null;
+  const textClass = "text-[12px] text-fd-muted-foreground";
+  if (!rest && summary.length <= 100) {
+    return (
+      <p id={id} className={`line-clamp-2 ${textClass}`}>
+        {summary}
+      </p>
+    );
+  }
+  return (
+    <details className={`group ${textClass}`}>
+      <summary id={id} className="line-clamp-2 cursor-pointer list-none group-open:line-clamp-none">
+        {summary}
+      </summary>
+      {rest ? <p className="mt-1 whitespace-pre-line">{rest}</p> : null}
+    </details>
+  );
+}
+
+function Caption({ name, required }: { name: string; required?: boolean | undefined }) {
+  return (
+    <>
+      {name}
+      {required ? <span className="text-fd-primary"> *</span> : null}
+    </>
+  );
+}
+
+// The name is the input's <label>, its description under it.
 function FieldHeader({
   name,
   required,
   description,
+  htmlFor,
 }: {
   name: string;
-  required?: boolean;
-  description?: string;
+  required?: boolean | undefined;
+  description?: string | undefined;
+  htmlFor: string;
 }) {
-  const summary = firstParagraph(description);
   return (
     <div className="flex flex-col gap-0.5">
-      <span className={labelClass} title={description}>
-        {name}
-        {required ? <span className="text-fd-primary"> *</span> : null}
-      </span>
-      {summary ? (
-        <p className="line-clamp-2 text-[12px] text-fd-muted-foreground" title={description}>
-          {summary}
-        </p>
-      ) : null}
+      <label htmlFor={htmlFor} className={labelClass}>
+        <Caption name={name} required={required} />
+      </label>
+      <FieldDescription id={`${htmlFor}-desc`} description={description} />
     </div>
   );
 }
@@ -57,15 +98,20 @@ function FieldGroup({
   children,
 }: {
   name: string;
-  required?: boolean;
-  description?: string;
+  required?: boolean | undefined;
+  description?: string | undefined;
   children: ReactNode;
 }) {
+  const id = useId();
   return (
-    <fieldset className="flex flex-col gap-3 border border-(--rule-soft) p-3">
-      <legend className="px-1">
-        <FieldHeader name={name} required={required} description={description} />
+    <fieldset
+      aria-describedby={descriptionId(id, description)}
+      className="flex flex-col gap-3 border border-(--rule-soft) p-3"
+    >
+      <legend className={`px-1 ${labelClass}`}>
+        <Caption name={name} required={required} />
       </legend>
+      <FieldDescription id={`${id}-desc`} description={description} />
       {children}
     </fieldset>
   );
@@ -74,9 +120,19 @@ function FieldGroup({
 export interface FieldProps {
   name: string;
   schema: FieldSchema;
-  required?: boolean;
+  required?: boolean | undefined;
   value: unknown;
   onChange: (value: unknown) => void;
+}
+
+// What each input below receives: the value already read as its type, the
+// field's `onChange` passed as is (it takes any value).
+interface InputProps<T> {
+  name: string;
+  schema: FieldSchema;
+  required?: boolean | undefined;
+  value: T;
+  onChange: (v: T) => void;
 }
 
 export function Field({ name, schema, required, value, onChange }: FieldProps) {
@@ -86,8 +142,8 @@ export function Field({ name, schema, required, value, onChange }: FieldProps) {
         name={name}
         schema={schema}
         required={required}
-        value={value as Record<string, unknown>}
-        onChange={onChange as (v: Record<string, unknown>) => void}
+        value={asRecord(value)}
+        onChange={onChange}
       />
     );
   }
@@ -97,8 +153,8 @@ export function Field({ name, schema, required, value, onChange }: FieldProps) {
         name={name}
         schema={schema}
         required={required}
-        value={(value as unknown[]) ?? []}
-        onChange={onChange as (v: unknown[]) => void}
+        value={asArray(value)}
+        onChange={onChange}
       />
     );
   }
@@ -108,8 +164,8 @@ export function Field({ name, schema, required, value, onChange }: FieldProps) {
         name={name}
         schema={schema}
         required={required}
-        value={(value as Record<string, string>) ?? {}}
-        onChange={onChange as (v: Record<string, string>) => void}
+        value={asRecord(value)}
+        onChange={onChange}
       />
     );
   }
@@ -119,7 +175,7 @@ export function Field({ name, schema, required, value, onChange }: FieldProps) {
         <ObjectFields
           schema={schema}
           value={value}
-          onChange={onChange as (v: Record<string, unknown>) => void}
+          onChange={onChange}
         />
       </FieldGroup>
     );
@@ -133,8 +189,8 @@ export function Field({ name, schema, required, value, onChange }: FieldProps) {
         name={name}
         schema={schema}
         required={required}
-        value={(value as string) ?? ""}
-        onChange={onChange as (v: string) => void}
+        value={typeof value === "string" ? value : ""}
+        onChange={onChange}
         options={schema.enum}
       />
     );
@@ -145,7 +201,7 @@ export function Field({ name, schema, required, value, onChange }: FieldProps) {
         name={name}
         schema={schema}
         value={Boolean(value)}
-        onChange={onChange as (v: boolean) => void}
+        onChange={onChange}
       />
     );
   }
@@ -156,7 +212,7 @@ export function Field({ name, schema, required, value, onChange }: FieldProps) {
         schema={schema}
         required={required}
         value={Number(value ?? 0)}
-        onChange={onChange as (v: number) => void}
+        onChange={onChange}
       />
     );
   }
@@ -165,8 +221,8 @@ export function Field({ name, schema, required, value, onChange }: FieldProps) {
       name={name}
       schema={schema}
       required={required}
-      value={(value as string) ?? ""}
-      onChange={onChange as (v: string) => void}
+      value={typeof value === "string" ? value : ""}
+      onChange={onChange}
     />
   );
 }
@@ -186,16 +242,16 @@ export function ObjectFields({
   // it itself (e.g. CrdForm merging `spec.name` into the metadata.name
   // input) — only meant for the root call, nested ObjectFields calls never
   // pass this.
-  omitKeys?: string[];
+  omitKeys?: string[] | undefined;
   // Root call only: optional fields fold under "More settings", so what must
   // be filled in is what the reader sees first.
-  collapseOptional?: boolean;
+  collapseOptional?: boolean | undefined;
   // Optional fields to keep upfront anyway (the ones a guided choice is about).
-  priorityKeys?: string[];
+  priorityKeys?: string[] | undefined;
 }) {
   const properties = schema.properties ?? {};
   const required = new Set(schema.required ?? []);
-  const obj = (value as Record<string, unknown>) ?? {};
+  const obj = asRecord(value);
   const omit = new Set(omitKeys ?? []);
   const entries = Object.entries(properties).filter(([key]) => !omit.has(key));
   // Required fields, then priority ones, then the rest; each keeps schema order.
@@ -234,23 +290,15 @@ export function ObjectFields({
   );
 }
 
-function StringField({
-  name,
-  schema,
-  required,
-  value,
-  onChange,
-}: {
-  name: string;
-  schema: FieldSchema;
-  required?: boolean;
-  value: string;
-  onChange: (v: string) => void;
-}) {
+function StringField({ name, schema, required, value, onChange }: InputProps<string>) {
+  const id = useId();
   return (
     <div className="flex flex-col gap-1">
-      <FieldHeader name={name} required={required} description={schema.description} />
+      <FieldHeader name={name} required={required} description={schema.description} htmlFor={id} />
       <input
+        id={id}
+        aria-required={required}
+        aria-describedby={descriptionId(id, schema.description)}
         type="text"
         className={inputClass}
         value={value}
@@ -261,23 +309,15 @@ function StringField({
   );
 }
 
-function NumberField({
-  name,
-  schema,
-  required,
-  value,
-  onChange,
-}: {
-  name: string;
-  schema: FieldSchema;
-  required?: boolean;
-  value: number;
-  onChange: (v: number) => void;
-}) {
+function NumberField({ name, schema, required, value, onChange }: InputProps<number>) {
+  const id = useId();
   return (
     <div className="flex flex-col gap-1">
-      <FieldHeader name={name} required={required} description={schema.description} />
+      <FieldHeader name={name} required={required} description={schema.description} htmlFor={id} />
       <input
+        id={id}
+        aria-required={required}
+        aria-describedby={descriptionId(id, schema.description)}
         type="number"
         className={inputClass}
         value={Number.isFinite(value) ? value : 0}
@@ -287,27 +327,20 @@ function NumberField({
   );
 }
 
-function BooleanField({
-  name,
-  schema,
-  value,
-  onChange,
-}: {
-  name: string;
-  schema: FieldSchema;
-  value: boolean;
-  onChange: (v: boolean) => void;
-}) {
+function BooleanField({ name, schema, value, onChange }: Omit<InputProps<boolean>, "required">) {
+  const id = useId();
   return (
-    <label className="flex items-center gap-2">
+    <div className="flex items-start gap-2">
       <input
+        id={id}
         type="checkbox"
+        aria-describedby={descriptionId(id, schema.description)}
         checked={value}
         onChange={(e) => onChange(e.target.checked)}
-        className="size-4 border border-(--rule-strong) bg-(--ground-sunk) accent-(--accent)"
+        className="mt-0.5 size-4 border border-(--rule-strong) bg-(--ground-sunk) accent-(--accent)"
       />
-      <FieldHeader name={name} description={schema.description} />
-    </label>
+      <FieldHeader name={name} description={schema.description} htmlFor={id} />
+    </div>
   );
 }
 
@@ -318,18 +351,19 @@ function SelectField({
   value,
   onChange,
   options,
-}: {
-  name: string;
-  schema: FieldSchema;
-  required?: boolean;
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-}) {
+}: InputProps<string> & { options: string[] }) {
+  const id = useId();
   return (
     <div className="flex flex-col gap-1">
-      <FieldHeader name={name} required={required} description={schema.description} />
-      <select className={inputClass} value={value} onChange={(e) => onChange(e.target.value)}>
+      <FieldHeader name={name} required={required} description={schema.description} htmlFor={id} />
+      <select
+        id={id}
+        aria-required={required}
+        aria-describedby={descriptionId(id, schema.description)}
+        className={inputClass}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
         {!value ? <option value="">-- select --</option> : null}
         {options.map((opt) => (
           <option key={opt} value={opt}>
@@ -341,55 +375,47 @@ function SelectField({
   );
 }
 
-function RawJsonField({
-  name,
-  schema,
-  required,
-  value,
-  onChange,
-}: {
-  name: string;
-  schema: FieldSchema;
-  required?: boolean;
-  value: unknown;
-  onChange: (v: unknown) => void;
-}) {
+function RawJsonField({ name, schema, required, value, onChange }: InputProps<unknown>) {
+  const id = useId();
+  const [parseError, setParseError] = useState<string | null>(null);
   const text = typeof value === "string" ? value : JSON.stringify(value ?? {}, null, 2);
+  const description = schema.description ?? "Free-form JSON, passed through to the remote object as-is.";
   return (
     <div className="flex flex-col gap-1">
       <FieldHeader
         name={name}
         required={required}
-        description={schema.description ?? "Free-form JSON, passed through to the remote object as-is."}
+        description={description}
+        htmlFor={id}
       />
       <textarea
-        className={`${inputClass} min-h-24 font-mono`}
+        id={id}
+        aria-required={required}
+        aria-invalid={parseError !== null}
+        aria-describedby={describedBy(descriptionId(id, description), parseError === null ? undefined : `${id}-error`)}
+        className={`${inputClass} min-h-24 font-mono ${parseError === null ? "" : "border-(--accent)"}`}
         defaultValue={text}
         onBlur={(e) => {
+          // Invalid JSON keeps the last valid value, and says so.
           try {
-            onChange(JSON.parse(e.target.value));
-          } catch {
-            // Keep the last valid value until the textarea holds parseable JSON again.
+            const parsed: unknown = JSON.parse(e.target.value);
+            onChange(parsed);
+            setParseError(null);
+          } catch (err: unknown) {
+            setParseError(err instanceof Error ? err.message : String(err));
           }
         }}
       />
+      {parseError === null ? null : (
+        <p id={`${id}-error`} role="alert" className="text-[12px] text-fd-primary">
+          Not valid JSON, the manifest keeps the last valid value: {parseError}
+        </p>
+      )}
     </div>
   );
 }
 
-function ArrayField({
-  name,
-  schema,
-  required,
-  value,
-  onChange,
-}: {
-  name: string;
-  schema: FieldSchema;
-  required?: boolean;
-  value: unknown[];
-  onChange: (v: unknown[]) => void;
-}) {
+function ArrayField({ name, schema, required, value, onChange }: InputProps<unknown[]>) {
   const itemSchema = schema.items ?? {};
   const singular = name.endsWith("s") ? name.slice(0, -1) : name;
   return (
@@ -399,7 +425,7 @@ function ArrayField({
           <div key={index} className="flex items-start gap-2 border border-dashed border-(--rule-soft) p-2">
             <div className="flex-1">
               <Field
-                name={`[${index}]`}
+                name={`${name}[${index}]`}
                 schema={itemSchema}
                 value={item}
                 onChange={(v) => onChange(value.map((it, i) => (i === index ? v : it)))}
@@ -409,6 +435,7 @@ function ArrayField({
               type="button"
               onClick={() => onChange(value.filter((_, i) => i !== index))}
               className={ghostButtonClass}
+              aria-label={`remove ${name}[${index}]`}
             >
               remove
             </button>
@@ -426,20 +453,8 @@ function ArrayField({
   );
 }
 
-function MapField({
-  name,
-  schema,
-  required,
-  value,
-  onChange,
-}: {
-  name: string;
-  schema: FieldSchema;
-  required?: boolean;
-  value: Record<string, string>;
-  onChange: (v: Record<string, string>) => void;
-}) {
-  const entries = Object.entries(value ?? {});
+function MapField({ name, schema, required, value, onChange }: InputProps<Record<string, unknown>>) {
+  const entries = Object.entries(value).map(([key, val]): [string, string] => [key, typeof val === "string" ? val : ""]);
 
   const updateEntry = (index: number, key: string, val: string) => {
     const next = [...entries];
@@ -455,12 +470,14 @@ function MapField({
             <input
               className={inputClass}
               placeholder="key"
+              aria-label={`${name}: key of entry ${index + 1}`}
               defaultValue={key}
               onBlur={(e) => updateEntry(index, e.target.value, val)}
             />
             <input
               className={inputClass}
               placeholder="value"
+              aria-label={`${name}: value of entry ${index + 1}`}
               defaultValue={val}
               onBlur={(e) => updateEntry(index, key, e.target.value)}
             />
@@ -468,6 +485,7 @@ function MapField({
               type="button"
               onClick={() => onChange(Object.fromEntries(entries.filter((_, i) => i !== index)))}
               className={ghostButtonClass}
+              aria-label={`remove ${name} entry ${index + 1}`}
             >
               remove
             </button>
@@ -485,22 +503,10 @@ function MapField({
   );
 }
 
-function DiscriminatedUnionField({
-  name,
-  schema,
-  required,
-  value,
-  onChange,
-}: {
-  name: string;
-  schema: FieldSchema;
-  required?: boolean;
-  value: Record<string, unknown>;
-  onChange: (v: Record<string, unknown>) => void;
-}) {
+function DiscriminatedUnionField({ name, schema, required, value, onChange }: InputProps<Record<string, unknown>>) {
   const variants = discriminatedVariants(schema);
-  const kind = (value?.kind as string) ?? variants[0];
-  const vSchema = variantSchema(schema, kind);
+  const kind = typeof value.kind === "string" ? value.kind : variants[0];
+  const vSchema = kind === undefined ? undefined : variantSchema(schema, kind);
 
   return (
     <FieldGroup name={name} required={required} description={schema.description}>
@@ -519,10 +525,10 @@ function DiscriminatedUnionField({
           }}
           options={variants}
         />
-        {vSchema ? (
+        {vSchema && kind !== undefined ? (
           <ObjectFields
             schema={vSchema}
-            value={value?.[kind]}
+            value={value[kind]}
             onChange={(v) => onChange({ kind, [kind]: v })}
           />
         ) : kind ? (

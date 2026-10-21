@@ -32,6 +32,31 @@ pub const CLUSTER_KINDS_ENV: &str = "WEEBO_WATCH_CLUSTER_KINDS";
 /// shares itself (its `spec.sharedWith`). Unset: `false`.
 pub const CROSS_NAMESPACE_REFS_ENV: &str = "WEEBO_CROSS_NAMESPACE_REFS";
 
+/// A scope the environment (or the operator) asks for that can't be
+/// watched: the start fails rather than watching more or less.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ScopeError {
+    #[error("{CLUSTER_KINDS_ENV}=false needs {NAMESPACE_ENV}")]
+    ClusterKindsNeedNamespace,
+    #[error("invalid label selector: {0}")]
+    InvalidSelector(String),
+    /// `{env}: {message}`: a variable that doesn't parse.
+    #[error("{env}: {message}")]
+    InvalidEnv { env: &'static str, message: String },
+    #[error(
+        "{kind} is cluster-scoped and this operator runs without cluster-scoped kinds \
+         ({CLUSTER_KINDS_ENV}=false)"
+    )]
+    ClusterScopedKind { kind: String },
+}
+
+fn neither_true_nor_false(env: &'static str, value: &str) -> ScopeError {
+    ScopeError::InvalidEnv {
+        env,
+        message: format!("{value:?} is neither true nor false"),
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WatchScope {
     namespace: Option<String>,
@@ -57,9 +82,9 @@ impl WatchScope {
 
     /// No cluster-scoped kind at all: the operator runs on the Roles of
     /// its namespace only. Needs [`Self::namespace`].
-    pub fn without_cluster_kinds(mut self) -> anyhow::Result<Self> {
+    pub fn without_cluster_kinds(mut self) -> Result<Self, ScopeError> {
         if self.namespace.is_none() {
-            anyhow::bail!("{CLUSTER_KINDS_ENV}=false needs {NAMESPACE_ENV}");
+            return Err(ScopeError::ClusterKindsNeedNamespace);
         }
         self.no_cluster_kinds = true;
         Ok(self)
@@ -67,9 +92,9 @@ impl WatchScope {
 
     /// Only the objects `selector` matches. An empty selector matches
     /// everything.
-    pub fn with_labels(mut self, selector: LabelSelector) -> anyhow::Result<Self> {
-        let selector = Selector::try_from(selector)
-            .map_err(|e| anyhow::anyhow!("invalid label selector: {}", e.0))?;
+    pub fn with_labels(mut self, selector: LabelSelector) -> Result<Self, ScopeError> {
+        let selector =
+            Selector::try_from(selector).map_err(|e| ScopeError::InvalidSelector(e.0))?;
         self.selector = (!selector.selects_all()).then_some(selector);
         Ok(self)
     }
@@ -102,7 +127,7 @@ impl WatchScope {
     /// From [`NAMESPACE_ENV`], [`LABEL_SELECTOR_ENV`],
     /// [`CLUSTER_KINDS_ENV`] and [`CROSS_NAMESPACE_REFS_ENV`]. An invalid
     /// value fails the start rather than silently watching more.
-    pub fn from_env() -> anyhow::Result<Self> {
+    pub fn from_env() -> Result<Self, ScopeError> {
         let scope = Self::from_values(
             std::env::var(NAMESPACE_ENV).ok().as_deref(),
             std::env::var(LABEL_SELECTOR_ENV).ok().as_deref(),
@@ -115,9 +140,7 @@ impl WatchScope {
         {
             None | Some("") | Some("false") => Ok(scope),
             Some("true") => Ok(scope.with_cross_namespace_refs()),
-            Some(other) => {
-                anyhow::bail!("{CROSS_NAMESPACE_REFS_ENV}: {other:?} is neither true nor false")
-            }
+            Some(other) => Err(neither_true_nor_false(CROSS_NAMESPACE_REFS_ENV, other)),
         }
     }
 
@@ -125,22 +148,23 @@ impl WatchScope {
         namespace: Option<&str>,
         selector: Option<&str>,
         cluster_kinds: Option<&str>,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, ScopeError> {
         let mut scope = match namespace.map(str::trim).filter(|ns| !ns.is_empty()) {
             Some(ns) => Self::namespace(ns),
             None => Self::cluster(),
         };
         if let Some(json) = selector.map(str::trim).filter(|s| !s.is_empty()) {
-            let selector: LabelSelector = serde_json::from_str(json)
-                .map_err(|e| anyhow::anyhow!("{LABEL_SELECTOR_ENV}: {e}"))?;
+            let selector: LabelSelector =
+                serde_json::from_str(json).map_err(|e| ScopeError::InvalidEnv {
+                    env: LABEL_SELECTOR_ENV,
+                    message: e.to_string(),
+                })?;
             scope = scope.with_labels(selector)?;
         }
         match cluster_kinds.map(str::trim).filter(|s| !s.is_empty()) {
             None | Some("true") => Ok(scope),
             Some("false") => scope.without_cluster_kinds(),
-            Some(other) => {
-                anyhow::bail!("{CLUSTER_KINDS_ENV}: {other:?} is neither true nor false")
-            }
+            Some(other) => Err(neither_true_nor_false(CLUSTER_KINDS_ENV, other)),
         }
     }
 
@@ -152,17 +176,15 @@ impl WatchScope {
     /// `K` may be watched: called at start for every kind the operator
     /// needs, so a cluster-scoped kind under a scope without them fails
     /// there instead of looping on 403s.
-    pub fn ensure<K>(&self) -> anyhow::Result<()>
+    pub fn ensure<K>(&self) -> Result<(), ScopeError>
     where
         K: Resource<DynamicType = ()>,
         K::Scope: KindScope,
     {
         if self.no_cluster_kinds && !<K::Scope as KindScope>::NAMESPACED {
-            anyhow::bail!(
-                "{} is cluster-scoped and this operator runs without cluster-scoped kinds \
-                 ({CLUSTER_KINDS_ENV}=false)",
-                K::kind(&())
-            );
+            return Err(ScopeError::ClusterScopedKind {
+                kind: K::kind(&()).into_owned(),
+            });
         }
         Ok(())
     }

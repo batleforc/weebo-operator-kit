@@ -1,4 +1,4 @@
-import { createCssVariablesTheme } from "shiki";
+import { createCssVariablesTheme, type HighlighterCore } from "shiki/core";
 
 // Renders through `--shiki-*` CSS variables instead of a bundled Shiki
 // theme — the generated manifest is highlighted client-side from live
@@ -28,3 +28,22 @@ export const yamlPreviewTheme = createCssVariablesTheme({
     "token-link": "oklch(0.65 0.235 25)",
   },
 });
+
+let highlighter: Promise<HighlighterCore> | undefined;
+
+// A highlighter that knows YAML and this theme only, loaded on first use:
+// `shiki`'s main entry would ship every bundled grammar to the browser.
+export function yamlHighlighter(): Promise<HighlighterCore> {
+  highlighter ??= Promise.all([
+    import("shiki/core"),
+    import("shiki/engine/javascript"),
+    import("shiki/langs/yaml.mjs"),
+  ]).then(([{ createHighlighterCore }, { createJavaScriptRegexEngine }, yaml]) =>
+    createHighlighterCore({
+      langs: [yaml.default],
+      themes: [yamlPreviewTheme],
+      engine: createJavaScriptRegexEngine(),
+    }),
+  );
+  return highlighter;
+}

@@ -13,6 +13,7 @@
 //! the API otherwise (tests). The operator's watch scope applies: its
 //! label selector and the namespace it is limited to.
 
+use crate::instance::{LookupError, list_all, lookup};
 use std::fmt::Debug;
 
 use k8s_openapi::NamespaceResourceScope;
@@ -84,7 +85,7 @@ where
     }
 
     /// The instances of `namespace` in scope.
-    pub async fn instances(&self, namespace: &str) -> Result<Vec<L>, String> {
+    pub async fn instances(&self, namespace: &str) -> Result<Vec<L>, LookupError> {
         if self
             .watched_namespace
             .as_deref()
@@ -106,16 +107,17 @@ where
             Some(selector) => ListParams::default().labels_from(selector),
             None => ListParams::default(),
         };
-        Api::<L>::namespaced(self.client.clone(), namespace)
-            .list(&params)
-            .await
-            .map(|l| l.items)
-            .map_err(|e| format!("listing {} in {namespace:?}: {e}", L::kind(&())))
+        list_all(
+            &Api::<L>::namespaced(self.client.clone(), namespace),
+            &params,
+        )
+        .await
+        .map_err(lookup(format!("listing {} in {namespace:?}", L::kind(&()))))
     }
 
     /// The instance `bound` designates, `None` when it is gone (or out of
     /// scope, or not a local instance).
-    pub async fn get(&self, bound: &BoundInstance) -> Result<Option<L>, String> {
+    pub async fn get(&self, bound: &BoundInstance) -> Result<Option<L>, LookupError> {
         let (InstanceKind::LocalInstance, Some(namespace)) =
             (bound.kind, bound.namespace.as_deref())
         else {
@@ -149,11 +151,7 @@ where
         let namespaces = [cr_namespace, request.foreign_namespace()];
         let mut needs_labels = false;
         for namespace in namespaces.into_iter().flatten() {
-            for instance in self
-                .instances(namespace)
-                .await
-                .map_err(InstanceError::Kubernetes)?
-            {
+            for instance in self.instances(namespace).await? {
                 let shared = sharing(&instance);
                 needs_labels |= Some(namespace) != cr_namespace
                     && shared

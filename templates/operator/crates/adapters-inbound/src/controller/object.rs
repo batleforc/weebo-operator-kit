@@ -63,7 +63,7 @@ async fn apply(api: &Api<Object>, object: &Object, ctx: &Ctx) -> Result<Action, 
     };
     super::record_reconcile(KIND, started, &outcome);
     super::publish(api, &ctx.recorder, &current, &outcome).await?;
-    Ok(super::requeue_after(&outcome))
+    Ok(super::requeue_after(object, &outcome))
 }
 
 async fn cleanup(api: &Api<Object>, object: &Object, ctx: &Ctx) -> Result<(), Error> {

@@ -2,6 +2,8 @@
 //! patch on the `status` subresource carrying the given fields, retried
 //! while the apiserver is unavailable, never on a refusal.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::Api;
 use serde_json::json;
@@ -12,7 +14,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const STATUS: &str = "/api/v1/namespaces/team-a/pods/app/status";
 
 fn api(server: &MockServer) -> Api<Pod> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Err: another test installed it first, which is as good.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let config = kube::Config::new(server.uri().parse().unwrap());
     Api::namespaced(kube::Client::try_from(config).unwrap(), "team-a")
 }

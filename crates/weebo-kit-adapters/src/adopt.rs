@@ -9,6 +9,7 @@
 //! it hands over the status fields to seed, and reads the identifier a CR
 //! already holds.
 
+use crate::instance::{LookupError, lookup};
 use std::fmt::Debug;
 
 use kube::api::{Api, Patch, PatchParams};
@@ -28,6 +29,22 @@ pub enum Adoption {
     AlreadyBound,
 }
 
+/// Why a CR could not be adopted.
+#[derive(Debug, thiserror::Error)]
+pub enum AdoptError {
+    #[error(transparent)]
+    Kubernetes(#[from] LookupError),
+    #[error("already bound to {owned}, not {remote_id}")]
+    BoundElsewhere { owned: String, remote_id: String },
+    #[error(
+        "exists but is bound to nothing yet — the operator may be creating its object right \
+         now; delete it, or re-run with --force to take it over"
+    )]
+    Unbound,
+    #[error("serializing the CR: {0}")]
+    Serialize(#[from] serde_json::Error),
+}
+
 /// What a run of adoptions did.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Summary {
@@ -39,11 +56,11 @@ pub struct Summary {
 }
 
 impl Summary {
-    pub fn record(&mut self, result: &Result<Adoption, String>) {
+    pub fn record(&mut self, result: &Result<Adoption, AdoptError>) {
         match result {
-            Ok(Adoption::Adopted) => self.adopted += 1,
-            Ok(Adoption::AlreadyBound) => self.skipped += 1,
-            Err(_) => self.failed += 1,
+            Ok(Adoption::Adopted) => self.adopted = self.adopted.saturating_add(1),
+            Ok(Adoption::AlreadyBound) => self.skipped = self.skipped.saturating_add(1),
+            Err(_) => self.failed = self.failed.saturating_add(1),
         }
     }
 }
@@ -74,7 +91,7 @@ impl Adopter {
         seed: serde_json::Value,
         bound_to: impl Fn(&K) -> Option<String>,
         force: bool,
-    ) -> Result<Adoption, String>
+    ) -> Result<Adoption, AdoptError>
     where
         K: Resource<DynamicType = ()> + Clone + Debug + Serialize + DeserializeOwned,
     {
@@ -83,7 +100,7 @@ impl Adopter {
         let existing = api
             .get_opt(&name)
             .await
-            .map_err(|e| format!("reading the CR: {e}"))?;
+            .map_err(lookup("reading the CR".into()))?;
         if let Some(existing) = existing {
             let paused = existing.annotations().contains_key(&pending);
             match bound_to(&existing) {
@@ -94,42 +111,43 @@ impl Adopter {
                     return Ok(Adoption::AlreadyBound);
                 }
                 Some(owned) => {
-                    return Err(format!("already bound to {owned}, not {remote_id}"));
+                    return Err(AdoptError::BoundElsewhere {
+                        owned,
+                        remote_id: remote_id.to_string(),
+                    });
                 }
                 None if paused || force => {}
-                None => {
-                    return Err("exists but is bound to nothing yet — the operator may be \
-                         creating its object right now; delete it, or re-run with --force \
-                         to take it over"
-                        .to_string());
-                }
+                None => return Err(AdoptError::Unbound),
             }
         }
 
-        let mut body = serde_json::to_value(cr).map_err(|e| e.to_string())?;
+        let mut cr = cr.clone();
+        cr.annotations_mut().insert(pending, "true".into());
+        let mut body = serde_json::to_value(&cr)?;
         if let Some(obj) = body.as_object_mut() {
             obj.remove("status");
         }
-        body["metadata"]["annotations"][&pending] = json!("true");
         api.patch(
             &name,
             &PatchParams::apply(self.field_manager).force(),
             &Patch::Apply(&body),
         )
         .await
-        .map_err(|e| format!("creating the CR: {e}"))?;
+        .map_err(lookup("creating the CR".into()))?;
         api.patch_status(
             &name,
             &PatchParams::default(),
             &Patch::Merge(json!({ "status": seed })),
         )
         .await
-        .map_err(|e| format!("seeding status (the CR stays paused until a re-run): {e}"))?;
+        .map_err(lookup(
+            "seeding status (the CR stays paused until a re-run)".into(),
+        ))?;
         self.unpause(api, &name).await?;
         Ok(Adoption::Adopted)
     }
 
-    async fn unpause<K>(&self, api: &Api<K>, name: &str) -> Result<(), String>
+    async fn unpause<K>(&self, api: &Api<K>, name: &str) -> Result<(), AdoptError>
     where
         K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned,
     {
@@ -145,16 +163,17 @@ impl Adopter {
         )
         .await
         .map(|_| ())
-        .map_err(|e| format!("unpausing the CR: {e}"))
+        .map_err(lookup("unpausing the CR".into()))?;
+        Ok(())
     }
 }
 
 /// `items` as one multi-document YAML stream (`---` between documents).
-pub fn to_yaml<T: Serialize>(items: &[T]) -> Result<String, String> {
+pub fn to_yaml<T: Serialize>(items: &[T]) -> Result<String, serde_norway::Error> {
     let mut out = String::new();
     for item in items {
         out.push_str("---\n");
-        out.push_str(&serde_norway::to_string(item).map_err(|e| e.to_string())?);
+        out.push_str(&serde_norway::to_string(item)?);
     }
     Ok(out)
 }
@@ -168,7 +187,7 @@ mod tests {
         let mut s = Summary::default();
         s.record(&Ok(Adoption::Adopted));
         s.record(&Ok(Adoption::AlreadyBound));
-        s.record(&Err("x".into()));
+        s.record(&Err(AdoptError::Unbound));
         assert_eq!(
             s,
             Summary {

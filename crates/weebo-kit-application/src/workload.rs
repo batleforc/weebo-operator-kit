@@ -44,11 +44,16 @@ impl OwnedObject {
     where
         K: Resource + Metadata<Ty = ObjectMeta> + serde::Serialize,
     {
+        #[expect(
+            clippy::expect_used,
+            reason = "a Kubernetes object's maps all have string keys: serde_json can't refuse it"
+        )]
+        let manifest = serde_json::to_value(k).expect("a Kubernetes object serializes");
         Self {
             api_version: K::API_VERSION.to_string(),
             kind: K::KIND.to_string(),
             name: k.metadata().name.clone().unwrap_or_default(),
-            manifest: serde_json::to_value(k).expect("a Kubernetes object serializes"),
+            manifest,
             create_only,
         }
     }

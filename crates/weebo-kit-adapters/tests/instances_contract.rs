@@ -3,6 +3,8 @@
 //! the API (no stores wired), within the operator's scope, and a recorded
 //! binding kept.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -10,7 +12,7 @@ use serde_json::json;
 use weebo_kit_adapters::{Instances, LocalInstances, SharesItself};
 use weebo_kit_api::{BoundInstance, InstanceRef, SharedWith};
 use weebo_kit_application::instances::{InstanceDirectory, InstanceError, ResolveError};
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[derive(CustomResource, Serialize, Deserialize, Clone, Debug, JsonSchema)]
@@ -95,7 +97,10 @@ async fn api(clusters: &[&str], locals: &[(&str, &str, serde_json::Value)]) -> M
 }
 
 fn directory(server: &MockServer) -> Directory {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Err: another test installed it first, which is as good.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let config = kube::Config::new(server.uri().parse().unwrap());
     Instances::new(kube::Client::try_from(config).unwrap())
 }
@@ -199,7 +204,10 @@ async fn an_unreadable_kind_is_a_kubernetes_error() {
 }
 
 fn local_only(server: &MockServer) -> LocalInstances<ExampleLocalInstance> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Err: another test installed it first, which is as good.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     let config = kube::Config::new(server.uri().parse().unwrap());
     LocalInstances::new(kube::Client::try_from(config).unwrap())
 }
@@ -262,4 +270,37 @@ async fn a_local_only_directory_shares_as_the_operator_says() {
             .await,
         Ok(BoundInstance::local("team-b", "shared"))
     );
+}
+
+#[tokio::test]
+async fn a_list_read_from_the_api_follows_its_pages() {
+    let server = MockServer::start().await;
+    let page = |items: serde_json::Value, next: Option<&str>| {
+        ResponseTemplate::new(200).set_body_json(json!({
+            "apiVersion": "example.weebo.io/v1", "kind": "ExampleInstanceList",
+            "metadata": {"resourceVersion": "1", "continue": next},
+            "items": items,
+        }))
+    };
+    Mock::given(method("GET"))
+        .and(path("/apis/example.weebo.io/v1/exampleinstances"))
+        .and(query_param("limit", "500"))
+        .and(query_param_is_missing("continue"))
+        .respond_with(page(json!([cluster("one")]), Some("page-2")))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/apis/example.weebo.io/v1/exampleinstances"))
+        .and(query_param("continue", "page-2"))
+        .respond_with(page(json!([cluster("two")]), None))
+        .mount(&server)
+        .await;
+    let names: Vec<_> = directory(&server)
+        .cluster_instances()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|i| i.metadata.name.unwrap())
+        .collect();
+    assert_eq!(names, ["one", "two"]);
 }

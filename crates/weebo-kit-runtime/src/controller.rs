@@ -3,7 +3,8 @@
 //! long until the next one, what an error announces, and the finalizer's
 //! force-orphan way out. The reconcile itself stays the operator's.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
 use futures::{Stream, StreamExt};
@@ -29,8 +30,15 @@ pub const DEFAULT_CONCURRENCY: u16 = 4;
 
 /// Steady-state drift check after a success, seconds.
 pub const STEADY_REQUEUE_SECS: u64 = 300;
-/// Retry after a failure (often a dependency not ready yet), seconds.
+/// Retry after a failure (often a dependency not ready yet), seconds;
+/// doubled for each consecutive failure of the same CR, up to
+/// [`STEADY_REQUEUE_SECS`].
 pub const RETRY_REQUEUE_SECS: u64 = 30;
+/// CRs whose failure streak is tracked at once; past it, the streaks idle
+/// for twice [`STEADY_REQUEUE_SECS`] (a CR deleted while failing, without
+/// a finalizer) are dropped, else a newly failing CR retries every
+/// [`RETRY_REQUEUE_SECS`].
+pub const MAX_FAILURE_STREAKS: usize = 4096;
 /// The soonest a reconcile is requeued, seconds: a due time already past
 /// (`due_in: Some(0)`) never spins the controller.
 pub const MIN_REQUEUE_SECS: u64 = 1;
@@ -134,19 +142,80 @@ pub fn jittered(secs: u64) -> Duration {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos() as u64);
-    Duration::from_secs((secs - spread + nanos % (2 * spread + 1)).max(1))
+    let offset = nanos
+        .checked_rem(spread.saturating_mul(2).saturating_add(1))
+        .unwrap_or(0);
+    Duration::from_secs(secs.saturating_sub(spread).saturating_add(offset).max(1))
 }
 
-/// When to reconcile again after a reconcile that reached its status:
-/// [`STEADY_REQUEUE_SECS`] after a success — or a failure only a change of
-/// the CR can clear (a change triggers a reconcile by itself) —,
-/// [`RETRY_REQUEUE_SECS`] after any other failure; jittered. `due_in`
-/// (seconds, e.g. a token expiring) comes first when sooner.
-pub fn requeue_after(steady: bool, due_in: Option<u64>) -> Action {
+/// Consecutive failures per CR uid: a CR that keeps failing (remote down,
+/// bad credentials) backs off instead of calling the remote system,
+/// patching its status and bumping an Event every 30 s forever. Ended by a
+/// steady reconcile or the finalizer's release.
+static FAILURE_STREAKS: LazyLock<Mutex<HashMap<String, Streak>>> = LazyLock::new(Default::default);
+
+#[derive(Clone, Copy)]
+struct Streak {
+    failures: u32,
+    last: std::time::Instant,
+}
+
+/// [`RETRY_REQUEUE_SECS`] doubled `failures` times, up to [`STEADY_REQUEUE_SECS`].
+fn backoff_secs(failures: u32) -> u64 {
+    RETRY_REQUEUE_SECS
+        .saturating_mul(2u64.saturating_pow(failures))
+        .min(STEADY_REQUEUE_SECS)
+}
+
+/// The retry delay of one more failure of `uid`, counted.
+fn failed(uid: Option<&str>) -> u64 {
+    let Some(uid) = uid else {
+        return RETRY_REQUEUE_SECS;
+    };
+    let mut streaks = FAILURE_STREAKS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if streaks.len() >= MAX_FAILURE_STREAKS && !streaks.contains_key(uid) {
+        let idle = Duration::from_secs(STEADY_REQUEUE_SECS.saturating_mul(2));
+        streaks.retain(|_, s| s.last.elapsed() < idle);
+        if streaks.len() >= MAX_FAILURE_STREAKS {
+            return RETRY_REQUEUE_SECS;
+        }
+    }
+    let now = std::time::Instant::now();
+    let streak = streaks.entry(uid.to_string()).or_insert(Streak {
+        failures: 0,
+        last: now,
+    });
+    let secs = backoff_secs(streak.failures);
+    streak.failures = streak.failures.saturating_add(1);
+    streak.last = now;
+    secs
+}
+
+/// Ends `uid`'s failure streak.
+fn recovered(uid: Option<&str>) {
+    if let Some(uid) = uid {
+        FAILURE_STREAKS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(uid);
+    }
+}
+
+/// When to reconcile `object` again after a reconcile that reached its
+/// status: [`STEADY_REQUEUE_SECS`] after a success — or a failure only a
+/// change of the CR can clear (a change triggers a reconcile by itself) —,
+/// [`RETRY_REQUEUE_SECS`] after any other failure, doubled per consecutive
+/// failure up to [`STEADY_REQUEUE_SECS`]; jittered. `due_in` (seconds, e.g.
+/// a token expiring) comes first when sooner.
+pub fn requeue_after<K: Resource>(object: &K, steady: bool, due_in: Option<u64>) -> Action {
+    let uid = object.meta().uid.as_deref();
     let base = if steady {
+        recovered(uid);
         STEADY_REQUEUE_SECS
     } else {
-        RETRY_REQUEUE_SECS
+        failed(uid)
     };
     match due_in {
         Some(due) if due < base => Action::requeue(Duration::from_secs(due.max(MIN_REQUEUE_SECS))),
@@ -157,7 +226,8 @@ pub fn requeue_after(steady: bool, due_in: Option<u64>) -> Action {
 /// The body of every `error_policy`: an error that stopped a reconcile
 /// before its status (API call, finalizer, cleanup) is logged, announced by
 /// a `Warning` Event on the CR (`reason`, `action` = [`events::RECONCILE`]
-/// or [`events::CLEANUP`]) and retried in ~[`RETRY_REQUEUE_SECS`].
+/// or [`events::CLEANUP`]) and retried in ~[`RETRY_REQUEUE_SECS`], backing
+/// off as [`requeue_after`] does (one streak per CR, both counted).
 pub fn retry_after_error<R: Reason>(
     recorder: &Recorder,
     object: ObjectReference,
@@ -165,7 +235,7 @@ pub fn retry_after_error<R: Reason>(
     action: &'static str,
     error: &dyn std::fmt::Display,
 ) -> Action {
-    let after = jittered(RETRY_REQUEUE_SECS);
+    let after = jittered(failed(object.uid.as_deref()));
     tracing::warn!(%error, retry_in = after.as_secs(), "reconcile error");
     events::spawn_error(recorder, object, reason, action, error.to_string());
     Action::requeue(after)
@@ -221,6 +291,7 @@ where
         );
     }
     release(orphaned, cleanup, always).await?;
+    recovered(obj.meta().uid.as_deref());
     let note = if orphaned {
         format!(
             "force-orphaned ({}): released without cleanup",
@@ -266,15 +337,42 @@ mod tests {
         assert_eq!(jittered(0), Duration::from_secs(1));
     }
 
+    fn cr(uid: &str) -> k8s_openapi::api::core::v1::ConfigMap {
+        k8s_openapi::api::core::v1::ConfigMap {
+            metadata: kube::api::ObjectMeta {
+                uid: Some(uid.into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn requeue_follows_the_outcome_and_a_due_time() {
+        let obj = cr("requeue-due");
         let secs = |a: Action| format!("{a:?}");
-        assert!(secs(requeue_after(false, Some(5))).contains("5s"));
+        assert!(secs(requeue_after(&obj, false, Some(5))).contains("5s"));
         // A due time already past: the floor, not a hot loop.
-        assert!(secs(requeue_after(true, Some(0))).contains("1s"));
+        assert!(secs(requeue_after(&obj, true, Some(0))).contains("1s"));
         // A due time later than the cadence doesn't delay it.
-        let steady = requeue_after(true, Some(10_000));
+        let steady = requeue_after(&obj, true, Some(10_000));
         assert!(!format!("{steady:?}").contains("10000"));
+    }
+
+    #[test]
+    fn failures_back_off_until_a_steady_reconcile() {
+        assert_eq!(
+            (0..6).map(backoff_secs).collect::<Vec<_>>(),
+            [30, 60, 120, 240, 300, 300]
+        );
+        assert_eq!(backoff_secs(u32::MAX), STEADY_REQUEUE_SECS);
+        let uid = Some("backoff-streak");
+        assert_eq!([failed(uid), failed(uid), failed(uid)], [30, 60, 120]);
+        recovered(uid);
+        assert_eq!(failed(uid), 30);
+        recovered(uid);
+        // No uid (an object not from the API): no streak to keep.
+        assert_eq!([failed(None), failed(None)], [30, 30]);
     }
 
     #[tokio::test]
@@ -332,6 +430,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(unsafe_code, reason = "remove_var is unsafe since edition 2024")]
     fn concurrency_defaults_to_four() {
         // SAFETY: the variable is only read by `concurrency`, here.
         unsafe { std::env::remove_var("WEEBO_RECONCILE_CONCURRENCY") };

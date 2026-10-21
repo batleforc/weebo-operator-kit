@@ -4,7 +4,7 @@ import { repoUrl, type SiteConfig } from "./config";
 // The wordmark's mark: a 3×3 grid of 4px squares on a 16px viewBox with 2px
 // gutters — the dot grid is the icon system (DESIGN.md, Shapes).
 function DotMark() {
-  const cells = [1, 7, 13].flatMap((y) => [1, 7, 13].map((x) => [x, y]));
+  const cells = [1, 7, 13].flatMap((y) => [1, 7, 13].map((x) => [x, y] as const));
   return (
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor">
       {cells.map(([x, y]) => (

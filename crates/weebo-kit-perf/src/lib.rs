@@ -32,6 +32,23 @@
 //! and a perf test is not a unit test: mark it `#[ignore]` and run it on
 //! purpose (`cargo test --release … -- --ignored`).
 
+// A test harness, not production code: it runs inside the operator's
+// `--ignored` perf test. A run that cannot start the binary or read its
+// metrics must fail that test with the reason; the measurements are
+// floating-point and bounded counters (samples of one process, phases of
+// one run), where the overflow and indexing lints only add noise. So,
+// unlike the other crates (each site justified on its own), these lints
+// are lifted for the whole crate; `#[expect]`, so a lift goes once nothing
+// trips it. The error-handling lints (`let _ =`, …) still apply.
+#![expect(
+    clippy::arithmetic_side_effects,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test harness: a panic is a failed perf test, with its message"
+)]
+
 pub mod operator;
 pub mod process;
 pub mod prom;

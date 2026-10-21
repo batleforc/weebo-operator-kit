@@ -166,7 +166,7 @@ fn pattern_matches(pattern: &str, path: &str) -> bool {
 
 fn check_pattern(pattern: &str) -> Result<(), String> {
     let segments: Vec<&str> = pattern.split('/').collect();
-    let last = segments.len() - 1;
+    let last = segments.len().saturating_sub(1);
     for (i, segment) in segments.iter().enumerate() {
         let why = match *segment {
             "" => Some("has an empty segment (or a leading \"/\")"),

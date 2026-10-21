@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "crates/weebo-kit-domain",
     "crates/weebo-kit-api",
@@ -31,7 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_norway = "0.9"
 thiserror = "2.0"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 kube = { version = "4.0", features = ["derive", "runtime", "client"] }
@@ -54,13 +54,51 @@ opentelemetry_sdk = { version = "0.33", features = ["trace", "metrics"] }
 tracing-opentelemetry = "0.34"
 opentelemetry-prometheus = "0.33"
 prometheus = { version = "0.14", default-features = false }
-anyhow = "1"
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
 futures = "0.3"
 envtest = "0.3"
 sha2 = "0.10"
 http = "1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"                      # LANG-UNSAFE; "deny", not "forbid": #[expect(unsafe_code, reason)] must stay possible for FFI
+unsafe_op_in_unsafe_fn = "deny"           # default in edition 2024, explicit for 2021 crates
+let_underscore_drop = "warn"
+
+[workspace.lints.clippy]
+# Panics (LANG-LIMIT-PANIC, LANG-LIMIT-PANIC-SRC, LANG-ARRINDEXING). Tests are exempt via clippy.toml.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+# Integer overflow (LANG-ARITH): checked_/saturating_/wrapping_ instead of bare operators.
+arithmetic_side_effects = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_possible_wrap = "deny"
+# Errors are handled, never dropped.
+let_underscore_must_use = "deny"
+let_underscore_future = "deny"
+# Memory (MEM-FORGET).
+mem_forget = "deny"
+# Every escape hatch carries its justification, and dies with the code it excused.
+allow_attributes = "deny"                 # #[expect], never #[allow]: an expect with nothing to excuse fails
+allow_attributes_without_reason = "deny"
+undocumented_unsafe_blocks = "deny"       # LANG-UNSAFE-ENCP: every unsafe {} has a // SAFETY: comment
+# Left-over debugging.
+dbg_macro = "deny"
+
+# weebo-good-practice (references/cargo.md): most of target/ is debug info
+# nobody reads. Tests inherit dev; overflow checks stay on.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
 
 [profile.test]
 debug = false

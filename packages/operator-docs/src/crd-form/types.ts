@@ -29,3 +29,22 @@ export interface CrdIndexEntry {
   singular: string;
   scope: "Namespaced" | "Cluster";
 }
+
+// Fetched JSON is checked at the boundary on its top-level shape; the nested
+// field schemas are `weebo-crd-docs`' own output and read as they come.
+const isScope = (v: unknown): v is CrdSchema["scope"] => v === "Namespaced" || v === "Cluster";
+
+export function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+export function isCrdSchema(v: unknown): v is CrdSchema {
+  return isRecord(v) && typeof v.apiVersion === "string" && typeof v.kind === "string" && isScope(v.scope);
+}
+
+export function isCrdIndex(v: unknown): v is CrdIndexEntry[] {
+  return (
+    Array.isArray(v) &&
+    v.every((e) => isRecord(e) && typeof e.kind === "string" && typeof e.singular === "string" && isScope(e.scope))
+  );
+}

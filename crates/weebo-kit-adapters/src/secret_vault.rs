@@ -449,9 +449,35 @@ enum Cached {
     /// unreachable or misconfigured Vault on every reconcile.
     Failed {
         config: VaultConfig,
-        error: String,
+        error: VaultLoginError,
         expires: Instant,
     },
+}
+
+impl Cached {
+    fn expires(&self) -> Instant {
+        match self {
+            Self::Login { expires, .. } | Self::Failed { expires, .. } => *expires,
+        }
+    }
+}
+
+type Slot = Arc<Mutex<Option<Cached>>>;
+
+/// Why [`VaultLogins::get`] has no store. `Clone`: a failed login is
+/// replayed for [`LOGIN_FAILURE_TTL`].
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum VaultLoginError {
+    #[error("reading the ServiceAccount token {path}: {source}")]
+    Token {
+        path: String,
+        source: Arc<std::io::Error>,
+    },
+    /// The configured CA could not be loaded (`load_ca`'s error).
+    #[error("{0}")]
+    Ca(String),
+    #[error("{}", .0.0)]
+    Login(SecretStoreError),
 }
 
 /// How long a failed login is replayed before the next attempt.
@@ -462,9 +488,11 @@ pub const LOGIN_FAILURE_TTL: Duration = Duration::from_secs(15);
 /// reconcile churned tokens), and redone when the instance's Vault
 /// settings change. Logins of different instances never wait for each
 /// other: each instance has its own lock, held across its login only.
+/// A slot whose login has expired is dropped on the next call, so a deleted
+/// instance's token is not kept past its cache TTL.
 #[derive(Default)]
 pub struct VaultLogins {
-    slots: std::sync::Mutex<HashMap<String, Arc<Mutex<Option<Cached>>>>>,
+    slots: std::sync::Mutex<HashMap<String, Slot>>,
 }
 
 impl VaultLogins {
@@ -476,18 +504,19 @@ impl VaultLogins {
         key: &str,
         config: &VaultConfig,
         load_ca: F,
-    ) -> Result<Arc<VaultSecretStore>, String>
+    ) -> Result<Arc<VaultSecretStore>, VaultLoginError>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<Option<Vec<u8>>, String>>,
     {
-        let slot = self
-            .slots
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .entry(key.to_string())
-            .or_default()
-            .clone();
+        let slot = {
+            let mut slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            // Only on a new key: the map can't grow without it.
+            if !slots.contains_key(key) {
+                prune(&mut slots, key, Instant::now());
+            }
+            slots.entry(key.to_string()).or_default().clone()
+        };
         let mut cached = slot.lock().await;
         let now = Instant::now();
         match &*cached {
@@ -506,19 +535,25 @@ impl VaultLogins {
 
         match Self::login(config, load_ca).await {
             Ok(store) => {
-                *cached = store.cache_ttl().map(|ttl| Cached::Login {
-                    config: config.clone(),
-                    store: store.clone(),
-                    expires: Instant::now() + ttl,
-                });
+                // A lease too long for the clock (`checked_add`) isn't cached.
+                *cached = store
+                    .cache_ttl()
+                    .and_then(|ttl| Instant::now().checked_add(ttl))
+                    .map(|expires| Cached::Login {
+                        config: config.clone(),
+                        store: store.clone(),
+                        expires,
+                    });
                 Ok(store)
             }
             Err(error) => {
-                *cached = Some(Cached::Failed {
-                    config: config.clone(),
-                    error: error.clone(),
-                    expires: Instant::now() + LOGIN_FAILURE_TTL,
-                });
+                *cached = Instant::now()
+                    .checked_add(LOGIN_FAILURE_TTL)
+                    .map(|expires| Cached::Failed {
+                        config: config.clone(),
+                        error: error.clone(),
+                        expires,
+                    });
                 Err(error)
             }
         }
@@ -527,27 +562,43 @@ impl VaultLogins {
     async fn login<F, Fut>(
         config: &VaultConfig,
         load_ca: F,
-    ) -> Result<Arc<VaultSecretStore>, String>
+    ) -> Result<Arc<VaultSecretStore>, VaultLoginError>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<Option<Vec<u8>>, String>>,
     {
         let jwt_path =
             std::env::var("VAULT_KUBERNETES_JWT_PATH").unwrap_or_else(|_| DEFAULT_JWT_PATH.into());
-        let jwt = std::fs::read_to_string(&jwt_path)
-            .map_err(|e| format!("reading the ServiceAccount token {jwt_path}: {e}"))?;
-        let ca = load_ca().await?;
+        let jwt = std::fs::read_to_string(&jwt_path).map_err(|e| VaultLoginError::Token {
+            path: jwt_path.clone(),
+            source: Arc::new(e),
+        })?;
+        let ca = load_ca().await.map_err(VaultLoginError::Ca)?;
         VaultSecretStore::new(config, &jwt, ca.as_deref())
             .await
             .map(|store| Arc::new(store.with_jwt_path(jwt_path)))
-            .map_err(|e| e.0)
+            .map_err(VaultLoginError::Login)
     }
 }
 
+/// Drops the slots, other than `keep`'s, that nobody is using and that hold
+/// no live login: what is left is bounded by the instances seen within one
+/// cache TTL.
+fn prune(slots: &mut HashMap<String, Slot>, keep: &str, now: Instant) {
+    slots.retain(|key, slot| {
+        key == keep
+            || Arc::strong_count(slot) > 1
+            || slot
+                .try_lock()
+                .map_or(true, |c| c.as_ref().is_some_and(|c| c.expires() > now))
+    });
+}
+
 /// 80% of the login lease; a zero lease or non-renewable token isn't
-/// cached at all.
+/// cached at all. The lease comes from Vault: saturating, not overflowing.
 fn cache_ttl_from_lease(lease_duration: u64, renewable: bool) -> Option<Duration> {
-    (lease_duration > 0 && renewable).then(|| Duration::from_secs(lease_duration * 4 / 5))
+    (lease_duration > 0 && renewable)
+        .then(|| Duration::from_secs(lease_duration.saturating_mul(4) / 5))
 }
 
 /// 401/403: the token is no good (expired or revoked), or — 403 — the
@@ -590,7 +641,10 @@ impl TempCaFile {
 
 impl Drop for TempCaFile {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        if let Err(e) = std::fs::remove_file(&self.path) {
+            // Only a leftover file in the temp dir: the CA is public.
+            tracing::warn!(path = %self.path.display(), error = %e, "removing the Vault CA temp file");
+        }
     }
 }
 
@@ -606,6 +660,24 @@ mod tests {
         );
         assert_eq!(cache_ttl_from_lease(0, true), None);
         assert_eq!(cache_ttl_from_lease(100, false), None);
+        assert_eq!(
+            cache_ttl_from_lease(u64::MAX, true),
+            Some(Duration::from_secs(u64::MAX / 5))
+        );
+    }
+
+    #[test]
+    fn prune_drops_idle_empty_slots_only() {
+        let mut slots: HashMap<String, Slot> = HashMap::new();
+        for key in ["gone", "kept", "busy"] {
+            slots.insert(key.into(), Slot::default());
+        }
+        let busy = slots["busy"].clone();
+        prune(&mut slots, "kept", Instant::now());
+        let mut left: Vec<_> = slots.keys().map(String::as_str).collect();
+        left.sort_unstable();
+        assert_eq!(left, ["busy", "kept"]);
+        drop(busy);
     }
 
     #[test]

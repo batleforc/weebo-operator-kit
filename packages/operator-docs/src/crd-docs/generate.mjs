@@ -142,7 +142,12 @@ function unionOf(schema) {
 }
 
 const PROSE_ESCAPES = /[\\{}<>]|!(?=\[)/g;
-const escapeOutsideCode = (text) => text.replace(PROSE_ESCAPES, "\\$&");
+// A `#` opening a line (rustdoc's `# Examples`) would become a heading;
+// `^` only counts where the text itself starts a line.
+const escapeOutsideCode = (text, lineStart) =>
+  text
+    .replace(PROSE_ESCAPES, "\\$&")
+    .replace(lineStart ? /(^|\n)([ \t]*)#/g : /(\n)([ \t]*)#/g, "$1$2\\#");
 
 /** Code spans left as written, the rest escaped; spans never cross `text`. */
 function escapeParagraph(text) {
@@ -152,7 +157,7 @@ function escapeParagraph(text) {
     const fence = open[0];
     const after = rest.slice(open.index + fence.length);
     const close = after.match(new RegExp(`(?<!\`)${fence}(?!\`)`));
-    out += escapeOutsideCode(rest.slice(0, open.index));
+    out += escapeOutsideCode(rest.slice(0, open.index), out === "");
     if (close) {
       out += fence + after.slice(0, close.index + fence.length);
       rest = after.slice(close.index + fence.length);
@@ -163,13 +168,14 @@ function escapeParagraph(text) {
       rest = after;
     }
   }
-  return out + escapeOutsideCode(rest);
+  return out + escapeOutsideCode(rest, out === "");
 }
 
 /**
- * CRD prose, made safe to paste into MDX: outside code spans, `\ { } < >` and
- * the `!` of `![` are escaped, so no description can become a JS expression
- * (evaluated at build time), a JSX element or an image fetched at build time.
+ * CRD prose, made safe to paste into MDX: outside code spans, `\ { } < >`,
+ * the `!` of `![` and a `#` opening a line are escaped, so no description can
+ * become a JS expression (evaluated at build time), a JSX element, an image
+ * fetched at build time or a heading.
  * Code spans (a backtick run closed by a run of the same length, as in
  * CommonMark) are left as written: MDX reads neither inside them. The text is
  * cut into paragraphs first, because no code span crosses a blank line. With

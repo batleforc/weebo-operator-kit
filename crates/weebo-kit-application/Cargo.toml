@@ -27,3 +27,6 @@ tokio = { workspace = true }
 # Exposes `test_support` (in-memory secret store, owned objects, pod logs)
 # to other crates' tests.
 test-support = []
+
+[lints]
+workspace = true

@@ -198,12 +198,13 @@ tasks:
         fi
 
   docs:check:
-    desc: "Check @weebo/operator-docs: version in step with the workspace, types against its pinned peers, generator tests"
+    desc: "Check @weebo/operator-docs: version in step with the workspace, types against its pinned peers, lint, generator tests"
     dir: packages/operator-docs
     cmds:
       - task: docs:version
       - mise exec -- npm ci --no-fund --no-audit
       - mise exec -- npm run check
+      - mise exec -- npm run lint
 
   docs:pack:
     desc: "Pack @weebo/operator-docs into dist/weebo-operator-docs-<version>.tgz, the release asset the operators' docs sites install"

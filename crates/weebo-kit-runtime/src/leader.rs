@@ -149,7 +149,9 @@ impl LeaseLock {
         let now = MicroTime(Timestamp::now());
         LeaseSpec {
             holder_identity: Some(self.holder.clone()),
-            lease_duration_seconds: Some(self.ttl.as_secs().max(1) as i32),
+            lease_duration_seconds: Some(
+                i32::try_from(self.ttl.as_secs().max(1)).unwrap_or(i32::MAX),
+            ),
             acquire_time: Some(acquired.unwrap_or_else(|| now.clone())),
             renew_time: Some(now),
             lease_transitions: Some(transitions),
@@ -212,14 +214,14 @@ impl LeaseLock {
             return self.write(lease, renewed).await;
         }
         if holder.is_some() {
-            let ttl = spec
-                .lease_duration_seconds
-                .map_or(self.ttl, |s| Duration::from_secs(s.max(0) as u64));
+            let ttl = spec.lease_duration_seconds.map_or(self.ttl, |s| {
+                Duration::from_secs(u64::try_from(s).unwrap_or(0))
+            });
             if observed_since.elapsed() < ttl {
                 return Ok(false);
             }
         }
-        let acquired = self.spec(transitions + 1, None);
+        let acquired = self.spec(transitions.saturating_add(1), None);
         self.write(lease, acquired).await
     }
 
@@ -273,6 +275,10 @@ pub async fn hold(lease: &LeaseLock, renew: Duration, ttl: Duration) -> String {
 }
 
 /// `renew_once`: `Ok(true)` renewed, `Ok(false)` someone else holds it.
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "Instant + seconds-scale settings: overflows only past the clock's range"
+)]
 async fn hold_with<F, Fut>(mut renew_once: F, renew: Duration, ttl: Duration) -> String
 where
     F: FnMut() -> Fut,

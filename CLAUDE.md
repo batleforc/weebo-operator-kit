@@ -21,6 +21,11 @@ read it before any non-trivial change.
 - `kube`/`k8s-openapi` versions must match the operators'.
 - A change that breaks an operator's build is a breaking release (0.x:
   minor bump).
+- The weebo-good-practice lints are on for the whole workspace
+  (`[workspace.lints]`, `clippy.toml` lets tests panic): a panic site
+  outside tests gets its own `#[expect(..., reason)]`. Only the test
+  harnesses `weebo-kit-testkit` and `weebo-kit-perf` lift the panic lints
+  crate-wide (why: the comment over their `#![expect]` in `lib.rs`).
 - `packages/operator-docs` (`@weebo/operator-docs`, npm) is the operators'
   docs-site format: CRD page generator, manifest builder, theme, layout,
   routes. Same naming rule (what varies is `defineSite`, the generator's
@@ -53,7 +58,7 @@ task test:all       # + template:check (the operator template, built and tested)
 task template:render  # the template rendered for "Example" in target/template/
 task audit   # cargo-deny + trivy + npm audit (operator-docs, site)
 task doctor  # envtest prerequisites
-task docs:check  # operator-docs: version sync, tsc, generator tests
+task docs:check  # operator-docs: version sync, tsc, generator tests, eslint
 task docs:pack   # dist/weebo-operator-docs-<version>.tgz (release asset)
 task site:build  # the kit's own docs site (site/, on the package from this tree)
 ```

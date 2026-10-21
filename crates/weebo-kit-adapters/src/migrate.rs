@@ -12,6 +12,7 @@
 //! in the release that migrates; the reconcilers' recorded binding
 //! (`status.instance`) keeps the guarantee.
 
+use crate::instance::{LookupError, list_all, lookup};
 use kube::api::{Api, ApiResource, DynamicObject, Patch, PatchParams};
 use kube::{Client, ResourceExt};
 use serde_json::{Value, json};
@@ -34,6 +35,15 @@ pub fn migrated_instance_ref(object: &Value) -> Option<Value> {
     }
 }
 
+/// Why a migration run stopped.
+#[derive(Debug, thiserror::Error)]
+pub enum MigrateError {
+    #[error(transparent)]
+    Kubernetes(#[from] LookupError),
+    #[error("serializing an object: {0}")]
+    Serialize(#[from] serde_json::Error),
+}
+
 /// Rewrites every object of `kinds` (cluster-wide) whose
 /// `spec.instanceRef` is still a bare name; `dry_run` only lists them.
 /// Stops at the first failed patch: rerunning resumes.
@@ -42,17 +52,19 @@ pub async fn migrate_instance_refs(
     kinds: &[ApiResource],
     field_manager: &str,
     dry_run: bool,
-) -> Result<Migration, String> {
+) -> Result<Migration, MigrateError> {
     let mut migration = Migration::default();
     for kind in kinds {
-        let list = Api::<DynamicObject>::all_with(client.clone(), kind)
-            .list(&Default::default())
-            .await
-            .map_err(|e| format!("listing {}: {e}", kind.kind))?;
-        for object in list.items {
-            let value = serde_json::to_value(&object).map_err(|e| e.to_string())?;
+        let objects = list_all(
+            &Api::<DynamicObject>::all_with(client.clone(), kind),
+            &Default::default(),
+        )
+        .await
+        .map_err(lookup(format!("listing {}", kind.kind)))?;
+        for object in objects {
+            let value = serde_json::to_value(&object)?;
             let Some(instance_ref) = migrated_instance_ref(&value) else {
-                migration.unchanged += 1;
+                migration.unchanged = migration.unchanged.saturating_add(1);
                 continue;
             };
             let name = object.name_any();
@@ -72,7 +84,7 @@ pub async fn migrate_instance_refs(
                     &Patch::Merge(&patch),
                 )
                 .await
-                .map_err(|e| format!("migrating {id}: {e}"))?;
+                .map_err(lookup(format!("migrating {id}")))?;
             }
             migration.migrated.push(id);
         }

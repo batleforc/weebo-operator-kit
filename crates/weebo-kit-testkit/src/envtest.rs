@@ -30,7 +30,10 @@ impl EnvTestCluster {
         // `ring` and `aws-lc-rs` are both linked transitively; rustls needs
         // one picked before the first TLS connection. A second install (a
         // second cluster in the same process) just loses the race.
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        // Err: another test installed it first, which is as good.
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
 
         let crd_dir = crd_dir
             .canonicalize()

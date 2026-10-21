@@ -68,7 +68,7 @@ function YamlSheet({ yaml }: { yaml: string }) {
 
 export function OperatorHome({ site, label, caption, actions, install, example, features }: OperatorHomeProps) {
   return (
-    <main className="flex flex-1 flex-col px-4 sm:px-6">
+    <div className="flex flex-1 flex-col px-4 sm:px-6">
       <section className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 pt-10 pb-10 sm:pt-16">
         <span className="sheet-label">{label}</span>
         <h1 className="sheet-display">{site.name}</h1>
@@ -88,13 +88,13 @@ export function OperatorHome({ site, label, caption, actions, install, example, 
       <section className="sheet-region mx-auto w-full max-w-[1100px]">
         <div className="grid gap-6 md:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-3">
-            <span className="sheet-label">1 · Install the chart</span>
+            <h2 className="sheet-label">1 · Install the chart</h2>
             <pre className="sheet-pre">
               <code>{install.replace(/\n+$/, "")}</code>
             </pre>
           </div>
           <div className="flex min-w-0 flex-col gap-3">
-            <span className="sheet-label">2 · {example.title}</span>
+            <h2 className="sheet-label">2 · {example.title}</h2>
             <pre className="sheet-pre">
               <code>
                 <YamlSheet yaml={example.yaml} />
@@ -113,6 +113,6 @@ export function OperatorHome({ site, label, caption, actions, install, example, 
           </div>
         ))}
       </section>
-    </main>
+    </div>
   );
 }

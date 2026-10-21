@@ -303,8 +303,11 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        if std::env::var("WEEBO_PERF_KEEP").as_deref() != Ok("1") {
-            let _ = std::fs::remove_dir_all(&self.0);
+        if std::env::var("WEEBO_PERF_KEEP").as_deref() != Ok("1")
+            && let Err(e) = std::fs::remove_dir_all(&self.0)
+        {
+            // Only a leftover scratch directory.
+            tracing::warn!(dir = %self.0.display(), error = %e, "removing the perf run's directory");
         }
     }
 }

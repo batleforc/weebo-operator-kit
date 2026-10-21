@@ -106,6 +106,7 @@ test("mdxText escapes outside code, keeps code spans as written", () => {
   assert.equal(mdxText("a | `b|c`\nd", { cell: true }), "a \\| `b\\|c` d");
   assert.equal(mdxText("plain text, unchanged"), "plain text, unchanged");
   assert.equal(mdxText("see ![x](u) and `![y](v)`"), "see \\![x](u) and `![y](v)`");
+  assert.equal(mdxText("# Examples\n  # b, issue #3 `x`\n# c"), "\\# Examples\n  \\# b, issue #3 `x`\n\\# c");
 });
 
 test("mdxText cuts paragraphs before it looks for code", () => {

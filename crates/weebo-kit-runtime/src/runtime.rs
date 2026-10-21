@@ -34,14 +34,21 @@ mod tests {
     use super::*;
 
     #[test]
+    #[expect(
+        unsafe_code,
+        reason = "set_var/remove_var are unsafe since edition 2024"
+    )]
     fn worker_threads_come_from_the_environment_or_default_to_four() {
-        // SAFETY: the variable is only read by `worker_threads`, here.
+        // SAFETY: the variable is only read by `worker_threads`, here, and
+        // no other test touches it.
         unsafe { std::env::remove_var("WEEBO_WORKER_THREADS") };
         assert_eq!(worker_threads(), DEFAULT_WORKER_THREADS);
         for (value, expected) in [("2", 2), ("0", 4), ("many", 4), ("16", 16)] {
+            // SAFETY: as above.
             unsafe { std::env::set_var("WEEBO_WORKER_THREADS", value) };
             assert_eq!(worker_threads(), expected, "{value}");
         }
+        // SAFETY: as above.
         unsafe { std::env::remove_var("WEEBO_WORKER_THREADS") };
         let runtime = build().unwrap();
         assert_eq!(runtime.metrics().num_workers(), DEFAULT_WORKER_THREADS);

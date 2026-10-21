@@ -163,6 +163,18 @@ pub fn is_ours(meta: &ObjectMeta, owner: &Owner, managed_by: &str) -> bool {
         && label("app.kubernetes.io/instance").is_some_and(|v| *v == owner.name)
 }
 
+/// The `metadata` map of a manifest, created when missing; `None` when the
+/// manifest (or its `metadata`) isn't a JSON object.
+fn metadata_of(
+    manifest: &mut serde_json::Value,
+) -> Option<&mut serde_json::Map<String, serde_json::Value>> {
+    manifest
+        .as_object_mut()?
+        .entry("metadata")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+}
+
 fn selector(labels: &BTreeMap<String, String>) -> String {
     labels
         .iter()
@@ -232,7 +244,15 @@ impl OwnedObjects for KubeOwnedObjects {
                 }
             }
             let mut manifest = object.manifest.clone();
-            manifest["metadata"]["ownerReferences"] = json!([self.owner_reference(owner)]);
+            let Some(metadata) = metadata_of(&mut manifest) else {
+                return Err(WorkloadError::Refused(format!(
+                    "{what}: its manifest is not an object"
+                )));
+            };
+            metadata.insert(
+                "ownerReferences".into(),
+                json!([self.owner_reference(owner)]),
+            );
             api.patch(&object.name, &params, &Patch::Apply(manifest))
                 .await
                 .map_err(|e| kube_error(&what, e))?;
@@ -452,6 +472,15 @@ mod tests {
     use super::*;
 
     const MANAGED_BY: &str = "weebo-example";
+
+    #[test]
+    fn metadata_of_refuses_a_manifest_that_is_not_an_object() {
+        let mut empty = json!({});
+        assert!(metadata_of(&mut empty).is_some());
+        assert_eq!(empty, json!({ "metadata": {} }));
+        assert!(metadata_of(&mut json!("pod")).is_none());
+        assert!(metadata_of(&mut json!({ "metadata": 1 })).is_none());
+    }
 
     fn owner() -> Owner {
         Owner {

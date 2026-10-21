@@ -1,5 +1,15 @@
 //! In-memory [`SecretStore`] for use-case and controller tests.
 
+#![expect(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "test fakes (behind `test-support`): a broken fake fails the test on purpose"
+)]
+
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 

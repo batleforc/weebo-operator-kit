@@ -44,11 +44,8 @@ pub(crate) fn truncate_bytes(message: &str, max: usize) -> String {
     if message.len() <= max {
         return message.to_string();
     }
-    let mut end = max;
-    while !message.is_char_boundary(end) {
-        end -= 1;
-    }
-    message[..end].to_string()
+    let end = message.floor_char_boundary(max);
+    message.get(..end).unwrap_or_default().to_string()
 }
 
 /// The Events a reconcile that went from `previous` to `current`

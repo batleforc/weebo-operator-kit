@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { DynamicCodeBlock } from "fumadocs-ui/components/dynamic-codeblock";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { DynamicCodeBlock } from "fumadocs-ui/components/dynamic-codeblock.core";
 import { ChoicePicker } from "./ChoicePicker";
 import { ObjectFields } from "./fields";
-import { defaultForSchema } from "./schema-utils";
+import { asRecord, defaultForSchema } from "./schema-utils";
 import { buildManifest } from "./manifest";
-import { yamlPreviewTheme } from "./yaml-theme";
+import { yamlHighlighter, yamlPreviewTheme } from "./yaml-theme";
 import {
   applySelection,
   chosenFields,
@@ -16,20 +16,20 @@ import {
   withPreset,
   type ChoiceGroup,
 } from "./choices";
-import type { CrdSchema } from "./types";
-import { withBasePath } from "../site/base-path";
+import { isCrdSchema, type CrdSchema } from "./types";
+import { fetchJson } from "./fetch-json";
 
 const NO_CHOICES: ChoiceGroup[] = [];
 
 const inputClass =
-  "w-full border border-(--rule-strong) bg-(--ground-sunk) px-3 py-2 text-[15px] text-fd-foreground outline-none placeholder:text-fd-muted-foreground focus:border-(--accent)";
+  "w-full border border-(--rule-strong) bg-(--ground-sunk) px-3 py-2 text-[15px] text-fd-foreground placeholder:text-fd-muted-foreground focus:border-(--accent)";
 
 const labelClass = "text-[12px] font-semibold uppercase tracking-[0.14em] text-fd-muted-foreground";
 
 export interface CrdFormProps {
   kind: string;
   /** The kind's guided choices (its entry of the operator's `CrdChoices`). */
-  choices?: ChoiceGroup[];
+  choices?: ChoiceGroup[] | undefined;
 }
 
 // The schema is fetched client-side from the static file the same
@@ -41,29 +41,27 @@ export function CrdForm({ kind, choices }: CrdFormProps) {
   const [name, setName] = useState("");
   const [namespace, setNamespace] = useState("default");
   const [specValue, setSpecValue] = useState<unknown>(null);
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const nameId = useId();
+  const namespaceId = useId();
   const groups = choices ?? NO_CHOICES;
   const [selection, setSelection] = useState(() => defaultSelection(groups));
 
   useEffect(() => {
-    let cancelled = false;
-    fetch(withBasePath(`/crd-schemas/${kind.toLowerCase()}.schema.json`))
-      .then((res) => {
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        return res.json() as Promise<CrdSchema>;
-      })
+    const controller = new AbortController();
+    fetchJson(`/crd-schemas/${kind.toLowerCase()}.schema.json`, isCrdSchema, controller.signal)
       .then((data) => {
-        if (cancelled) return;
         setSchema(data);
         setSpecValue(defaultForSchema(data));
       })
-      .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) setError(err instanceof Error ? err.message : String(err));
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [kind]);
+
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
 
   // `spec.name` shows up on many kinds as the remote object's own name — a
   // different concept from metadata.name
@@ -76,7 +74,7 @@ export function CrdForm({ kind, choices }: CrdFormProps) {
   // dropped, implied values set) and the shared name folded in.
   const effectiveSpecValue = useMemo(() => {
     if (specValue === null) return specValue;
-    const spec = applySelection(groups, selection, specValue as Record<string, unknown>);
+    const spec = applySelection(groups, selection, asRecord(specValue));
     return hasSpecName ? { ...spec, name } : spec;
   }, [specValue, hasSpecName, name, groups, selection]);
 
@@ -114,11 +112,22 @@ export function CrdForm({ kind, choices }: CrdFormProps) {
     );
   }
 
-  const copyYaml = async () => {
+  const showCopyState = (state: "copied" | "failed") => {
+    setCopyState(state);
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopyState("idle"), 1500);
+  };
+
+  const copyYaml = () => {
     if (!built) return;
-    await navigator.clipboard.writeText(built.yaml);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    const { yaml } = built;
+    // Inside the chain: `navigator.clipboard` is undefined outside a secure context.
+    Promise.resolve()
+      .then(() => navigator.clipboard.writeText(yaml))
+      .then(
+        () => showCopyState("copied"),
+        () => showCopyState("failed"),
+      );
   };
 
   const downloadYaml = () => {
@@ -138,13 +147,18 @@ export function CrdForm({ kind, choices }: CrdFormProps) {
         {groups.length > 0 ? (
           <ChoicePicker groups={groups} selection={selection} onChange={choose} />
         ) : null}
+        <p className="text-[12px] text-fd-muted-foreground">
+          <span className="text-fd-primary">*</span> marks a required field.
+        </p>
         <div className="border border-(--rule-soft) p-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
-              <label className={labelClass}>
+              <label htmlFor={nameId} className={labelClass}>
                 {hasSpecName ? "name" : "metadata.name"} <span className="text-fd-primary">*</span>
               </label>
               <input
+                id={nameId}
+                aria-required
                 className={inputClass}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -159,10 +173,12 @@ export function CrdForm({ kind, choices }: CrdFormProps) {
             </div>
             {schema.scope === "Namespaced" ? (
               <div className="flex flex-col gap-1">
-                <label className={labelClass}>
+                <label htmlFor={namespaceId} className={labelClass}>
                   metadata.namespace <span className="text-fd-primary">*</span>
                 </label>
                 <input
+                  id={namespaceId}
+                  aria-required
                   className={inputClass}
                   value={namespace}
                   onChange={(e) => setNamespace(e.target.value)}
@@ -191,7 +207,7 @@ export function CrdForm({ kind, choices }: CrdFormProps) {
               onClick={copyYaml}
               className="ctl"
             >
-              {copied ? "copied" : "copy"}
+              {copyState === "idle" ? "copy" : copyState === "copied" ? "copied" : "copy failed"}
             </button>
             <button
               type="button"
@@ -202,6 +218,12 @@ export function CrdForm({ kind, choices }: CrdFormProps) {
             </button>
           </div>
         </div>
+        <span role="status" className="sr-only">
+          {copyState === "copied" ? "Manifest copied" : copyState === "failed" ? "Could not copy the manifest" : ""}
+        </span>
+        <span role="status" className="sr-only">
+          {built?.missing.length ? `${built.missing.length} required field${built.missing.length === 1 ? "" : "s"} still to fill in` : "Every required field is filled in"}
+        </span>
         {built && built.missing.length > 0 ? (
           <div className="border border-(--accent) p-3 text-[13px] text-fd-foreground">
             <p className="mb-1 text-[12px] font-semibold uppercase tracking-[0.1em] text-fd-primary">
@@ -219,6 +241,7 @@ export function CrdForm({ kind, choices }: CrdFormProps) {
         <div className="yaml-preview max-h-[70vh] overflow-auto border border-(--rule-soft) text-[13px] [&_pre]:my-0">
           <DynamicCodeBlock
             lang="yaml"
+            highlighter={yamlHighlighter}
             code={built?.yaml ?? ""}
             options={{ theme: yamlPreviewTheme }}
           />
