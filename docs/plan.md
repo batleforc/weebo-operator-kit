@@ -1800,7 +1800,9 @@ le site du kit liste leurs kinds sans lien.
    `<CrdIde />` dans `docsMdxComponents(choices, { recipes, sources })`,
    derrière `LazyCrdIde` (`next/dynamic`, `ssr: false`) : le code de l'IDE
    ne charge que sur sa page, `GraphView` (et `@xyflow/react` 12.12) est un
-   second import dynamique, chargé au passage en vue graphe. Colonnes en
+   second import dynamique, chargé avec la première ressource du projet
+   (le choix liste / graphe a été retiré le 2026-10-22 : le graphe est
+   toujours affiché au-dessus de la liste, qui garde chaque action). Colonnes en
    container query (la largeur de la colonne de doc, pas de la fenêtre).
    Vérifié dans un build du site (copie jetable sous `target/`) piloté par
    Playwright : recette, liens, graphe, zip, brouillon rechargé, pas de

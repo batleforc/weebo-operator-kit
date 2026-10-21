@@ -192,8 +192,9 @@ guided choices.
 
 `<CrdIde />` composes a project of manifests linked to each other: an
 instance, the Secret its token comes from, the objects that live on it.
-Put it on a page of its own (`full: true` in the frontmatter); its code,
-and the graph view's `@xyflow/react`, load only there.
+Put it on a page of its own (`full: true` in the frontmatter): its code
+loads only there, and the graph's `@xyflow/react` with the project's first
+resource.
 
 ```tsx
 // src/components/mdx.tsx — schema directories (weebo-crd-docs output);
@@ -225,7 +226,8 @@ A recipe is `{ id, label, description?, yaml }`.
   resource, every reference field is a select of the objects it may point
   at — the project's resources, the objects they make (the Secret of an
   external secret) and the external objects declared by hand (never
-  exported). The list is the keyboard way; the graph view shows the same.
+  exported). The graph, above, shows them; the list is the keyboard way,
+  with every action.
 - **Issues**, as you type: the schema (required, type, enum, pattern,
   bounds, unknown fields), the recipe's blanks, references to nothing or to
   the wrong kind, a missing key, a local instance not shared with the

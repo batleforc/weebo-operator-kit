@@ -62,7 +62,6 @@ export function CrdIde({ sources = DEFAULT_SOURCES, recipes = NO_RECIPES, choice
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const [selections, setSelections] = useState<Record<string, Selection>>({});
   const [importIssues, setImportIssues] = useState<Issue[]>([]);
-  const [view, setView] = useState<"list" | "graph">("list");
   const editorHeading = useRef<HTMLHeadingElement>(null);
   const sourceKey = sources.map((s) => s.base).join(",");
   const key = storageKey ?? `weebo-crd-ide:${sourceKey}`;
@@ -159,8 +158,6 @@ export function CrdIde({ sources = DEFAULT_SOURCES, recipes = NO_RECIPES, choice
         catalog={catalog}
         project={project}
         recipes={recipes}
-        view={view}
-        onView={setView}
         onAdd={(kindKey, name) => {
           const entry = catalog.get(kindKey);
           if (!entry) return;
@@ -176,7 +173,9 @@ export function CrdIde({ sources = DEFAULT_SOURCES, recipes = NO_RECIPES, choice
           setSelected(undefined);
         }}
       />
-      {view === "graph" ? <GraphView graph={graph} selected={selected} onSelect={setSelected} /> : null}
+      {/* Always shown, from the first resource: @xyflow/react loads then, not
+          with the page. */}
+      {project.resources.length > 0 ? <GraphView graph={graph} selected={selected} onSelect={setSelected} /> : null}
       <div className="grid gap-4 @3xl:grid-cols-[18rem_minmax(0,1fr)] @7xl:grid-cols-[18rem_minmax(0,1fr)_minmax(0,1fr)]">
         {/* Shown in both views: the list is where every action is. */}
         <ResourceList
@@ -224,8 +223,6 @@ function Toolbar({
   catalog,
   project,
   recipes,
-  view,
-  onView,
   onAdd,
   onImport,
   onNamespace,
@@ -234,8 +231,6 @@ function Toolbar({
   catalog: Catalog;
   project: Project;
   recipes: Recipe[];
-  view: "list" | "graph";
-  onView: (view: "list" | "graph") => void;
   onAdd: (kindKey: string, name: string) => void;
   onImport: (text: string) => void;
   onNamespace: (namespace: string) => void;
@@ -290,14 +285,6 @@ function Toolbar({
             Default namespace
           </label>
           <input id={ids.ns} className={inputClass} value={project.defaultNamespace} onChange={(e) => onNamespace(e.target.value)} />
-        </div>
-        <div className="flex gap-2" role="group" aria-label="View">
-          <button type="button" className="ctl" aria-pressed={view === "list"} onClick={() => onView("list")}>
-            list
-          </button>
-          <button type="button" className="ctl" aria-pressed={view === "graph"} onClick={() => onView("graph")}>
-            graph
-          </button>
         </div>
       </div>
       <div className="flex flex-wrap items-end gap-3">
