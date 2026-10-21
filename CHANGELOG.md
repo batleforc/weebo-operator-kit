@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.22.1](https://github.com/batleforc/weebo-operator-kit/compare/e37fb1953052895f5ea9345e4a046435047f7800..v0.22.1) - 2026-10-21
+#### Bug Fixes
+- (**runtime**) only retries back off, not watch events (#26) - ([e37fb19](https://github.com/batleforc/weebo-operator-kit/commit/e37fb1953052895f5ea9345e4a046435047f7800)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.22.0](https://github.com/batleforc/weebo-operator-kit/compare/556d423283d52783fe1e481a0c1b34c5d332375f..v0.22.0) - 2026-10-21
 #### Features
 - ![BREAKING](https://img.shields.io/badge/BREAKING-red) (**kit**) house lints, retry backoff, typed errors, accessible manifest builder (#25) - ([45604c9](https://github.com/batleforc/weebo-operator-kit/commit/45604c945062774cd973668474ffa980941e7590)) - Maxime, Claude Opus 5.5 (1M context)
