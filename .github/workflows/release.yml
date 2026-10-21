@@ -61,6 +61,13 @@ jobs:
       packages: write
       # Keyless cosign signature of the pushed chart.
       id-token: write
+    env:
+      # `mise exec` would install every tool of mise.toml it finds missing,
+      # through GitHub's API, unauthenticated: a shared runner's rate limit
+      # failed the v0.23.0 release (library chart). Only what the job
+      # installs is used, and mise's API calls are authenticated.
+      MISE_EXEC_AUTO_INSTALL: "false"
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
