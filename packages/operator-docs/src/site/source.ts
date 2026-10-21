@@ -17,10 +17,10 @@ export const docsLoaderOptions = {
 export interface DocsPageLike {
   slugs: string[];
   url: string;
-  locale?: string;
+  locale?: string | undefined;
   data: {
-    title?: string;
-    description?: string;
+    title?: string | undefined;
+    description?: string | undefined;
     getText: (type: "processed") => Promise<string>;
   };
 }

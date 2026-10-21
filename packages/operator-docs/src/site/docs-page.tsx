@@ -17,9 +17,9 @@ import { getPageImage, getPageMarkdownUrl } from "./source";
 
 /** What a docs page needs from the operator's collection (fumadocs-mdx's `defineDocs`). */
 interface MdxPageData {
-  title?: string;
-  description?: string;
-  full?: boolean;
+  title?: string | undefined;
+  description?: string | undefined;
+  full?: boolean | undefined;
   body: (props: { components?: MDXComponents }) => ReactNode;
   toc: NonNullable<ComponentProps<typeof DocsPage>["toc"]>;
 }

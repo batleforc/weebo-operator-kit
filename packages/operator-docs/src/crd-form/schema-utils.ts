@@ -1,4 +1,8 @@
-import type { FieldSchema } from "./types";
+import { isRecord, type FieldSchema } from "./types";
+
+/** A form value read as an object or a list: anything else is empty. */
+export const asRecord = (v: unknown): Record<string, unknown> => (isRecord(v) ? v : {});
+export const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 
 // The only "oneOf" shape the operators' CRDs use: an object with an
 // enum-typed `kind` property plus sibling properties named after each enum
@@ -46,7 +50,9 @@ export function defaultForSchema(schema: FieldSchema): unknown {
     case "integer":
     case "number":
       return 0;
-    default:
+    case "string":
+    case undefined:
+    default: // a type the schema file should not hold
       return "";
   }
 }
@@ -64,12 +70,13 @@ function isEmptyValue(value: unknown, schema: FieldSchema): boolean {
     case "array":
       return Array.isArray(value) && value.length === 0;
     case "object":
-      return typeof value === "object" && Object.keys(value as object).length === 0;
+      return typeof value === "object" && Object.keys(value).length === 0;
     case "boolean":
       return value === (schema.default ?? false);
     case "integer":
     case "number":
       return value === (schema.default ?? 0);
+    case undefined:
     default:
       return false;
   }
@@ -83,12 +90,13 @@ function isEmptyValue(value: unknown, schema: FieldSchema): boolean {
 // `keep` is false for such optional sections; the root `spec` is always kept.
 export function pruneValue(schema: FieldSchema, value: unknown, keep = true): unknown {
   if (isDiscriminatedUnion(schema)) {
-    const kind = (value as Record<string, unknown> | undefined)?.kind as string | undefined;
+    const union = asRecord(value);
+    const kind = typeof union.kind === "string" ? union.kind : undefined;
     if (!kind) return undefined;
     const out: Record<string, unknown> = { kind };
     const vSchema = variantSchema(schema, kind);
     if (vSchema) {
-      const prunedVariant = pruneValue(vSchema, (value as Record<string, unknown>)[kind]);
+      const prunedVariant = pruneValue(vSchema, union[kind]);
       if (prunedVariant !== undefined && !isEmptyValue(prunedVariant, vSchema)) {
         out[kind] = prunedVariant;
       } else if (Object.keys(vSchema.properties ?? {}).some((k) => (vSchema.required ?? []).includes(k))) {
@@ -99,7 +107,7 @@ export function pruneValue(schema: FieldSchema, value: unknown, keep = true): un
   }
 
   if (schema.type === "object" && schema.additionalProperties) {
-    const entries = Object.entries((value as Record<string, string>) ?? {}).filter(
+    const entries = Object.entries(asRecord(value)).filter(
       ([key, val]) => key !== "" && val !== "",
     );
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;
@@ -107,7 +115,7 @@ export function pruneValue(schema: FieldSchema, value: unknown, keep = true): un
 
   if (schema.type === "object" && schema.properties) {
     const required = new Set(schema.required ?? []);
-    const source = (value as Record<string, unknown>) ?? {};
+    const source = asRecord(value);
     const filled: Record<string, unknown> = {};
     for (const [key, childSchema] of Object.entries(schema.properties)) {
       const pruned = pruneValue(childSchema, source[key], false);
@@ -128,7 +136,7 @@ export function pruneValue(schema: FieldSchema, value: unknown, keep = true): un
 
   if (schema.type === "array") {
     // A list item the user added is in use, so its required fields show.
-    return ((value as unknown[]) ?? []).map((item) => pruneValue(schema.items ?? {}, item, true));
+    return asArray(value).map((item) => pruneValue(schema.items ?? {}, item, true));
   }
 
   return value;
@@ -147,7 +155,8 @@ export function findMissingRequired(schema: FieldSchema, value: unknown, path: s
   const missing: string[] = [];
 
   if (isDiscriminatedUnion(schema)) {
-    const kind = (value as Record<string, unknown> | undefined)?.kind as string | undefined;
+    const union = asRecord(value);
+    const kind = typeof union.kind === "string" ? union.kind : undefined;
     if (!kind) {
       missing.push([...path, "kind"].join("."));
       return missing;
@@ -155,7 +164,7 @@ export function findMissingRequired(schema: FieldSchema, value: unknown, path: s
     const vSchema = variantSchema(schema, kind);
     if (vSchema) {
       missing.push(
-        ...findMissingRequired(vSchema, (value as Record<string, unknown>)[kind], [...path, kind]),
+        ...findMissingRequired(vSchema, union[kind], [...path, kind]),
       );
     }
     return missing;
@@ -163,7 +172,7 @@ export function findMissingRequired(schema: FieldSchema, value: unknown, path: s
 
   if (schema.type === "object" && schema.properties) {
     const required = new Set(schema.required ?? []);
-    const source = (value as Record<string, unknown>) ?? {};
+    const source = asRecord(value);
     for (const [key, childSchema] of Object.entries(schema.properties)) {
       const childValue = source[key];
       if (required.has(key) && isEmptyValue(childValue, childSchema)) {
@@ -179,8 +188,7 @@ export function findMissingRequired(schema: FieldSchema, value: unknown, path: s
   }
 
   if (schema.type === "array") {
-    const items = (value as unknown[]) ?? [];
-    items.forEach((item, index) => {
+    asArray(value).forEach((item, index) => {
       missing.push(...findMissingRequired(schema.items ?? {}, item, [...path, String(index)]));
     });
   }

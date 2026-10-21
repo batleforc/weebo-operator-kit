@@ -8,7 +8,7 @@
 //
 // Field names are `spec` keys. A kind not listed gets the plain form.
 
-import type { FieldSchema } from "./types";
+import { isRecord, type FieldSchema } from "./types";
 
 export interface ChoiceOption {
   id: string;
@@ -40,11 +40,11 @@ export type CrdChoices = Record<string, ChoiceGroup[]>;
 export type Selection = Record<string, string>;
 
 export function defaultSelection(groups: ChoiceGroup[]): Selection {
-  return Object.fromEntries(groups.map((g) => [g.id, g.options[0].id]));
+  return Object.fromEntries(groups.flatMap((g) => (g.options[0] ? [[g.id, g.options[0].id]] : [])));
 }
 
 function chosen(groups: ChoiceGroup[], selection: Selection): ChoiceOption[] {
-  return groups.map((g) => g.options.find((o) => o.id === selection[g.id]) ?? g.options[0]);
+  return groups.flatMap((g) => g.options.find((o) => o.id === selection[g.id]) ?? g.options.slice(0, 1));
 }
 
 /** Spec keys the form must not render: other options' fields, and implied values. */
@@ -86,6 +86,7 @@ export function withChoiceRequirements<S extends FieldSchema>(
 // Copy-on-write down `path`, adding its last segment to its parent's `required`.
 function requirePath<S extends FieldSchema>(schema: S, path: string[]): S {
   const [head, ...rest] = path;
+  if (head === undefined) return schema;
   if (rest.length === 0) {
     return { ...schema, required: [...new Set([...(schema.required ?? []), head])] };
   }
@@ -96,13 +97,10 @@ function requirePath<S extends FieldSchema>(schema: S, path: string[]): S {
 
 /** Deep-merge `preset` into a form value: objects merge, anything else replaces. */
 export function withPreset(value: unknown, preset: Record<string, unknown>): Record<string, unknown> {
-  const base = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const base = isRecord(value) ? value : {};
   const out = { ...base };
   for (const [key, v] of Object.entries(preset)) {
-    out[key] =
-      v && typeof v === "object" && !Array.isArray(v)
-        ? withPreset(base[key], v as Record<string, unknown>)
-        : v;
+    out[key] = isRecord(v) ? withPreset(base[key], v) : v;
   }
   return out;
 }

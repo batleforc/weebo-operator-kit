@@ -343,7 +343,7 @@ already do).
 ## Developing the package
 
 ```bash
-task docs:check   # version in step with the workspace, tsc against the peers' floors, generator tests
+task docs:check   # version in step with the workspace, tsc against the peers' floors, generator tests, eslint
 task docs:pack    # dist/weebo-operator-docs-<version>.tgz, what the release attaches
 ```
 

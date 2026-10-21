@@ -33,7 +33,7 @@ const features = [
 
 export default function HomePage() {
   return (
-    <main className="flex flex-1 flex-col px-4 sm:px-6">
+    <div className="flex flex-1 flex-col px-4 sm:px-6">
       <section className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 pt-10 pb-10 sm:pt-16">
         <span className="sheet-label">Shared core of the weebo operators · {version}</span>
         <h1 className="sheet-display">{site.name}</h1>
@@ -58,7 +58,7 @@ export default function HomePage() {
       <section className="sheet-region mx-auto w-full max-w-[1100px]">
         <div className="grid gap-6 md:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-3">
-            <span className="sheet-label">1 · Start an operator</span>
+            <h2 className="sheet-label">1 · Start an operator</h2>
             <pre className="sheet-pre">
               <code>{`cargo generate \\
   --git https://github.com/batleforc/weebo-operator-kit \\
@@ -66,7 +66,7 @@ export default function HomePage() {
             </pre>
           </div>
           <div className="flex min-w-0 flex-col gap-3">
-            <span className="sheet-label">2 · Move to a new release</span>
+            <h2 className="sheet-label">2 · Move to a new release</h2>
             <pre className="sheet-pre">
               <code>{`task kit:sync TAG=${version}`}</code>
             </pre>
@@ -83,6 +83,6 @@ export default function HomePage() {
           </div>
         ))}
       </section>
-    </main>
+    </div>
   );
 }
