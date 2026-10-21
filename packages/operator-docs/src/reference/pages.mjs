@@ -191,7 +191,7 @@ ${table(["When", "Type", "Reason", "Action", "Note"], rows)}
 ## Repeats
 
 A CR that keeps failing is retried after ${runtime.retry_requeue_secs} s, then a delay doubled
-at each consecutive failure, up to ${runtime.steady_requeue_secs} s, and warns each time. Identical Events (same reason, note and action) are folded into one
+at each retry that fails again (not at each watch event), up to ${runtime.steady_requeue_secs} s, and warns each time. Identical Events (same reason, note and action) are folded into one
 series whose count goes up, so a stuck CR shows one line, not hundreds, and
 the apiserver isn't flooded. A note is cut at ${runtime.event_note_max_chars} characters.
 
@@ -306,7 +306,7 @@ Served on every replica, on the admission webhook's HTTPS port
 | \`WEEBO_WATCH_CLUSTER_KINDS\` | \`true\` | \`false\` (chart: \`watch.clusterKinds\`, with a namespace): full namespaced — no cluster-scoped kind is watched, objects use the LocalInstances of the namespace, the operator runs on Roles only |
 | \`WEEBO_CROSS_NAMESPACE_REFS\` | \`false\` | \`true\` (chart: \`references.crossNamespace\`): a CR may reference a CR of another namespace that shares itself with it (\`spec.sharedWith\`); never with \`WEEBO_WATCH_NAMESPACE\` |
 | \`WEEBO_WATCH_LABEL_SELECTOR\` | every object | A JSON \`LabelSelector\` (chart: \`watch.labelSelector\`): only the objects it matches exist for the operator, every kind included. It splits the work between releases, it is not a security boundary. An invalid selector stops the start |
-| Requeue | ${runtime.steady_requeue_secs} s / ${runtime.retry_requeue_secs} s | Next reconcile after a success (drift check) / after a failure, doubled per consecutive failure up to the steady delay; ±20 % so CRs don't move in lockstep. A failure only a change of the CR can clear waits the long delay: the change triggers a reconcile by itself |
+| Requeue | ${runtime.steady_requeue_secs} s / ${runtime.retry_requeue_secs} s | Next reconcile after a success (drift check) / after a failure, doubled per failed retry up to the steady delay; ±20 % so CRs don't move in lockstep. A failure only a change of the CR can clear waits the long delay: the change triggers a reconcile by itself |
 | Status patch | ${runtime.status_retries} retries | A status update the apiserver couldn't take (unavailable, 429, 5xx) is retried before the reconcile fails |
 | \`LEASE_NAME\`, \`POD_NAMESPACE\` | | The leader lease. Only its holder reconciles; it lasts ${runtime.lease_ttl_secs} s, renewed every ${runtime.lease_renew_secs} s, and a leader that may have lost it exits (its pod restarts as a standby) |
 | \`WEEBO_OPERATOR_POD_LABELS\` | set by the chart | The operator pod's own selector labels (a JSON object, \`nameOverride\` applied): what a NetworkPolicy the operator writes selects to let the operator in, when it writes any |

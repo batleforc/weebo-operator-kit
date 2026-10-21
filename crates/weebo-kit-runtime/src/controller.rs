@@ -31,8 +31,9 @@ pub const DEFAULT_CONCURRENCY: u16 = 4;
 /// Steady-state drift check after a success, seconds.
 pub const STEADY_REQUEUE_SECS: u64 = 300;
 /// Retry after a failure (often a dependency not ready yet), seconds;
-/// doubled for each consecutive failure of the same CR, up to
-/// [`STEADY_REQUEUE_SECS`].
+/// doubled for each retry of the same CR that fails again, up to
+/// [`STEADY_REQUEUE_SECS`] (a failure seen sooner, on a watch event, is
+/// not counted).
 pub const RETRY_REQUEUE_SECS: u64 = 30;
 /// CRs whose failure streak is tracked at once; past it, the streaks idle
 /// for twice [`STEADY_REQUEUE_SECS`] (a CR deleted while failing, without
@@ -169,6 +170,13 @@ fn backoff_secs(failures: u32) -> u64 {
 
 /// The retry delay of one more failure of `uid`, counted.
 fn failed(uid: Option<&str>) -> u64 {
+    failed_at(uid, std::time::Instant::now())
+}
+
+/// [`failed`] at `now`. A failure seen before the previous retry was due
+/// (a watch event: the CR's own workloads rolling out, a referenced Secret
+/// changing) is not counted: only retries back off, not bursts of events.
+fn failed_at(uid: Option<&str>, now: std::time::Instant) -> u64 {
     let Some(uid) = uid else {
         return RETRY_REQUEUE_SECS;
     };
@@ -182,11 +190,18 @@ fn failed(uid: Option<&str>) -> u64 {
             return RETRY_REQUEUE_SECS;
         }
     }
-    let now = std::time::Instant::now();
     let streak = streaks.entry(uid.to_string()).or_insert(Streak {
         failures: 0,
         last: now,
     });
+    if let Some(previous) = streak.failures.checked_sub(1) {
+        let current = backoff_secs(previous);
+        // The jittered retry fires at 80% of `current` at the soonest.
+        let due = Duration::from_secs(current.saturating_sub(current / 5));
+        if now.saturating_duration_since(streak.last) < due {
+            return current;
+        }
+    }
     let secs = backoff_secs(streak.failures);
     streak.failures = streak.failures.saturating_add(1);
     streak.last = now;
@@ -206,8 +221,8 @@ fn recovered(uid: Option<&str>) {
 /// When to reconcile `object` again after a reconcile that reached its
 /// status: [`STEADY_REQUEUE_SECS`] after a success — or a failure only a
 /// change of the CR can clear (a change triggers a reconcile by itself) —,
-/// [`RETRY_REQUEUE_SECS`] after any other failure, doubled per consecutive
-/// failure up to [`STEADY_REQUEUE_SECS`]; jittered. `due_in` (seconds, e.g.
+/// [`RETRY_REQUEUE_SECS`] after any other failure, doubled per retry that
+/// fails again up to [`STEADY_REQUEUE_SECS`]; jittered. `due_in` (seconds, e.g.
 /// a token expiring) comes first when sooner.
 pub fn requeue_after<K: Resource>(object: &K, steady: bool, due_in: Option<u64>) -> Action {
     let uid = object.meta().uid.as_deref();
@@ -367,9 +382,25 @@ mod tests {
         );
         assert_eq!(backoff_secs(u32::MAX), STEADY_REQUEUE_SECS);
         let uid = Some("backoff-streak");
-        assert_eq!([failed(uid), failed(uid), failed(uid)], [30, 60, 120]);
+        let start = std::time::Instant::now();
+        let at = |secs| start + Duration::from_secs(secs);
+        // Retries 30 s then 60 s apart: each one counts.
+        assert_eq!(
+            [
+                failed_at(uid, at(0)),
+                failed_at(uid, at(30)),
+                failed_at(uid, at(90))
+            ],
+            [30, 60, 120]
+        );
+        // Events before the 120 s retry is due: the same failure, not counted.
+        assert_eq!(
+            [failed_at(uid, at(91)), failed_at(uid, at(150))],
+            [120, 120]
+        );
+        assert_eq!(failed_at(uid, at(210)), 240);
         recovered(uid);
-        assert_eq!(failed(uid), 30);
+        assert_eq!(failed_at(uid, at(211)), 30);
         recovered(uid);
         // No uid (an object not from the API): no streak to keep.
         assert_eq!([failed(None), failed(None)], [30, 30]);
