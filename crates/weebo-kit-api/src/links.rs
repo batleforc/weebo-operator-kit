@@ -26,8 +26,9 @@
 //!   the reference field `ref` designates —
 //!   `"{/spec.instanceRef>spec.url}/o/{/spec.slug}/"`, a name the operator
 //!   computes, which a `name` field lets the user override. [`crate::SecretTarget`] carries it: one `Secret` per
-//!   target, none for a Vault one. `each` is a path under the field, for
-//!   one the schema leaves free-form:
+//!   target, none for a Vault one. On a list field, each item makes one
+//!   (`spec.hosts[]`). `each` is a path under the field, for one the
+//!   schema leaves free-form:
 //!
 //!   ```ignore
 //!   // One schematic `Upstream` per URL of `config.upstreams`.
@@ -341,8 +342,10 @@ fn walk(
                 source: serde::de::Error::custom("neither a name field nor a template"),
             });
         }
+        // On a list field, as `x-weebo-link`: each item makes one.
         let each = match marker.each {
             Some(under) => format!("{path}.{under}"),
+            None if node.contains_key("items") => format!("{path}[]"),
             None => path.to_string(),
         };
         out.produces.push(Production {
@@ -550,11 +553,19 @@ mod tests {
         cluster_ref: ObjectRef,
     }
 
+    fn open_object(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "object", "x-kubernetes-preserve-unknown-fields": true })
+    }
+
     #[derive(JsonSchema)]
     #[expect(dead_code, reason = "only its schema is used")]
     struct WithUpstreams {
+        // As an operator types a free-form field: `schema_with` keeps the marker.
+        #[schemars(schema_with = "open_object")]
         #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.example.weebo.io", "kind": "Upstream" }, "each": "upstreams[]", "name": ["."] }))]
         config: serde_json::Value,
+        #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.example.weebo.io", "kind": "Host" }, "name": ["."] }))]
+        hosts: Vec<String>,
     }
 
     #[test]
@@ -581,19 +592,23 @@ mod tests {
     }
 
     #[test]
-    fn each_produces_under_a_free_form_field() {
+    fn each_produces_under_a_free_form_field_and_per_item_of_a_list() {
         let links = of::<WithUpstreams>(&roles()).unwrap();
+        let made = |kind: &str, each: &str| Production {
+            kind: GroupKind::new("schematic.example.weebo.io", kind),
+            each: each.to_string(),
+            name: vec![".".to_string()],
+            template: None,
+            namespace: None,
+            key_names: vec![],
+            unless: None,
+        };
         assert_eq!(
             links.produces,
-            vec![Production {
-                kind: GroupKind::new("schematic.example.weebo.io", "Upstream"),
-                each: "config.upstreams[]".to_string(),
-                name: vec![".".to_string()],
-                template: None,
-                namespace: None,
-                key_names: vec![],
-                unless: None,
-            }]
+            vec![
+                made("Upstream", "config.upstreams[]"),
+                made("Host", "hosts[]")
+            ]
         );
     }
 

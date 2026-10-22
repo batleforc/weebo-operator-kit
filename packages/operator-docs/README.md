@@ -416,7 +416,8 @@ schematic.insert("AccessMethod".into(), links::schematic::<AccessMethodSpec>(GRO
 ```
 
 A CRD's field may make schematic objects from its values, so the drawing
-follows the manifests (`.`: the item itself):
+follows the manifests (`.`: the item itself; on a list field, each item
+makes one, as `x-weebo-link` applies to each):
 
 ```rust
 /// One `Upstream` per URL of `config.upstreams`.
