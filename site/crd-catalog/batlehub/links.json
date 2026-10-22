@@ -1,0 +1,103 @@
+{
+  "kinds": {
+    "BatleHubLocalInstance": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.configLayers[].configMapRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "ConfigMap"
+            }
+          ]
+        },
+        {
+          "path": "spec.configLayers[].secretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.external.adminTokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.external.tls.caSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.managed.credentials",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.managed.operatorAccess.tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ]
+    },
+    "BatleHubMaintenance": {
+      "produces": [],
+      "references": []
+    },
+    "BatleHubNamespaceClaim": {
+      "produces": [],
+      "references": []
+    },
+    "BatleHubPackageGrant": {
+      "produces": [],
+      "references": []
+    },
+    "BatleHubPackagePolicy": {
+      "produces": [],
+      "references": []
+    },
+    "BatleHubRegistry": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.configFrom[].configMapRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "ConfigMap"
+            }
+          ]
+        },
+        {
+          "path": "spec.configFrom[].secretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "version": 1
+}

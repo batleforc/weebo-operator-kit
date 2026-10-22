@@ -1,0 +1,473 @@
+{
+  "kinds": {
+    "ForgejoAccessToken": {
+      "produces": [
+        {
+          "each": "spec.secretTargets[]",
+          "keyNames": [
+            "FORGEJO_TOKEN",
+            "FORGEJO_USERNAME",
+            "FORGEJO_URL"
+          ],
+          "kind": {
+            "group": "",
+            "kind": "Secret"
+          },
+          "name": [
+            "name"
+          ],
+          "namespace": "namespace",
+          "unless": {
+            "equals": "vault",
+            "path": "backend"
+          }
+        }
+      ],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoInstance"
+            },
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.repositoryRefs[]",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoRepository"
+            }
+          ]
+        },
+        {
+          "path": "spec.userRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoUser"
+            }
+          ]
+        }
+      ]
+    },
+    "ForgejoDeployKey": {
+      "produces": [
+        {
+          "each": "spec.secretTargets[]",
+          "keyNames": [
+            "ssh-privatekey",
+            "ssh-publickey"
+          ],
+          "kind": {
+            "group": "",
+            "kind": "Secret"
+          },
+          "name": [
+            "name"
+          ],
+          "namespace": "namespace",
+          "unless": {
+            "equals": "vault",
+            "path": "backend"
+          }
+        }
+      ],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoInstance"
+            },
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.repositoryRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoRepository"
+            }
+          ]
+        }
+      ]
+    },
+    "ForgejoInstance": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.secretStore.vault.caSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.tls.caSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ]
+    },
+    "ForgejoLocalInstance": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.tls.caSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ]
+    },
+    "ForgejoNamespacePolicy": {
+      "produces": [],
+      "references": []
+    },
+    "ForgejoOAuth2Application": {
+      "produces": [
+        {
+          "each": "spec.secretTargets[]",
+          "keyNames": [
+            "FORGEJO_CLIENT_ID",
+            "FORGEJO_CLIENT_SECRET",
+            "FORGEJO_URL"
+          ],
+          "kind": {
+            "group": "",
+            "kind": "Secret"
+          },
+          "name": [
+            "name"
+          ],
+          "namespace": "namespace",
+          "unless": {
+            "equals": "vault",
+            "path": "backend"
+          }
+        }
+      ],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoInstance"
+            },
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.ownerRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoUser"
+            }
+          ]
+        }
+      ]
+    },
+    "ForgejoOrganization": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoInstance"
+            },
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.ownerRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoUser"
+            }
+          ]
+        }
+      ]
+    },
+    "ForgejoRepository": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.fromTemplate.repositoryRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoRepository"
+            }
+          ]
+        },
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoInstance"
+            },
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.organizationRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoOrganization"
+            }
+          ]
+        },
+        {
+          "path": "spec.teamRefs[]",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoTeam"
+            }
+          ]
+        },
+        {
+          "path": "spec.userRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoUser"
+            }
+          ]
+        }
+      ]
+    },
+    "ForgejoTeam": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoInstance"
+            },
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.memberRefs[]",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoUser"
+            }
+          ]
+        },
+        {
+          "path": "spec.organizationRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoOrganization"
+            }
+          ]
+        }
+      ]
+    },
+    "ForgejoUser": {
+      "produces": [
+        {
+          "each": "spec.secretTargets[]",
+          "keyNames": [
+            "FORGEJO_USERNAME",
+            "FORGEJO_PASSWORD",
+            "FORGEJO_URL"
+          ],
+          "kind": {
+            "group": "",
+            "kind": "Secret"
+          },
+          "name": [
+            "name"
+          ],
+          "namespace": "namespace",
+          "unless": {
+            "equals": "vault",
+            "path": "backend"
+          }
+        }
+      ],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoInstance"
+            },
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoLocalInstance"
+            }
+          ]
+        }
+      ]
+    },
+    "ForgejoUserKey": {
+      "produces": [
+        {
+          "each": "spec.secretTargets[]",
+          "keyNames": [
+            "ssh-privatekey",
+            "ssh-publickey"
+          ],
+          "kind": {
+            "group": "",
+            "kind": "Secret"
+          },
+          "name": [
+            "name"
+          ],
+          "namespace": "namespace",
+          "unless": {
+            "equals": "vault",
+            "path": "backend"
+          }
+        }
+      ],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoInstance"
+            },
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.userRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoUser"
+            }
+          ]
+        }
+      ]
+    },
+    "ForgejoWebhook": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.authorizationHeaderSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoInstance"
+            },
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.organizationRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoOrganization"
+            }
+          ]
+        },
+        {
+          "path": "spec.repositoryRef",
+          "to": [
+            {
+              "group": "forgejo.weebo.io",
+              "kind": "ForgejoRepository"
+            }
+          ]
+        },
+        {
+          "path": "spec.secretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "version": 1
+}
