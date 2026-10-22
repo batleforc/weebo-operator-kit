@@ -1,0 +1,235 @@
+{
+  "kinds": {
+    "AngosIdentity": {
+      "produces": [
+        {
+          "each": "spec.secretTargets[]",
+          "keyNames": [
+            "username",
+            "password",
+            ".dockerconfigjson"
+          ],
+          "kind": {
+            "group": "",
+            "kind": "Secret"
+          },
+          "name": [
+            "name"
+          ],
+          "namespace": "namespace",
+          "unless": {
+            "equals": "vault",
+            "path": "backend"
+          }
+        }
+      ],
+      "references": [
+        {
+          "path": "spec.adoptSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "angos.weebo.io",
+              "kind": "AngosLocalInstance"
+            }
+          ]
+        }
+      ]
+    },
+    "AngosLocalInstance": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.auth.oidc[].audienceFrom",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.auth.oidc[].issuerFrom",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.auth.oidc[].tls.ca.configMapKeyRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "ConfigMap"
+            }
+          ]
+        },
+        {
+          "path": "spec.auth.oidc[].tls.ca.secretKeyRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.auth.tokenService.keySecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.auth.webhooks[].bearerTokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.auth.webhooks[].tls.ca.configMapKeyRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "ConfigMap"
+            }
+          ]
+        },
+        {
+          "path": "spec.auth.webhooks[].tls.ca.secretKeyRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.cache.redis.urlSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.eventWebhooks[].tls.ca.configMapKeyRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "ConfigMap"
+            }
+          ]
+        },
+        {
+          "path": "spec.eventWebhooks[].tls.ca.secretKeyRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.eventWebhooks[].tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.scan.tls.ca.configMapKeyRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "ConfigMap"
+            }
+          ]
+        },
+        {
+          "path": "spec.scan.tls.ca.secretKeyRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.scan.tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.server.tls.clientCA",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.ui.oidc.clientIdFrom",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ]
+    },
+    "AngosMaintenance": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "angos.weebo.io",
+              "kind": "AngosLocalInstance"
+            }
+          ]
+        }
+      ]
+    },
+    "AngosRepository": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "angos.weebo.io",
+              "kind": "AngosLocalInstance"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "version": 1
+}

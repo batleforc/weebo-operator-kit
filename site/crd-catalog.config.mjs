@@ -12,11 +12,11 @@
 /** @type {{ operators: { name: string, repo: string, tag: string }[], thirdParty: { name: string, url: string, kinds: string[], links?: import('@weebo/operator-docs/crd-docs').CrdLinks }[] }} */
 const catalog = {
   operators: [
-    { name: 'forgejo', repo: 'batleforc/weebo-forgejo', tag: 'v0.5.6' },
-    { name: 'authentik', repo: 'batleforc/weebo-authentik', tag: 'v0.19.6' },
-    { name: 'angos', repo: 'batleforc/weebo-angos', tag: 'v0.1.6' },
-    { name: 'batlehub', repo: 'batleforc/weebo-batlehub', tag: 'v0.3.3' },
-    { name: 'stalwart', repo: 'batleforc/weebo-stalwart', tag: 'v0.1.2' },
+    { name: 'forgejo', repo: 'batleforc/weebo-forgejo', tag: 'v0.6.0' },
+    { name: 'authentik', repo: 'batleforc/weebo-authentik', tag: 'v0.20.0' },
+    { name: 'angos', repo: 'batleforc/weebo-angos', tag: 'v0.2.0' },
+    { name: 'batlehub', repo: 'batleforc/weebo-batlehub', tag: 'v0.4.0' },
+    { name: 'stalwart', repo: 'batleforc/weebo-stalwart', tag: 'v0.2.0' },
   ],
   thirdParty: [
     {
