@@ -398,3 +398,115 @@ test("pages: false writes the schemas, index.json and links.json, and no page", 
   assert.deepEqual(JSON.parse(read("public/crd-schemas/links.json")), { version: 1, kinds: {} });
   fs.rmSync(root, { recursive: true });
 });
+
+const upstream = { group: "schematic.example.weebo.io", kind: "Upstream" };
+
+test("schematic kinds: a schema and an index entry each, their links checked, no page", () => {
+  const dir = withLinks({
+    version: 1,
+    kinds: {
+      ExampleWidget: { references: [], produces: [{ kind: upstream, each: "spec.labels.*", name: ["."] }] },
+    },
+    schematic: {
+      Upstream: {
+        group: "schematic.example.weebo.io",
+        scope: "Cluster",
+        schema: { type: "object", description: "A registry mirrored.", properties: { url: { type: "string" } } },
+        references: [],
+        produces: [],
+      },
+      Mirror: {
+        group: "schematic.example.weebo.io",
+        scope: "Namespaced",
+        schema: { type: "object", properties: { upstreamRef: { type: "object", properties: { name: { type: "string" } } } } },
+        references: [{ path: "spec.upstreamRef", to: [upstream] }],
+        produces: [],
+      },
+    },
+  });
+  const { root, read } = run({ crdDir: dir });
+  const index = JSON.parse(read("public/crd-schemas/index.json"));
+  assert.deepEqual(index.slice(3), [
+    { kind: "Mirror", singular: "mirror", scope: "Namespaced", apiVersion: "schematic.example.weebo.io/v1", served: ["v1"], schematic: true },
+    { kind: "Upstream", singular: "upstream", scope: "Cluster", apiVersion: "schematic.example.weebo.io/v1", served: ["v1"], schematic: true },
+  ]);
+  const schema = JSON.parse(read("public/crd-schemas/upstream.schema.json"));
+  assert.equal(schema.apiVersion, "schematic.example.weebo.io/v1");
+  assert.equal(schema.schematic, true);
+  assert.equal(schema.properties.url.type, "string");
+  const links = JSON.parse(read("public/crd-schemas/links.json"));
+  assert.deepEqual(links.kinds.Mirror.references, [{ path: "spec.upstreamRef", to: [upstream] }]);
+  assert.deepEqual(links.kinds.ExampleWidget.produces, [{ kind: upstream, each: "spec.labels.*", name: ["."] }]);
+  assert.ok(!fs.existsSync(path.join(root, "content/docs/crds/upstream.mdx")));
+  fs.rmSync(root, { recursive: true });
+  fs.rmSync(dir, { recursive: true });
+});
+
+test("productions under a free-form field: any path below it", () => {
+  const dir = withLinks({ version: 1, kinds: { ExampleWidget: { references: [], produces: [{ kind: upstream, each: "spec.config.upstreams[]", name: ["."] }] } } });
+  const file = path.join(dir, "widget.yaml");
+  const crd = yaml.load(fs.readFileSync(file, "utf8"));
+  crd.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.config = { type: "object", "x-kubernetes-preserve-unknown-fields": true };
+  fs.writeFileSync(file, yaml.dump(crd));
+  const { root, read } = run({ crdDir: dir });
+  assert.equal(JSON.parse(read("public/crd-schemas/links.json")).kinds.ExampleWidget.produces[0].each, "spec.config.upstreams[]");
+  fs.rmSync(root, { recursive: true });
+  fs.rmSync(dir, { recursive: true });
+});
+
+test("schematic kinds: bad entries fail generation", () => {
+  const kind = (entry) => ({ version: 1, kinds: {}, schematic: { Upstream: { group: "schematic.example.weebo.io", scope: "Cluster", schema: {}, ...entry } } });
+  const cases = [
+    [{ version: 1, kinds: {}, schematic: [] }, /schematic is not a map/],
+    [kind({ group: "nodots" }), /invalid group/],
+    [kind({ scope: "Global" }), /scope is Namespaced or Cluster/],
+    [kind({ schema: null }), /no schema/],
+    [{ version: 1, kinds: {}, schematic: { ExampleWidget: { group: "schematic.example.weebo.io", scope: "Cluster", schema: {} } } }, /already a CRD's kind/],
+    [kind({ references: [{ path: "spec.nope", to: [secret] }] }), /Upstream has no field "spec\.nope"/],
+    [{ version: 1, kinds: { ExampleWidget: { produces: [{ kind: upstream, name: ["."] }] } } }, /names an object by "\." without each/],
+  ];
+  for (const [generated, error] of cases) {
+    const dir = withLinks(generated);
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "crd-docs-"));
+    assert.throws(() => generateCrdDocs({ ...config, crdDir: dir }, { root }), error);
+    fs.rmSync(root, { recursive: true });
+    fs.rmSync(dir, { recursive: true });
+  }
+});
+
+test("a computed name: a template over the item, the resource and a referenced kind", () => {
+  const widget = { group: "example.weebo.io", kind: "ExampleWidget" };
+  const base = (template) => ({
+    version: 1,
+    kinds: {
+      ExampleNested: {
+        references: [{ path: "spec.target.host", to: [widget] }],
+        produces: [{ kind: upstream, each: "spec.rules[]", name: [], template }],
+      },
+    },
+  });
+  const dir = withLinks(base("{/spec.target.host>spec.name}/{path}/{/metadata.name}"));
+  const { root, read } = run({ crdDir: dir });
+  assert.deepEqual(JSON.parse(read("public/crd-schemas/links.json")).kinds.ExampleNested.produces[0], {
+    kind: upstream,
+    each: "spec.rules[]",
+    name: [],
+    template: "{/spec.target.host>spec.name}/{path}/{/metadata.name}",
+  });
+  fs.rmSync(root, { recursive: true });
+  fs.rmSync(dir, { recursive: true });
+  const cases = [
+    ["no hole", /has no \{field\}/],
+    ["{nope}", /has no field "spec\.rules\[\]\.nope"/],
+    ["{/spec.nope}", /has no field "spec\.nope"/],
+    ["{/spec.rules>name}", /spec\.rules is not one of its references/],
+    ["{/spec.target.host>spec.nope}", /no ExampleWidget has a field spec\.nope/],
+  ];
+  for (const [template, error] of cases) {
+    const bad = withLinks(base(template));
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "crd-docs-"));
+    assert.throws(() => generateCrdDocs({ ...config, crdDir: bad }, { root: out }), error);
+    fs.rmSync(out, { recursive: true });
+    fs.rmSync(bad, { recursive: true });
+  }
+});

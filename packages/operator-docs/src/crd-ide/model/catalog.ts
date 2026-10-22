@@ -32,6 +32,7 @@ function isKindLinks(v: unknown): v is KindLinks {
         isRecord(p) &&
         isGroupKind(p.kind) &&
         isStrings(p.name) &&
+        optional(p.template, isString) &&
         optional(p.each, isString) &&
         optional(p.namespace, isString) &&
         optional(p.keys, isString) &&
@@ -50,7 +51,8 @@ const NO_LINKS: KindLinks = { references: [], produces: [] };
 
 /**
  * The catalog of the given kinds (an `index.json`'s entries, or schemas,
- * which say as much). `links` is keyed by kind alone, as one site's
+ * which say as much). A kind twice is refused, but for a schematic one
+ * (the kit's shared kinds, on every operator's site): the first is kept. `links` is keyed by kind alone, as one site's
  * `links.json` is: pass each site's kinds with its own file. `schemas` are
  * loaded already.
  */
@@ -61,7 +63,10 @@ export function buildCatalog(sources: { kinds: KindEntry[]; links: LinksFile; sc
       const parsed = parseApiVersion(entry.apiVersion);
       if (!parsed) throw new Error(`${entry.kind}: invalid apiVersion ${JSON.stringify(entry.apiVersion)}`);
       const key = gkKey({ group: parsed.group, kind: entry.kind });
-      if (catalog.has(key)) throw new Error(`${key} is in the catalog twice`);
+      const known = catalog.get(key);
+      // A shared schematic kind comes with every operator's site: the first wins.
+      if (known?.schematic && entry.schematic) continue;
+      if (known) throw new Error(`${key} is in the catalog twice`);
       const schema = schemas.find((s) => s.kind === entry.kind && s.apiVersion === entry.apiVersion);
       catalog.set(key, {
         kind: entry.kind,
@@ -70,6 +75,7 @@ export function buildCatalog(sources: { kinds: KindEntry[]; links: LinksFile; sc
         apiVersion: entry.apiVersion,
         scope: entry.scope,
         served: entry.served ?? [parsed.version],
+        schematic: entry.schematic ?? false,
         links: links.kinds[entry.kind] ?? NO_LINKS,
         ...(schema ? { schema } : {}),
       });
@@ -89,6 +95,9 @@ export function withSchemas(catalog: Catalog, schemas: CrdSchema[]): Catalog {
   }
   return next;
 }
+
+/** Whether a kind is a schematic one: drawn, never applied. */
+export const isSchematic = (catalog: Catalog, gk: GroupKind): boolean => catalog.get(gkKey(gk))?.schematic === true;
 
 /** The kinds of the project's resources whose schema is not loaded yet. */
 export function missingSchemas(catalog: Catalog, kinds: GroupKind[]): string[] {

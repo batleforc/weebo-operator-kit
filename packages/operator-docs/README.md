@@ -228,12 +228,21 @@ A recipe is `{ id, label, description?, yaml }`.
   external secret) and the external objects declared by hand (never
   exported). The graph, above, shows them; the list is the keyboard way,
   with every action.
+- **Schematic objects** (see [Schematic kinds](#schematic-kinds)): kinds
+  an operator declares for the IDE alone — a cluster and the ways to reach
+  it, the upstream a registry mirrors. Added, edited and linked as any
+  resource, any name allowed (a URL), drawn with a dotted border and
+  marked "(schematic)". A production may make them from a resource's
+  fields: they follow its YAML, one node per name, merged into the object
+  added by hand with that name. Left out of the manifests, downloaded
+  apart as `schematic.yaml`, which imports back.
 - **Issues**, as you type: the schema (required, type, enum, pattern,
   bounds, unknown fields), the recipe's blanks, references to nothing or to
   the wrong kind, a missing key, a local instance not shared with the
   referencing namespace, duplicates. CEL rules are left to the API server.
 - **Out**: multi-document YAML in dependency order (copy or `.yaml`), or a
-  `.zip` of one file per resource. The project is kept in the browser's
+  `.zip` of one file per resource; the schematic objects in
+  `schematic.yaml`. The project is kept in the browser's
   storage between visits.
 
 The model behind it (`@weebo/operator-docs/crd-ide/model`) is plain
@@ -340,9 +349,24 @@ links: {
 ```
 
 A production may also make one object per item (`each: 'spec.targets[]'`,
-the other paths then relative to the item), name its namespace's field
-(`namespace`, default the resource's) and skip items (`unless: { path:
-'backend', equals: 'vault' }`).
+the other paths then relative to the item, `.` being the item itself when
+it is a plain string), name its namespace's field (`namespace`, default the
+resource's) and skip items (`unless: { path: 'backend', equals: 'vault'
+}`; a boolean or a number compares as its text). Under a free-form object
+(`x-kubernetes-preserve-unknown-fields`), any path is accepted: `each:
+'spec.config.upstreams[]'`.
+
+A name the operator computes is a `template`, used when no `name` field is
+set — so a `name` field is the user's override: `{path}` relative to the
+item, `{/path}` from the resource's root, `{/ref>path}` read on the
+resource the reference field `ref` designates (unset: the only candidate,
+as the kit's default instance). A hole without a value makes no object.
+
+```js
+// The issuer of an application: `issuerUrl` if set, else computed.
+{ kind: { group: 'schematic.weebo.io', kind: 'OidcIssuer' }, each: 'spec.provider.oauth2',
+  name: ['issuerUrl'], template: '{/spec.instanceRef>spec.url}/application/o/{/spec.slug}/' }
+```
 
 Paths are dotted from the object's root (`spec.instanceRef`), `[]` stepping
 into an array's items and `*` into a map's values. The output is
@@ -350,6 +374,64 @@ into an array's items and `*` into a map's values. The output is
 `group: ""` being the core group. Generation fails, writing nothing, on a
 kind that is not one of the CRDs (a stale `links.json`: rerun the crdgen),
 a path that is not a field of the CRD, or a reference declared twice.
+
+### Schematic kinds
+
+A kind the IDE draws but Kubernetes never sees: no CRD, nothing to apply.
+
+The kit declares a **shared vocabulary**, group `schematic.weebo.io`
+(`weebo_kit_api::schematic`): `OidcIssuer`, `UpstreamRegistry`,
+`VaultServer`, `HttpEndpoint`, `DnsName`, `S3Bucket` (cluster-scoped, named
+by their URL or name) and `Database` (namespaced). The template's `crdgen`
+declares them all (`schematic::shared`): every operator's site publishes
+them, the IDE keeps the first, and two operators naming one issuer meet on
+one node. A URL is compared without its trailing slash. What only one
+operator draws gets a group of its own, as below.
+The operator declares it in Rust, its `spec` a type with doc comments and
+the same markers as a CRD's, and its `crdgen` writes it to `links.json`:
+
+```rust
+/// A cluster the proxy gives access to.
+#[derive(JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ClusterSpec {
+    /// The API server's URL.
+    api_server: String,
+}
+
+/// One way to reach a cluster.
+#[derive(JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct AccessMethodSpec {
+    /// `oidc`, `token`…
+    r#type: String,
+    #[schemars(extend("x-weebo-link" = { "to": [{ "group": "schematic.example.weebo.io", "kind": "Cluster" }] }))]
+    cluster_ref: ObjectRef,
+}
+
+// crates/crdgen/src/main.rs
+let mut schematic = BTreeMap::new();
+schematic.insert("Cluster".into(), links::schematic::<ClusterSpec>(GROUP, links::Scope::Cluster, &roles)?);
+schematic.insert("AccessMethod".into(), links::schematic::<AccessMethodSpec>(GROUP, links::Scope::Namespaced, &roles)?);
+```
+
+A CRD's field may make schematic objects from its values, so the drawing
+follows the manifests (`.`: the item itself):
+
+```rust
+/// One `Upstream` per URL of `config.upstreams`.
+#[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.example.weebo.io", "kind": "Upstream" }, "each": "upstreams[]", "name": ["."] }))]
+pub config: serde_json::Value,
+```
+
+The generator publishes each one as a kind in version `v1` of its group:
+a `<kind>.schema.json` and an `index.json` entry marked `schematic: true`
+(`<CrdBuilder />` leaves them out), no page. Its links' paths start at the
+object's root (`spec.clusterRef`). Generation fails on a group that is not
+a DNS subdomain, a scope other than `Namespaced`/`Cluster`, no schema, or a
+name already a CRD's. Use a group of the operator's own, apart from its
+CRDs' (`schematic.<operator group>`): the kit's site loads every
+operator's.
 
 ### Schemas only
 

@@ -1761,6 +1761,37 @@ un import (un dossier GitOps). Vérifié sur la doc de weebo-forgejo : liens
 et Secrets résolus, aucune valeur ni champ serveur dans l'export ou le
 brouillon.
 
+#### Kinds schématiques (ajouté le 2026-10-22)
+
+Un opérateur veut dessiner dans l'IDE ce que Kubernetes ne connaît pas :
+le cluster et ses méthodes d'accès (proxyAuthK8s), les sources upstream
+d'un registre (batlehub). Décidé :
+
+- **Déclarés par l'opérateur, en Rust** : `weebo_kit_api::links::schematic::<S>(group,
+  Scope, &roles)` lit le schéma du type `S` (le `spec`, mêmes marqueurs
+  qu'une CRD, retirés du schéma publié) ; `crdgen` l'écrit dans
+  `links.json`, section `schematic: { <Kind>: { group, scope, schema,
+  references, produces } }` (`version` reste 1 : un lecteur plus ancien
+  ignore la clé). Le groupe est celui de l'opérateur
+  (`schematic.<groupe>`), la version toujours `v1`.
+- **Publiés comme des kinds** : `weebo-crd-docs` écrit leur
+  `<kind>.schema.json` et une entrée `index.json` `schematic: true`, sans
+  page ; `CrdBuilder` les ignore. Leurs liens sont vérifiés comme ceux
+  d'une CRD (chemins depuis la racine : `spec.…`).
+- **Éditables et liés** : dans l'IDE, des ressources comme les autres
+  (formulaire, références dans les deux sens), tout nom accepté (une URL),
+  bordure pointillée et « (schematic) » dans le texte.
+- **Dérivés des champs** : une production peut faire des objets
+  schématiques. Le marqueur `x-weebo-produces` gagne `each` (un chemin sous
+  le champ, pour un champ libre comme le `config` de batlehub), un nom `.`
+  désigne l'item lui-même (une URL), et sous un objet libre
+  (`x-kubernetes-preserve-unknown-fields`) tout chemin est accepté. Deux
+  objets schématiques produits de même identité ne font qu'un nœud
+  (`alsoFrom`), fusionné dans la ressource ajoutée à la main qui l'a : pas
+  de doublon pour un upstream partagé, et on le complète à la main.
+- **Export à part** : jamais dans `manifests.yaml` ni le zip ; un
+  `schematic.yaml` téléchargeable, qui se réimporte par le même chemin.
+
 #### Release
 
 Mineure (0.x) : le template `crdgen` change (chaque opérateur régénère et
@@ -1849,3 +1880,124 @@ le site du kit liste leurs kinds sans lien.
      Forgejo avec son token depuis ESO et sa CA depuis cert-manager ; Angos
      avec la connexion à l'UI par une application Authentik. Vérifiées dans
      le navigateur : seuls les trous restent signalés.
+
+### À faire — les kinds schématiques sur tous les opérateurs (décidé le 2026-10-22)
+
+Les kinds schématiques (voir « Kinds schématiques » dans la section de
+l'IDE) servent à dessiner ce qui vit hors du cluster. Décidé : un
+**vocabulaire partagé** défini par le kit, et **ProxyAuthK8S** rejoint le
+kit (`weebo-kit-api`, docs à jour, catalogue du site).
+
+#### Le vocabulaire partagé
+
+Un même objet extérieur (un issuer OIDC, un registre amont) n'est un seul
+nœud que si tous les opérateurs le déclarent du même kind. Le kit fournit
+donc des kinds neutres, groupe `schematic.weebo.io` : leurs types de spec
+dans `weebo_kit_api::links` (doc comments = descriptions), une fonction
+qui les déclare tous (le `crdgen` du template l'appelle). Portée `Cluster`
+pour tout ce qu'une URL nomme : un nœud produit d'un kind namespacé prend
+le namespace de son producteur, deux registres de deux namespaces ne
+fusionneraient pas.
+
+| Kind | Nom du nœud | Produit par | À la main |
+| --- | --- | --- | --- |
+| `OidcIssuer` | URL de l'issuer | ProxyAuthK8S, angos, authentik | forgejo, stalwart |
+| `UpstreamRegistry` | URL | batlehub, angos | — |
+| `VaultServer` | adresse | forgejo, authentik, stalwart | — |
+| `HttpEndpoint` | URL | forgejo, angos, authentik | — |
+| `DnsName` | domaine ou hôte | authentik, stalwart, batlehub, angos | — |
+| `S3Bucket` | bucket | angos | batlehub |
+| `Database` (Namespaced) | — | — | batlehub |
+
+Un kind propre à un seul opérateur reste dans son groupe
+(`schematic.<groupe de l'opérateur>`).
+
+#### Kit (v0.24.0, mineure) — fait, à publier
+
+Fait le 2026-10-22, vérifié dans une copie jetable du site (`target/`,
+les kinds du template rendu plus deux productions de test) pilotée par
+Playwright à 1400 et 390 px : groupes du sélecteur, nœuds schématiques
+(pointillés, « (schematic) »), issuer calculé fusionné dans celui ajouté à
+la main, manifestes sans les objets schématiques, `schematic.yaml`
+téléchargé, aucune erreur console, pas de défilement horizontal. Écart
+trouvé et corrigé : une URL écrite avec son slash (`https://h/`) suivie de
+`/…` dans le gabarit donnait `https://h//…` ; un trou suivi d'un `/` perd
+le slash final de sa valeur.
+
+
+- Publier les kinds schématiques (`links::schematic`, `each` du marqueur,
+  nom `.`, `schematic.yaml`).
+- Le vocabulaire partagé ci-dessus, et `crdgen` (template) qui le déclare.
+- Le catalogue de l'IDE accepte un kind schématique déclaré par plusieurs
+  sources (le premier gagne) ; un kind de CRD en double reste une erreur.
+- `unless.equals` compare aussi un booléen ou un nombre (sa forme texte).
+- Les noms d'un kind nommé par une URL sont normalisés (slash final
+  retiré) : `…npmjs.org` et `…npmjs.org/` sont un nœud.
+- **Nom calculé** (décidé le 2026-10-22, pour l'issuer authentik) : une
+  production gagne `template`, le nom quand aucun champ de `name` n'est
+  renseigné — `name` porte donc la surcharge de l'utilisateur, le gabarit
+  le calcul. `{chemin}` relatif à l'item, `{/chemin}` depuis la racine de
+  la ressource, `{/réf>chemin}` lu sur la ressource que désigne la
+  référence `réf` (une des références du kind ; non renseignée, la seule
+  ressource candidate, comme le défaut du kit). Un trou → pas de nœud.
+  Marqueur `x-weebo-produces` et `links.json` : `template`, `name` peut
+  être vide s'il y en a un.
+- Vérifié dans un build du site (Playwright, 390 px) sur les kinds du
+  template rendu.
+- Les recettes croisées (un cluster ProxyAuthK8S, ses méthodes d'accès et
+  son issuer ; batlehub et angos sur les mêmes registres amont) viennent
+  après les releases des opérateurs : le site ne charge que leurs tags.
+
+#### Opérateurs, dans l'ordre
+
+Pour chacun : kit v0.24 (crates, `@weebo/operator-docs`, `crdgen` repris
+du template), marqueurs et kinds propres, `task recu`, release, puis son
+tag dans `site/crd-catalog.config.mjs`.
+
+1. **batlehub** (pilote) : `UpstreamRegistry` produit par
+   `BatleHubRegistry spec.config` (`each: upstreams[]`, nom `.`) et par
+   `BatleHubLocalInstance spec.config` (`registries[].upstreams[]`) ;
+   `DnsName` par `spec.managed.ingress.host` ; `Database`, `S3Bucket` à la
+   main. Limite : ce qui vient de `configFrom`/`configLayers` (TOML de
+   ConfigMaps et Secrets) reste invisible.
+2. **ProxyAuthK8S** : d'abord rejoindre le kit — dépendance
+   `weebo-kit-api` (kube 4, k8s-openapi, schemars 1 : compatibles),
+   `crdgen` qui écrit `deploy/crd/*.yaml` et `links.json` comme le
+   template, docs de `@weebo/operator-docs` 0.20.0 à 0.24 avec une page
+   `ide.mdx`. Puis : `KubeCluster` (son groupe, `schematic.weebo.si.rs`)
+   produit par `spec.service.ExternalService.url` ; une vraie référence
+   vers le `Service` de `spec.service.KubernetesService` ;
+   `AccessMethod` (son groupe, à la main : `type` dashboard, plugin
+   kubectl, serveur OAuth ou direct, `proxyRef` → `ProxyKubeApi`, `group`
+   OIDC exigé) ; `OidcIssuer` produit par `spec.auth_config.jwt[].issuer.url`
+   et `spec.auth_config.oidc_provider.issuer_url` ; références vers les
+   Secrets et ConfigMaps de `cert`, `client_cert`,
+   `virtual_apis[].list_fallback_token`. Ajouté au catalogue du site.
+3. **angos** : `UpstreamRegistry` par `AngosRepository spec.upstreams[]`
+   et `spec.downstreams[]` (nom `url`) ; `S3Bucket` par
+   `spec.storage.s3` et `spec.storage.metadata.s3` ; `OidcIssuer` par
+   `spec.auth.oidc[]` et `spec.auth.kubernetes`, `spec.ui.oidc.provider`
+   y pointe ; `HttpEndpoint` par `spec.scan`, `spec.auth.webhooks[]`,
+   `spec.eventWebhooks[]`, `spec.tracing` ; `DnsName` par
+   `AngosIdentity spec.registryHost`.
+4. **authentik** : `OidcIssuer` produit par `spec.provider.oauth2`, nommé
+   par le nouveau champ `issuerUrl` (surcharge, optionnel ; l'opérateur
+   l'écrit aussi en statut) sinon calculé :
+   `{/spec.instanceRef>spec.url}/application/o/{/spec.slug}/` ;
+   `HttpEndpoint` par `spec.provider.proxy.internalHost`,
+   `DnsName` par `AuthentikBrand spec.domain` et
+   `spec.provider.proxy.externalHost` ; `VaultServer` par
+   `spec.secretStore.vault.address`.
+5. **forgejo** : `GitRemote` (son groupe) par
+   `ForgejoRepository spec.migrate.cloneAddr` ; `HttpEndpoint` par
+   `ForgejoWebhook spec.url` ; `VaultServer`. `loginSourceId` est un
+   numéro : l'IdP s'ajoute à la main.
+6. **stalwart** : `DnsName` par `StalwartDomain` (`spec.name`, sinon
+   `metadata.name` : par les `links` de sa config docs, le marqueur ne lit
+   pas `metadata`) et `spec.aliases[]` ; `HttpEndpoint` par
+   `spec.submission` ; `VaultServer`.
+
+#### Limites acceptées
+
+- Les valeurs tenues dans des Secrets (URL Redis d'angos, DSN de
+  batlehub, `issuerFrom` d'angos) ne seront jamais vues par l'IDE.

@@ -18,7 +18,9 @@ export function CrdBuilder({ choices }: { choices?: CrdChoices | undefined }) {
   useEffect(() => {
     const controller = new AbortController();
     fetchJson("/crd-schemas/index.json", isCrdIndex, controller.signal)
-      .then((data) => {
+      .then((index) => {
+        // A schematic kind is the IDE's only: no manifest to build.
+        const data = index.filter((k) => !k.schematic);
         setKinds(data);
         setSelected(data[0]?.kind ?? "");
       })

@@ -7,11 +7,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { applyNodeChanges, Background, Controls, Position, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
-import type { Graph } from "./model/graph";
+import type { Graph, GraphNode } from "./model/graph";
 import { layout } from "./model/layout";
 import { formatPath } from "./model/paths";
 
 const ORIGIN = { resource: "", produced: " (made)", external: " (external)" } as const;
+
+/** The node's text: a schematic object says so, not only its border. */
+const nodeText = (n: GraphNode) =>
+  `${n.kind.kind} ${n.namespace ? `${n.namespace}/` : ""}${n.name}${ORIGIN[n.origin]}${n.schematic ? " (schematic)" : ""}`;
 
 export default function GraphView({
   graph,
@@ -43,7 +47,11 @@ export default function GraphView({
       const field = formatPath(slot.path).split(".").pop() ?? "";
       if (slot.target) add(slot.resource, slot.target.id, slot.target.from ?? slot.target.id, field, false);
     }
-    for (const n of graph.nodes) if (n.from) add(n.id, n.from, n.from, "made by", true);
+    for (const n of graph.nodes) {
+      if (n.from) add(n.id, n.from, n.from, "made by", true);
+      // The other resources naming a schematic object.
+      for (const other of n.alsoFrom ?? []) add(n.id, other, other, "named by", true);
+    }
     return [...pairs.entries()].map(([id, p]): Edge => {
       const shown = selected !== undefined && (p.source === selected || p.owner === selected);
       return {
@@ -57,7 +65,7 @@ export default function GraphView({
   }, [graph, selected]);
   const nodes = useMemo(() => {
     return graph.nodes.map((n): Node => {
-      const label = `${n.kind.kind} ${n.namespace ? `${n.namespace}/` : ""}${n.name}${ORIGIN[n.origin]}`;
+      const label = nodeText(n);
       return {
         id: n.id,
         position: positions.get(n.id) ?? { x: 0, y: 0 },
@@ -69,7 +77,7 @@ export default function GraphView({
         // The current resource (and what it makes) is marked by a class, not
         // xyflow's `selected`: the IDE's selection and xyflow's would answer
         // each other without end.
-        className: `crd-ide-node crd-ide-node-${n.origin}${n.id === selected || n.from === selected ? " crd-ide-current" : ""}`,
+        className: `crd-ide-node crd-ide-node-${n.origin}${n.schematic ? " crd-ide-node-schematic" : ""}${n.id === selected || n.from === selected ? " crd-ide-current" : ""}`,
       };
     });
   }, [graph, positions, selected]);

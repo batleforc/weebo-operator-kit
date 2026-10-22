@@ -18,10 +18,22 @@
 //!
 //!   On a list field, the marker applies to each item (`spec.memberRefs[]`).
 //!
-//! - `x-weebo-produces` `{ "kind", "name": [..], "namespace"?, "unless"? }`:
+//! - `x-weebo-produces` `{ "kind", "name": [..], "template"?, "each"?, "namespace"?, "unless"? }`:
 //!   the object (each item, in a list) makes an object of `kind`, named by
-//!   the first of its `name` fields that is set. [`crate::SecretTarget`]
-//!   carries it: one `Secret` per target, none for a Vault one.
+//!   the first of its `name` fields that is set (`.`: the item itself, a
+//!   plain string), else by `template`: `{path}` relative to the item,
+//!   `{/path}` from the object's root, `{/ref>path}` read on the object
+//!   the reference field `ref` designates —
+//!   `"{/spec.instanceRef>spec.url}/o/{/spec.slug}/"`, a name the operator
+//!   computes, which a `name` field lets the user override. [`crate::SecretTarget`] carries it: one `Secret` per
+//!   target, none for a Vault one. `each` is a path under the field, for
+//!   one the schema leaves free-form:
+//!
+//!   ```ignore
+//!   // One schematic `Upstream` per URL of `config.upstreams`.
+//!   #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.example.weebo.io", "kind": "Upstream" }, "each": "upstreams[]", "name": ["."] }))]
+//!   pub config: serde_json::Value,
+//!   ```
 //! - `x-weebo-keys` `["token", ..]`: on the field holding producing
 //!   objects, the keys the made objects hold — the operator knows them,
 //!   the kit's types do not:
@@ -35,6 +47,13 @@
 //! extensions, and `CustomResourceExt::crd()` drops them (its schema goes
 //! through `JSONSchemaProps`, which ignores unknown keys). [`of`]
 //! generates the schema again and reads them.
+//!
+//! A **schematic** kind ([`schematic`]) is one the IDE draws but Kubernetes
+//! never sees: a cluster and the ways to reach it, the upstream a registry
+//! mirrors. The operator describes its `spec` as a Rust type, markers
+//! included; the IDE edits and links it like a CRD's, and exports it apart
+//! from the manifests. A production may make one: such objects of the same
+//! name are one node, the one added by hand among them.
 
 use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
@@ -103,6 +122,10 @@ pub struct Production {
     pub each: String,
     /// The fields naming the made object; the first one set wins.
     pub name: Vec<String>,
+    /// The name when no `name` field is set, computed (see the module's
+    /// doc).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
     /// The field naming its namespace; unset: the producing resource's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
@@ -161,7 +184,12 @@ enum Target {
 #[serde(deny_unknown_fields)]
 struct ProducesMarker {
     kind: GroupKind,
+    #[serde(default)]
     name: Vec<String>,
+    #[serde(default)]
+    template: Option<String>,
+    #[serde(default)]
+    each: Option<String>,
     #[serde(default)]
     namespace: Option<String>,
     #[serde(default)]
@@ -183,6 +211,70 @@ pub fn of<K: JsonSchema>(roles: &Roles) -> Result<KindLinks, LinkError> {
     links.references.sort_by(|a, b| a.path.cmp(&b.path));
     links.produces.sort_by(|a, b| a.each.cmp(&b.each));
     Ok(links)
+}
+
+/// Where a schematic kind's objects live.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    Namespaced,
+    Cluster,
+}
+
+/// A kind the IDE draws but Kubernetes never sees: its `spec` schema and
+/// links, under a group of the operator's (`schematic.example.weebo.io`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Schematic {
+    pub group: String,
+    pub scope: Scope,
+    /// The `spec` schema (OpenAPI v3, subschemas inlined, markers
+    /// removed); the type's doc comment is its description.
+    pub schema: Value,
+    pub references: Vec<Link>,
+    pub produces: Vec<Production>,
+}
+
+/// The schematic kind whose `spec` is `S`, its links read from `S`'s
+/// markers as [`of`] does (paths from the object's root: `spec.…`).
+pub fn schematic<S: JsonSchema>(
+    group: &str,
+    scope: Scope,
+    roles: &Roles,
+) -> Result<Schematic, LinkError> {
+    let mut schema = SchemaSettings::openapi3()
+        .with(|s| {
+            s.inline_subschemas = true;
+            s.meta_schema = None;
+        })
+        .into_generator()
+        .into_root_schema_for::<S>()
+        .to_value();
+    let mut links = KindLinks::default();
+    walk(&schema, "spec", &[], roles, &mut links)?;
+    links.references.sort_by(|a, b| a.path.cmp(&b.path));
+    links.produces.sort_by(|a, b| a.each.cmp(&b.each));
+    strip_markers(&mut schema);
+    if let Value::Object(root) = &mut schema {
+        // The Rust type's name, not the kind's.
+        root.remove("title");
+    }
+    Ok(Schematic {
+        group: group.to_string(),
+        scope,
+        schema,
+        references: links.references,
+        produces: links.produces,
+    })
+}
+
+fn strip_markers(node: &mut Value) {
+    match node {
+        Value::Object(map) => {
+            map.retain(|key, _| !key.starts_with("x-weebo-"));
+            map.values_mut().for_each(strip_markers);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_markers),
+        _ => {}
+    }
 }
 
 fn read<T: DeserializeOwned>(
@@ -242,10 +334,22 @@ fn walk(
     }
     if let Some(marker) = node.get(PRODUCES) {
         let marker: ProducesMarker = read(PRODUCES, marker, path)?;
+        if marker.name.is_empty() && marker.template.is_none() {
+            return Err(LinkError {
+                marker: PRODUCES,
+                path: path.to_string(),
+                source: serde::de::Error::custom("neither a name field nor a template"),
+            });
+        }
+        let each = match marker.each {
+            Some(under) => format!("{path}.{under}"),
+            None => path.to_string(),
+        };
         out.produces.push(Production {
             kind: marker.kind,
-            each: path.to_string(),
+            each,
             name: marker.name,
+            template: marker.template,
             namespace: marker.namespace,
             key_names: own_keys.clone(),
             unless: marker.unless,
@@ -329,6 +433,7 @@ mod tests {
             kind: GroupKind::new("", "Secret"),
             each: each.to_string(),
             name: vec!["name".to_string()],
+            template: None,
             namespace: Some("namespace".to_string()),
             key_names: keys.iter().map(|k| k.to_string()).collect(),
             unless: Some(Unless {
@@ -389,12 +494,107 @@ mod tests {
         field: Vec<SecretTarget>,
     }
 
+    #[derive(JsonSchema)]
+    #[serde(rename_all = "camelCase")]
+    #[expect(dead_code, reason = "only its schema is used")]
+    struct Computed {
+        #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.example.weebo.io", "kind": "Issuer" }, "name": ["issuerUrl"], "template": "{/spec.instanceRef>spec.url}/o/{/spec.slug}/" }))]
+        oauth2: Option<Override>,
+    }
+
+    #[derive(JsonSchema)]
+    #[serde(rename_all = "camelCase")]
+    #[expect(dead_code, reason = "only its schema is used")]
+    struct Override {
+        issuer_url: Option<String>,
+    }
+
+    #[derive(JsonSchema)]
+    #[expect(dead_code, reason = "only its schema is used")]
+    struct Nameless {
+        #[schemars(extend("x-weebo-produces" = { "kind": { "kind": "Secret" } }))]
+        field: String,
+    }
+
+    #[test]
+    fn a_computed_name_with_an_override() {
+        let links = of::<Computed>(&roles()).unwrap();
+        assert_eq!(links.produces.len(), 1);
+        assert_eq!(links.produces[0].each, "oauth2");
+        assert_eq!(links.produces[0].name, vec!["issuerUrl".to_string()]);
+        assert_eq!(
+            links.produces[0].template.as_deref(),
+            Some("{/spec.instanceRef>spec.url}/o/{/spec.slug}/")
+        );
+        let err = of::<Nameless>(&roles()).unwrap_err();
+        assert_eq!((err.marker, err.path.as_str()), (PRODUCES, "field"));
+    }
+
     #[test]
     fn a_malformed_marker_names_its_field() {
         let err = of::<Bad>(&roles()).unwrap_err();
         assert_eq!((err.marker, err.path.as_str()), (MARKER, "field"));
         let err = of::<BadKeys>(&roles()).unwrap_err();
         assert_eq!((err.marker, err.path.as_str()), (KEYS, "field"));
+    }
+
+    /// A cluster, its access methods (one schematic kind referencing
+    /// another), and an upstream a free-form field produces.
+    #[derive(JsonSchema)]
+    #[serde(rename_all = "camelCase")]
+    #[expect(dead_code, reason = "only its schema is used")]
+    struct AccessMethodSpec {
+        /// The API server's URL.
+        url: String,
+        #[schemars(extend("x-weebo-link" = { "to": [{ "group": "schematic.example.weebo.io", "kind": "Cluster" }] }))]
+        cluster_ref: ObjectRef,
+    }
+
+    #[derive(JsonSchema)]
+    #[expect(dead_code, reason = "only its schema is used")]
+    struct WithUpstreams {
+        #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.example.weebo.io", "kind": "Upstream" }, "each": "upstreams[]", "name": ["."] }))]
+        config: serde_json::Value,
+    }
+
+    #[test]
+    fn a_schematic_kind_has_its_spec_schema_and_links_without_markers() {
+        let kind = schematic::<AccessMethodSpec>(
+            "schematic.example.weebo.io",
+            Scope::Namespaced,
+            &roles(),
+        )
+        .unwrap();
+        assert_eq!(
+            kind.references,
+            vec![link(
+                "spec.clusterRef",
+                &[("schematic.example.weebo.io", "Cluster")]
+            )]
+        );
+        assert!(kind.produces.is_empty());
+        assert_eq!(kind.schema["properties"]["url"]["type"], "string");
+        assert!(kind.schema.get("title").is_none());
+        assert!(!kind.schema.to_string().contains("x-weebo"));
+        let json = serde_json::to_value(&kind).unwrap();
+        assert_eq!(json["scope"], "Namespaced");
+    }
+
+    #[test]
+    fn each_produces_under_a_free_form_field() {
+        let links = of::<WithUpstreams>(&roles()).unwrap();
+        assert_eq!(
+            links.produces,
+            vec![Production {
+                kind: GroupKind::new("schematic.example.weebo.io", "Upstream"),
+                each: "config.upstreams[]".to_string(),
+                name: vec![".".to_string()],
+                template: None,
+                namespace: None,
+                key_names: vec![],
+                unless: None,
+            }]
+        );
     }
 
     /// What `CustomResourceExt::crd()` does with the schema: the markers

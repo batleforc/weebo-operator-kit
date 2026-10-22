@@ -237,6 +237,13 @@ function Toolbar({
   onClear: () => void;
 }) {
   const kinds = [...catalog.entries()].sort(([, a], [, b]) => a.kind.localeCompare(b.kind));
+  const option = ([k, e]: (typeof kinds)[number]) => (
+    <option key={k} value={k}>
+      {e.kind}
+      {groups.size > 1 ? ` (${e.group})` : ""}
+    </option>
+  );
+  const drawn = kinds.filter(([, e]) => e.schematic);
   const [kind, setKind] = useState(kinds[0]?.[0] ?? "");
   const [name, setName] = useState("");
   const [recipe, setRecipe] = useState(recipes[0]?.id ?? "");
@@ -262,12 +269,14 @@ function Toolbar({
               Kind
             </label>
             <select id={ids.kind} ref={kindSelect} className={inputClass} value={kind} onChange={(e) => setKind(e.target.value)}>
-              {kinds.map(([k, e]) => (
-                <option key={k} value={k}>
-                  {e.kind}
-                  {groups.size > 1 ? ` (${e.group})` : ""}
-                </option>
-              ))}
+              {drawn.length > 0 ? (
+                <>
+                  <optgroup label="Kubernetes kinds">{kinds.filter(([, e]) => !e.schematic).map(option)}</optgroup>
+                  <optgroup label="Schematic kinds (drawn, never applied)">{drawn.map(option)}</optgroup>
+                </>
+              ) : (
+                kinds.map(option)
+              )}
             </select>
           </div>
           <div className="flex flex-col gap-1">

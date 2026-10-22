@@ -40,6 +40,8 @@ export interface CrdIndexEntry {
   /** The storage version's; absent from a site generated before the IDE. */
   apiVersion?: string;
   served?: string[];
+  /** A kind the CRD IDE draws but Kubernetes never sees: not a CRD. */
+  schematic?: boolean;
 }
 
 // Fetched JSON is checked at the boundary on its top-level shape; the nested
@@ -64,7 +66,8 @@ export function isCrdIndex(v: unknown): v is CrdIndexEntry[] {
         typeof e.singular === "string" &&
         isScope(e.scope) &&
         (e.apiVersion === undefined || typeof e.apiVersion === "string") &&
-        (e.served === undefined || (Array.isArray(e.served) && e.served.every((s) => typeof s === "string"))),
+        (e.served === undefined || (Array.isArray(e.served) && e.served.every((s) => typeof s === "string"))) &&
+        (e.schematic === undefined || typeof e.schematic === "boolean"),
     )
   );
 }

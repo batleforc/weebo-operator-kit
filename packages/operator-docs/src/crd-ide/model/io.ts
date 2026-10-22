@@ -4,7 +4,7 @@
 import * as yaml from "js-yaml";
 import { pruneValue } from "../../crd-form/schema-utils";
 import { isRecord } from "../../crd-form/types";
-import { gkKey, parseApiVersion } from "./catalog";
+import { gkKey, isSchematic, parseApiVersion } from "./catalog";
 import { buildGraph, dependencies } from "./graph";
 import { addExternal, addResource, groupKindOf, isNamespaced, nameOf, namespaceOf } from "./project";
 import type { Catalog, Doc, Issue, Project, Resource, ResourceMode } from "./types";
@@ -152,15 +152,35 @@ export function exportDoc(project: Project, catalog: Catalog, resource: Resource
 
 const dump = (doc: Doc) => yaml.dump(doc, { noRefs: true, lineWidth: 100 });
 
-export function exportYaml(project: Project, catalog: Catalog): string {
-  return dependencyOrder(project, catalog)
-    .map((r) => dump(exportDoc(project, catalog, r)))
-    .join("---\n");
+const schematic = (catalog: Catalog, r: Resource) => {
+  const gk = groupKindOf(r.doc);
+  return gk !== undefined && isSchematic(catalog, gk);
+};
+
+/** The manifests: every resource but the schematic ones, in dependency order. */
+const manifests = (project: Project, catalog: Catalog) => dependencyOrder(project, catalog).filter((r) => !schematic(catalog, r));
+
+/**
+ * Both outputs from one ordering: the manifests, and the schematic
+ * resources — nothing to apply, the drawing, imported back as any YAML
+ * (empty when the project has none).
+ */
+export function exportParts(project: Project, catalog: Catalog): { manifests: string; schematic: string } {
+  const ordered = dependencyOrder(project, catalog);
+  const yamlOf = (resources: Resource[]) => resources.map((r) => dump(exportDoc(project, catalog, r))).join("---\n");
+  return {
+    manifests: yamlOf(ordered.filter((r) => !schematic(catalog, r))),
+    schematic: yamlOf(ordered.filter((r) => schematic(catalog, r))),
+  };
 }
 
-/** One file per resource, numbered in dependency order: `01-secret-token.yaml`. */
+export const exportYaml = (project: Project, catalog: Catalog): string => exportParts(project, catalog).manifests;
+
+export const exportSchematic = (project: Project, catalog: Catalog): string => exportParts(project, catalog).schematic;
+
+/** One file per manifest, numbered in dependency order: `01-secret-token.yaml`. */
 export function exportFiles(project: Project, catalog: Catalog): { name: string; content: string }[] {
-  const ordered = dependencyOrder(project, catalog);
+  const ordered = manifests(project, catalog);
   const width = String(ordered.length).length < 2 ? 2 : String(ordered.length).length;
   return ordered.map((r, i) => {
     const gk = groupKindOf(r.doc);

@@ -16,4 +16,10 @@ of kinds, and the versions they come from, is
 An operator's references show once it is released on a kit with
 `links.json` (v0.23 on); until then its kinds are listed without them.
 
+Some kinds are **schematic**: an operator declares them for the drawing
+alone (a cluster and the ways to reach it, the upstreams a registry
+mirrors). They are edited and linked like the others, some appear on their
+own from a resource's fields, and they are never applied: they are left
+out of the manifests and downloaded apart as `schematic.yaml`.
+
 <CrdIde recipes={RECIPES} />
