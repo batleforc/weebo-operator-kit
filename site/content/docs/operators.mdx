@@ -6,16 +6,16 @@ description: The weebo operators built on the kit, and ProxyAuthK8S, with the pa
 Kit versions below are those pinned on each repository's `main` branch
 on 2026-10-22 (the `tag` of its `weebo-kit-*` dependencies, or its
 Taskfile's `KIT_TAG`), next to the project's latest release. The latest
-kit release is v0.23.1.
+kit release is v0.24.0.
 
 | Project | Manages | Release | Kit release | Docs |
 | ------- | ------- | ------- | ----------- | ---- |
-| [weebo-forgejo](https://github.com/batleforc/weebo-forgejo) | Forgejo v16+ | v0.6.0 | v0.23.1 | [site](https://batleforc.github.io/weebo-forgejo/) |
-| [weebo-authentik](https://github.com/batleforc/weebo-authentik) | Authentik | v0.20.1 | v0.23.1 | [site](https://batleforc.github.io/weebo-authentik/) |
-| [weebo-batlehub](https://github.com/batleforc/weebo-batlehub) | BatleHub registry proxy-caches | v0.4.0 | v0.23.1 | [site](https://batleforc.github.io/weebo-batlehub/) |
-| [weebo-angos](https://github.com/batleforc/weebo-angos) | Angos OCI registries | v0.2.0 | v0.23.1 | [site](https://batleforc.github.io/weebo-angos/) |
-| [weebo-stalwart](https://github.com/batleforc/weebo-stalwart) | a Stalwart mail server | v0.2.0 | v0.23.1 | [site](https://batleforc.github.io/weebo-stalwart/) |
-| [ProxyAuthK8S](https://github.com/batleforc/ProxyAuthK8S) | an authenticating proxy in front of Kubernetes API servers | v0.2.1 | v0.20.0 (tasks, docs) | [site](https://batleforc.github.io/ProxyAuthK8S/) (French) |
+| [weebo-forgejo](https://github.com/batleforc/weebo-forgejo) | Forgejo v16+ | v0.7.0 | v0.24.0 | [site](https://batleforc.github.io/weebo-forgejo/) |
+| [weebo-authentik](https://github.com/batleforc/weebo-authentik) | Authentik | v0.21.0 | v0.24.0 | [site](https://batleforc.github.io/weebo-authentik/) |
+| [weebo-batlehub](https://github.com/batleforc/weebo-batlehub) | BatleHub registry proxy-caches | v0.5.0 | v0.24.0 | [site](https://batleforc.github.io/weebo-batlehub/) |
+| [weebo-angos](https://github.com/batleforc/weebo-angos) | Angos OCI registries | v0.3.0 | v0.24.0 | [site](https://batleforc.github.io/weebo-angos/) |
+| [weebo-stalwart](https://github.com/batleforc/weebo-stalwart) | a Stalwart mail server | v0.3.0 | v0.24.0 | [site](https://batleforc.github.io/weebo-stalwart/) |
+| [ProxyAuthK8S](https://github.com/batleforc/ProxyAuthK8S) | an authenticating proxy in front of Kubernetes API servers | v0.3.0 | v0.24.0 (tasks, docs, `weebo-kit-api` in crdgen) | [site](https://batleforc.github.io/ProxyAuthK8S/) (French) |
 
 ## The weebo operators
 
@@ -90,8 +90,11 @@ controller, users log in with OIDC from a web UI or the
 It is not a template-generated operator, and takes only part of the kit
 (its RFC 0005, "adopt weebo-operator-kit"):
 
-- **`@weebo/operator-docs`** for its documentation site (v0.20.0
-  tarball, in a pnpm workspace: `NPM_CLIENT: pnpm`);
+- **`@weebo/operator-docs`** for its documentation site and its CRD IDE
+  page (in a pnpm workspace: `NPM_CLIENT: pnpm`);
+- **`weebo-kit-api`** in its `crdgen` only, for the IDE's `links.json`:
+  the clusters behind its proxies (`KubeCluster`), the ways to reach them
+  (`AccessMethod`) and the OIDC issuers they trust;
 - the shared **`tasks/rust.yaml`** and **`tasks/repo.yaml`**, pinned by
   its Taskfile's `KIT_TAG` (no kit crate in `Cargo.toml` to read the tag
   from) and moved by `task kit:sync`.

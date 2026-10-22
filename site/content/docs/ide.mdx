@@ -6,7 +6,8 @@ full: true
 
 import { RECIPES } from '@/lib/recipes';
 
-Every kind of every weebo operator, plus External Secrets and cert-manager,
+Every kind of every weebo operator and of ProxyAuthK8S, plus External
+Secrets and cert-manager,
 in one project: add resources, point each reference field at another
 resource (or at the Secret one of them makes), and export the whole set as
 YAML. Start from a recipe to see how the operators fit together. The list
@@ -20,6 +21,9 @@ Some kinds are **schematic**: an operator declares them for the drawing
 alone (a cluster and the ways to reach it, the upstreams a registry
 mirrors). They are edited and linked like the others, some appear on their
 own from a resource's fields, and they are never applied: they are left
-out of the manifests and downloaded apart as `schematic.yaml`.
+out of the manifests and downloaded apart as `schematic.yaml`. The kit's
+shared ones are one node whichever operators name them: the OIDC issuer
+an Authentik application computes is the one a `ProxyKubeApi` or an
+Angos instance trusts.
 
 <CrdIde recipes={RECIPES} />
