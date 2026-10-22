@@ -2,6 +2,16 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.24.0](https://github.com/batleforc/weebo-operator-kit/compare/7f2862191f17de91290c4e860748e88af8488c6a..v0.24.0) - 2026-10-22
+#### Features
+- (**operator-docs**) schematic kinds, drawn in the CRD IDE and never applied (#30) - ([38d1cc4](https://github.com/batleforc/weebo-operator-kit/commit/38d1cc4ecf5d01f00e0d6152f445fc00ae895aa0)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+#### Documentation
+- (**site**) operators page on kit v0.23.1 with each project's release - ([8331f8e](https://github.com/batleforc/weebo-operator-kit/commit/8331f8e4920f3b8bfad4191e98320558a7f575de)) - Max Batleforc, Claude Opus 5.5 (1M context)
+#### Miscellaneous Chores
+- (**site**) pin the operators released on kit v0.23.1 in the CRD catalog (#29) - ([7f28621](https://github.com/batleforc/weebo-operator-kit/commit/7f2862191f17de91290c4e860748e88af8488c6a)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.23.1](https://github.com/batleforc/weebo-operator-kit/compare/d78bfcf2724396db84ec0ea125bcb869eed13869..v0.23.1) - 2026-10-21
 #### Bug Fixes
 - (**ci**) release and publish jobs authenticate mise (#28) - ([d78bfcf](https://github.com/batleforc/weebo-operator-kit/commit/d78bfcf2724396db84ec0ea125bcb869eed13869)) - Maxime, Claude Opus 5.5 (1M context)
