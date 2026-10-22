@@ -484,6 +484,11 @@ body {
   color: var(--ink-dim);
 }
 
+.crd-ide-graph .react-flow__node.crd-ide-node-schematic {
+  border-style: dotted;
+  background: var(--ground);
+}
+
 .crd-ide-graph .react-flow__edge-path {
   stroke: var(--rule-strong);
 }

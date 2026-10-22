@@ -34,8 +34,10 @@ export async function loadCatalog(sources: CatalogSource[], signal: AbortSignal)
       const kinds = index.map((entry): KindEntry => {
         const parsed = entry.apiVersion ? parseApiVersion(entry.apiVersion) : undefined;
         if (!entry.apiVersion || !parsed) throw new Error(`${base}/index.json predates the IDE: regenerate it with weebo-crd-docs`);
-        files.set(gkKey({ group: parsed.group, kind: entry.kind }), `${base}/${entry.singular}.schema.json`);
-        return { kind: entry.kind, apiVersion: entry.apiVersion, scope: entry.scope, served: entry.served };
+        const key = gkKey({ group: parsed.group, kind: entry.kind });
+        // The first source of a shared schematic kind, as the catalog keeps.
+        if (!files.has(key)) files.set(key, `${base}/${entry.singular}.schema.json`);
+        return { kind: entry.kind, apiVersion: entry.apiVersion, scope: entry.scope, served: entry.served, schematic: entry.schematic };
       });
       return { kinds, links };
     }),

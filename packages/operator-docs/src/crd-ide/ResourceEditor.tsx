@@ -81,6 +81,11 @@ export function ResourceEditor({ project, catalog, resource, choices, selection,
       <h2 id={titleId} ref={headingRef} tabIndex={-1} className={headingClass}>
         {title}
       </h2>
+      {entry.schematic ? (
+        <p className="text-[12px] text-fd-muted-foreground">
+          A schematic kind: drawn and linked here, never applied. Exported in <code>schematic.yaml</code>, not with the manifests.
+        </p>
+      ) : null}
       {choices.length > 0 ? <ChoicePicker groups={choices} selection={selection} onChange={choose} /> : null}
       <p className="text-[12px] text-fd-muted-foreground">
         <span className="text-fd-primary">*</span> marks a required field.

@@ -3,7 +3,8 @@
 import { useId, useRef, useState } from "react";
 import { candidates, emptySlots, type Graph, type GraphNode, type Slot } from "./model/graph";
 import { formatPath } from "./model/paths";
-import { nameOf } from "./model/project";
+import { isSchematic } from "./model/catalog";
+import { groupKindOf, nameOf } from "./model/project";
 import type { Catalog, GroupKind, Issue, Project } from "./model/types";
 import { headingClass, inputClass, labelClass, panelClass } from "./ui";
 
@@ -71,6 +72,9 @@ export function ResourceList(props: ResourceListProps) {
                   >
                     {label}
                     {resource.mode !== "editable" ? <span className="text-fd-muted-foreground"> (read-only)</span> : null}
+                    {isSchematic(catalog, groupKindOf(resource.doc) ?? { group: "", kind: "" }) ? (
+                      <span className="text-fd-muted-foreground"> (schematic)</span>
+                    ) : null}
                   </button>
                   {errors > 0 ? (
                     <span className="text-[12px] text-fd-primary">
@@ -140,6 +144,7 @@ function SlotPicker({
           <option key={n.id} value={n.id}>
             {nodeLabel(n)}
             {n.origin === "produced" ? " (made)" : n.origin === "external" ? " (external)" : ""}
+            {n.schematic ? " (schematic)" : ""}
           </option>
         ))}
       </select>

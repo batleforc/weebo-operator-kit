@@ -6,7 +6,9 @@ import type { Segment } from "./types";
 /** A link path's steps: a property, `[]` (every item) or `*` (every map value). */
 type Step = { prop: string } | { each: "item" | "value" };
 
+/** `.` is the value itself: a production's item that is a plain string. */
 export function parseLinkPath(path: string): Step[] {
+  if (path === ".") return [];
   const steps: Step[] = [];
   for (const part of path.split(".")) {
     const match = /^([^[\]]+)((?:\[\])*)$/.exec(part);

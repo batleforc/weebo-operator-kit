@@ -3,7 +3,7 @@
 
 import { findMissingRequired } from "../../crd-form/schema-utils";
 import { isRecord, type FieldSchema } from "../../crd-form/types";
-import { gkKey } from "./catalog";
+import { gkKey, isSchematic } from "./catalog";
 import { buildGraph, type Graph, type GraphNode, type Slot } from "./graph";
 import { formatPath } from "./paths";
 import { groupKindOf, isNamespaced, nameOf, namespaceOf } from "./project";
@@ -88,15 +88,17 @@ function matches(pattern: string, value: string): boolean {
 function checkResource(project: Project, catalog: Catalog, resource: Resource): Issue[] {
   const issues: Omit<Issue, "resource">[] = [];
   const name = nameOf(resource.doc);
+  const gk = groupKindOf(resource.doc);
+  // A schematic object never reaches the API server: any name (a URL) will do.
+  const strict = !(gk && isSchematic(catalog, gk));
   if (isHole(name)) issues.push({ severity: "error", code: "hole", message: `metadata.name: to fill in (${name})`, path: "metadata.name" });
-  else if (!NAME.test(name) || name.length > 253) {
+  else if (strict ? !NAME.test(name) || name.length > 253 : !name) {
     issues.push({ severity: "error", code: "invalid-name", message: `metadata.name: ${JSON.stringify(name)} is not a valid name`, path: "metadata.name" });
   }
   const namespace = namespaceOf(project, catalog, resource);
   if (namespace !== undefined && !NAME.test(namespace)) {
     issues.push({ severity: "error", code: "missing-namespace", message: `metadata.namespace: ${JSON.stringify(namespace)} is not a valid namespace`, path: "metadata.namespace" });
   }
-  const gk = groupKindOf(resource.doc);
   const schema = gk && catalog.get(gkKey(gk))?.schema;
   if (resource.mode === "editable" && schema) {
     const spec = resource.doc.spec ?? {};

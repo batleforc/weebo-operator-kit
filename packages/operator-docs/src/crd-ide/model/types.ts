@@ -18,14 +18,20 @@ export interface Reference {
 
 /**
  * Objects a resource makes: one per value `each` reaches (default: the
- * resource itself), named by the first `name` field set. Paths other than
- * `each` are relative to each item; an item whose `unless.path` holds
- * `unless.equals` makes nothing.
+ * resource itself), named by the first `name` field set (`.`: the item
+ * itself). Paths other than `each` are relative to each item; an item whose
+ * `unless.path` holds `unless.equals` makes nothing.
  */
 export interface Production {
   kind: GroupKind;
   each?: string;
   name: string[];
+  /**
+   * The name when no `name` field is set: `{path}` of the item, `{/path}`
+   * of the resource, `{/ref>path}` of the resource its reference field
+   * `ref` designates.
+   */
+  template?: string;
   /** The field naming its namespace; default the resource's. */
   namespace?: string;
   /** The field listing its keys. */
@@ -55,6 +61,11 @@ export interface CatalogKind {
   scope: "Namespaced" | "Cluster";
   /** Every served version. */
   served: string[];
+  /**
+   * A kind the IDE draws but Kubernetes never sees (a cluster, an upstream):
+   * edited and linked as any, exported apart from the manifests.
+   */
+  schematic: boolean;
   links: KindLinks;
   /**
    * Loaded the first time a resource of the kind needs it (`withSchemas`):
@@ -70,6 +81,7 @@ export interface KindEntry {
   apiVersion: string;
   scope: "Namespaced" | "Cluster";
   served?: string[] | undefined;
+  schematic?: boolean | undefined;
 }
 
 /** The kinds a project may hold, by `gkKey`. */

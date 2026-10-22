@@ -1,8 +1,10 @@
 //! Writes `deploy/crd/<kind, lowercase>.yaml`, one file per CRD, from the
 //! `api` types (`CustomResourceExt::crd()`), and `deploy/crd/links.json`,
 //! the reference fields and produced objects of each kind
-//! (`weebo_kit_api::links`) for the docs' CRD IDE. Run by `task recu`; the result is committed and installed
-//! by the chart and the envtest tests.
+//! (`weebo_kit_api::links`) for the docs' CRD IDE, with the schematic
+//! kinds the IDE draws but Kubernetes never sees (`links::schematic`). Run
+//! by `task recu`; the result is committed and installed by the chart and
+//! the envtest tests.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -12,7 +14,7 @@ use clap::Parser;
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::CustomResourceExt;
 use schemars::JsonSchema;
-use weebo_kit_api::links::{self, GroupKind, KindLinks, Roles};
+use weebo_kit_api::links::{self, GroupKind, KindLinks, Roles, Schematic};
 
 #[derive(Parser)]
 struct Args {
@@ -31,7 +33,12 @@ fn main() -> anyhow::Result<()> {
     write::<api::Instance>(&args.out, &roles, &mut kinds)?;
     write::<api::LocalInstance>(&args.out, &roles, &mut kinds)?;
     write::<api::Object>(&args.out, &roles, &mut kinds)?;
-    let links = serde_json::json!({ "version": 1, "kinds": kinds });
+    // The kinds of the IDE only: the kit's shared ones (an OIDC issuer, a
+    // registry mirrored…), then this operator's own, keyed by name, its
+    // `spec` a Rust type with the same markers as a CRD's, e.g.
+    // `schematic.insert("Cluster".into(), links::schematic::<ClusterSpec>("schematic.example.weebo.io", links::Scope::Cluster, &roles)?);`
+    let schematic: BTreeMap<String, Schematic> = weebo_kit_api::schematic::shared(&roles)?;
+    let links = serde_json::json!({ "version": 1, "kinds": kinds, "schematic": schematic });
     fs::write(
         args.out.join("links.json"),
         serde_json::to_string_pretty(&links)? + "\n",

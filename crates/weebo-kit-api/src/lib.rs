@@ -10,6 +10,7 @@ pub mod annotations;
 pub mod instance;
 pub mod links;
 pub mod refs;
+pub mod schematic;
 pub mod secret;
 pub mod status;
 pub mod tls;

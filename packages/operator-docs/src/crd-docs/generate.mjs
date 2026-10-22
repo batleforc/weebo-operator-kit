@@ -9,7 +9,10 @@
 //     and <schemaDir>/index.json — the kind list `<CrdBuilder />` offers;
 //   - <schemaDir>/links.json — which fields reference another object and
 //     which objects a kind produces, for the CRD IDE: the crdgen's
-//     <crdDir>/links.json, merged with the config's `links`.
+//     <crdDir>/links.json, merged with the config's `links`;
+//   - the schematic kinds of that links.json (kinds the IDE draws but
+//     Kubernetes never sees): a schema each and an index.json entry marked
+//     `schematic`, no page.
 // Both output directories are owned by the generator: their previous
 // .mdx/.json files are removed first, so a deleted CRD leaves no page behind.
 //
@@ -77,8 +80,11 @@ import { generateReference } from "../reference/generate.mjs";
  * `metadata.name` as a last resort), its namespace's field (default: the
  * resource's), and its keys: a field listing them (`keys`) or a fixed list
  * (`keyNames`). `unless` skips an item whose field holds a value. Paths
- * other than `each` are relative to each item.
- * @typedef {{ kind: GroupKind, each?: string, name: string[], namespace?: string, keys?: string, keyNames?: string[], unless?: { path: string, equals: string } }} Production
+ * other than `each` are relative to each item. `template` names it when no
+ * `name` field is set: `{path}` relative to the item, `{/path}` from the
+ * resource's root, `{/ref>path}` read on the resource the reference field
+ * `ref` designates.
+ * @typedef {{ kind: GroupKind, each?: string, name: string[], template?: string, namespace?: string, keys?: string, keyNames?: string[], unless?: { path: string, equals: string } }} Production
  */
 
 /**
@@ -380,13 +386,17 @@ function checkExample(kind, example, specSchema) {
 
 const METADATA_PATHS = new Set(["metadata.name", "metadata.namespace"]);
 
+// A free-form object: any path under it may hold a value.
+const isOpen = (node) => node["x-kubernetes-preserve-unknown-fields"] === true || (node.type === "object" && !node.properties && node.additionalProperties === undefined);
+
 // Whether `fieldPath` (`spec.a[].b`, `spec.m.*`) is a field of `schema`, the
 // CRD's openAPIV3Schema. `metadata` is not in a generated schema: its name
-// and namespace are always there.
+// and namespace are always there. Under a free-form object, any path is.
 function hasPath(schema, fieldPath) {
   if (METADATA_PATHS.has(fieldPath)) return true;
   let nodes = [schema];
   for (const segment of fieldPath.split(".")) {
+    if (nodes.flatMap(variants).some(isOpen)) return true;
     const [, name, arrays] = /^([^[\]]+)((?:\[\])*)$/.exec(segment) ?? [];
     if (!name) return false;
     nodes = nodes
@@ -437,21 +447,48 @@ export function buildLinks(schemas, generated, configured) {
     if (!Array.isArray(ref.to) || !ref.to.length) throw new Error(`${where}: ${kind} ${ref.path} references no kind`);
     links.references.push({ path: ref.path, to: ref.to.map((gk) => checkGroupKind(`${where}: ${kind} ${ref.path}`, gk)) });
   };
+  // Every placeholder a field: of the item, of the resource, or of a kind
+  // the reference (one of the resource's) designates.
+  const checkTemplate = (where, kind, p, within) => {
+    const holes = typeof p.template === "string" ? [...p.template.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1]) : [];
+    if (!holes.length) throw new Error(`${where}: ${kind} template ${JSON.stringify(p.template)} has no {field}`);
+    for (const hole of holes) {
+      if (!hole.startsWith("/")) {
+        checkPath(where, kind, within(hole));
+        continue;
+      }
+      const [ref, field, ...rest] = hole.slice(1).split(">");
+      if (field === undefined) {
+        checkPath(where, kind, ref);
+        continue;
+      }
+      const link = kinds[kind]?.references.find((r) => r.path === ref);
+      if (rest.length || !link) throw new Error(`${where}: ${kind} template {${hole}}: ${ref} is not one of its references`);
+      const targets = link.to.map((gk) => schemas.get(gk.kind)).filter(Boolean);
+      if (targets.length && !targets.some((schema) => hasPath(schema, field))) {
+        throw new Error(`${where}: ${kind} template {${hole}}: no ${link.to.map((gk) => gk.kind).join(" or ")} has a field ${field}`);
+      }
+    }
+  };
   const addProduction = (where, kind, p) => {
     const links = entry(where, kind);
-    if (!Array.isArray(p?.name) || !p.name.length) throw new Error(`${where}: ${kind} produces an object with no name field`);
+    if (!Array.isArray(p?.name) || (!p.name.length && p.template === undefined)) throw new Error(`${where}: ${kind} produces an object with no name field`);
     if (p.each !== undefined) checkPath(where, kind, p.each);
-    const within = (rel) => (p.each ? `${p.each}.${rel}` : rel);
+    // `.`: the item itself (a plain string), only with `each`.
+    if (p.name.includes(".") && p.each === undefined) throw new Error(`${where}: ${kind} names an object by "." without each`);
+    const within = (rel) => (rel === "." ? p.each : p.each ? `${p.each}.${rel}` : rel);
     const relative = [...p.name, p.namespace, p.keys, p.unless?.path].filter((v) => v !== undefined);
     for (const rel of relative) checkPath(where, kind, typeof rel === "string" ? within(rel) : rel);
     if (p.keyNames !== undefined && !(Array.isArray(p.keyNames) && p.keyNames.every((k) => typeof k === "string"))) {
       throw new Error(`${where}: ${kind} keyNames is not a list of names`);
     }
     if (p.unless !== undefined && typeof p.unless.equals !== "string") throw new Error(`${where}: ${kind} unless.equals is not a string`);
+    if (p.template !== undefined) checkTemplate(where, kind, p, within);
     links.produces.push({
       kind: checkGroupKind(`${where}: ${kind}`, p.kind),
       ...(p.each !== undefined ? { each: p.each } : {}),
       name: p.name,
+      ...(p.template !== undefined ? { template: p.template } : {}),
       ...(p.namespace !== undefined ? { namespace: p.namespace } : {}),
       ...(p.keys !== undefined ? { keys: p.keys } : {}),
       ...(p.keyNames?.length ? { keyNames: p.keyNames } : {}),
@@ -469,6 +506,11 @@ export function buildLinks(schemas, generated, configured) {
       for (const ref of references) addReference(where, kind, ref);
       for (const p of produces) addProduction(where, kind, p);
     }
+    for (const [kind, { references = [], produces = [] }] of Object.entries(generated.schematic ?? {})) {
+      entry(`${where} schematic`, kind);
+      for (const ref of references) addReference(`${where} schematic`, kind, ref);
+      for (const p of produces) addProduction(`${where} schematic`, kind, p);
+    }
   }
   for (const [kind, { references = [], produces = [] }] of Object.entries(configured)) {
     const where = "config links";
@@ -477,6 +519,32 @@ export function buildLinks(schemas, generated, configured) {
   }
   for (const links of Object.values(kinds)) links.references.sort((a, b) => a.path.localeCompare(b.path));
   return { version: 1, kinds: Object.fromEntries(Object.entries(kinds).sort(([a], [b]) => a.localeCompare(b))) };
+}
+
+/**
+ * The schematic kinds of the crdgen's `links.json` (`schematic: { <Kind>:
+ * { group, scope, schema, references, produces } }`): kinds the CRD IDE
+ * draws and links but never exports with the manifests, all in version
+ * `v1` of their group. A name already a CRD's is refused.
+ *
+ * @param {unknown} generated the parsed crdgen file, or undefined
+ * @param {Set<string>} crdKinds
+ * @returns {{ kind: string, singular: string, group: string, scope: "Namespaced" | "Cluster", schema: Record<string, unknown> }[]}
+ */
+export function readSchematic(generated, crdKinds) {
+  const kinds = generated?.schematic ?? {};
+  if (typeof kinds !== "object" || Array.isArray(kinds)) throw new Error("links.json: schematic is not a map of kinds");
+  return Object.entries(kinds)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([kind, entry]) => {
+      const where = `links.json schematic ${kind}`;
+      const { group } = checkGroupKind(where, { group: entry?.group, kind });
+      if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$/.test(group)) throw new Error(`${where}: invalid group ${JSON.stringify(group)}`);
+      if (entry.scope !== "Namespaced" && entry.scope !== "Cluster") throw new Error(`${where}: scope is Namespaced or Cluster`);
+      if (typeof entry.schema !== "object" || entry.schema === null) throw new Error(`${where}: no schema`);
+      if (crdKinds.has(kind)) throw new Error(`${where}: already a CRD's kind`);
+      return { kind, singular: kind.toLowerCase(), group, scope: entry.scope, schema: entry.schema };
+    });
 }
 
 const scopeLabel = (scope) => (scope === "Namespaced" ? "Namespaced" : "Cluster");
@@ -620,20 +688,36 @@ ${rows.map((r) => `| ${r} |`).join("\n")}
       `${JSON.stringify({ title: "CRD reference", pages: ["index", ...index.map((k) => k.singular)] }, null, 2)}\n`,
     ]);
   }
+  const linksFile = path.join(crdDir, "links.json");
+  const generatedLinks = fs.existsSync(linksFile) ? JSON.parse(fs.readFileSync(linksFile, "utf8")) : undefined;
+  const schematic = readSchematic(generatedLinks, new Set(schemas.keys()));
+  for (const s of schematic) {
+    if (index.some((k) => k.singular === s.singular)) throw new Error(`links.json schematic ${s.kind}: ${s.singular} is already a CRD's file`);
+    // Its links' paths start at the object's root, as a CRD's.
+    schemas.set(s.kind, { type: "object", properties: { spec: s.schema } });
+    const apiVersion = `${s.group}/v1`;
+    writes.push([
+      path.join(schemaOutDir, `${s.singular}.schema.json`),
+      `${JSON.stringify({ apiVersion, kind: s.kind, scope: s.scope, served: ["v1"], schematic: true, ...s.schema }, null, 2)}\n`,
+    ]);
+  }
+
   // The kind picker of `<CrdBuilder />` and the IDE's catalog read this:
-  // every CRD, without a second data source to keep in sync. The IDE loads a
-  // kind's schema only once a resource of that kind needs it.
+  // every CRD, without a second data source to keep in sync, then the
+  // schematic kinds (the builder leaves them out). The IDE loads a kind's
+  // schema only once a resource of that kind needs it.
   writes.push([
     path.join(schemaOutDir, "index.json"),
     `${JSON.stringify(
-      index.map(({ kind, singular, scope, apiVersion, served }) => ({ kind, singular, scope, apiVersion, served })),
+      [
+        ...index.map(({ kind, singular, scope, apiVersion, served }) => ({ kind, singular, scope, apiVersion, served })),
+        ...schematic.map(({ kind, singular, scope, group }) => ({ kind, singular, scope, apiVersion: `${group}/v1`, served: ["v1"], schematic: true })),
+      ],
       null,
       2,
     )}\n`,
   ]);
 
-  const linksFile = path.join(crdDir, "links.json");
-  const generatedLinks = fs.existsSync(linksFile) ? JSON.parse(fs.readFileSync(linksFile, "utf8")) : undefined;
   const links = buildLinks(schemas, generatedLinks, config.links ?? {});
   writes.push([path.join(schemaOutDir, "links.json"), `${JSON.stringify(links, null, 2)}\n`]);
 

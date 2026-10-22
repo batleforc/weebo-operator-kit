@@ -3,7 +3,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { DynamicCodeBlock } from "fumadocs-ui/components/dynamic-codeblock.core";
 import { yamlHighlighter, yamlPreviewTheme } from "../crd-form/yaml-theme";
-import { exportFiles, exportYaml } from "./model/io";
+import { exportFiles, exportParts } from "./model/io";
 import { zip } from "./model/zip";
 import type { Catalog, Issue, Project } from "./model/types";
 import { download, headingClass, panelClass } from "./ui";
@@ -25,7 +25,7 @@ export function OutputPanel({
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
-  const text = useMemo(() => exportYaml(project, catalog), [project, catalog]);
+  const { manifests: text, schematic: drawing } = useMemo(() => exportParts(project, catalog), [project, catalog]);
   // The highlighted preview waits for typing to pause; copy and download use `text`.
   const preview = useDeferredValue(text);
   const errors = issues.filter((i) => i.severity === "error").length;
@@ -45,7 +45,7 @@ export function OutputPanel({
         () => show("failed"),
       );
   };
-  const empty = project.resources.length === 0;
+  const empty = text === "";
 
   return (
     <section aria-label="Issues and manifests" className={`${panelClass} lg:sticky lg:top-20 lg:self-start`}>
@@ -96,6 +96,19 @@ export function OutputPanel({
           </button>
         </div>
       </div>
+      {drawing ? (
+        <p className="flex flex-wrap items-center gap-2 text-[12px] text-fd-muted-foreground">
+          Schematic objects are drawn, never applied: they are left out of the manifests.
+          <button
+            type="button"
+            className="ctl"
+            aria-label="Download schematic.yaml, the schematic objects to import back"
+            onClick={() => download("schematic.yaml", drawing, "text/yaml")}
+          >
+            schematic.yaml
+          </button>
+        </p>
+      ) : null}
       <span role="status" className="sr-only">
         {copyState === "copied" ? "Manifests copied" : copyState === "failed" ? "Could not copy the manifests" : ""}
       </span>

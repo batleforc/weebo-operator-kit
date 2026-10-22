@@ -7,6 +7,7 @@ import {
   buildCatalog,
   buildGraph,
   candidates,
+  canonicalName,
   crc32,
   dependencyOrder,
   emptySlots,
@@ -16,12 +17,14 @@ import {
   emptyProject,
   expand,
   exportFiles,
+  exportSchematic,
   exportYaml,
   formatPath,
   getAt,
   importYaml,
   isHole,
   isLinksFile,
+  isSchematic,
   layout,
   nameOf,
   newDoc,
@@ -687,4 +690,193 @@ metadata:
   annotations: { kubectl.kubernetes.io/last-applied-configuration: "{}" }
 `).project;
   assert.deepEqual(bare.resources[0].doc.metadata, { name: "o" });
+});
+
+// Schematic kinds: a Cluster and its access methods drawn by hand, the
+// upstreams a registry's free-form config names.
+const S = "schematic.example.weebo.io";
+const cluster = { group: S, kind: "Cluster" };
+const upstream = { group: S, kind: "Upstream" };
+const schematicSchemas = [
+  { apiVersion: `${S}/v1`, kind: "Cluster", scope: "Cluster", served: ["v1"], schematic: true, type: "object", properties: { apiServer: str } },
+  {
+    apiVersion: `${S}/v1`,
+    kind: "AccessMethod",
+    scope: "Namespaced",
+    served: ["v1"],
+    schematic: true,
+    type: "object",
+    required: ["type"],
+    properties: { type: { type: "string", enum: ["oidc", "token"] }, clusterRef: { type: "object", properties: { name: str } } },
+  },
+  { apiVersion: `${S}/v1`, kind: "Upstream", scope: "Cluster", served: ["v1"], schematic: true, type: "object", properties: { auth: str } },
+];
+const schematicCatalog = buildCatalog([
+  {
+    kinds: schemas,
+    schemas,
+    links: {
+      ...links,
+      kinds: {
+        ...links.kinds,
+        ExampleObject: {
+          references: links.kinds.ExampleObject.references,
+          produces: [{ kind: upstream, each: "spec.extra.upstreams[]", name: ["."] }],
+        },
+      },
+    },
+  },
+  {
+    kinds: schematicSchemas,
+    schemas: schematicSchemas,
+    links: { version: 1, kinds: { AccessMethod: { references: [{ path: "spec.clusterRef", to: [cluster] }], produces: [] } } },
+  },
+]);
+const DRAWING = `
+apiVersion: ${G}/v1alpha1
+kind: ExampleObject
+metadata: { name: npm }
+spec:
+  extra: { upstreams: ["https://registry.npmjs.org", "https://mirror.example.com"] }
+---
+apiVersion: ${G}/v1alpha1
+kind: ExampleObject
+metadata: { name: npm-proxy }
+spec:
+  extra: { upstreams: ["https://registry.npmjs.org"] }
+---
+apiVersion: ${S}/v1
+kind: Upstream
+metadata: { name: "https://mirror.example.com" }
+spec: { auth: token }
+---
+apiVersion: ${S}/v1
+kind: Cluster
+metadata: { name: prod }
+spec: { apiServer: "https://prod:6443" }
+---
+apiVersion: ${S}/v1
+kind: AccessMethod
+metadata: { name: sso }
+spec: { type: oidc, clusterRef: { name: prod } }
+`;
+
+test("schematic: kinds of the catalog, edited and linked as any, names free", () => {
+  assert.equal(isSchematic(schematicCatalog, cluster), true);
+  assert.equal(isSchematic(schematicCatalog, secret), false);
+  assert.deepEqual(parseLinkPath("."), []);
+  assert.deepEqual(expand("x", "."), [{ path: [], value: "x" }]);
+  const { project, issues } = importYaml(emptyProject("team-a"), schematicCatalog, DRAWING);
+  assert.deepEqual(issues, []);
+  assert.ok(project.resources.every((r) => r.mode === "editable"));
+  const graph = buildGraph(project, schematicCatalog);
+  const access = graph.slots.find((s) => s.resource === "r5");
+  assert.equal(access?.target?.id, "r4");
+  assert.deepEqual(validate(project, schematicCatalog, graph), []);
+  const unnamed = updateResource(project, "r4", { ...project.resources[3].doc, metadata: { name: "" } });
+  assert.deepEqual(codes(validate(unnamed, schematicCatalog)), ["dangling-reference", "invalid-name"]);
+});
+
+test("schematic: a production's items are nodes, one per name, merged into the resource that has it", () => {
+  const { project } = importYaml(emptyProject("team-a"), schematicCatalog, DRAWING);
+  const graph = buildGraph(project, schematicCatalog);
+  const upstreams = graph.nodes.filter((n) => n.kind.kind === "Upstream");
+  assert.deepEqual(
+    upstreams.map((n) => [n.id, n.name, n.origin, n.from, n.alsoFrom, n.schematic]),
+    [
+      ["r3", "https://mirror.example.com", "resource", undefined, ["r1"], true],
+      ["r1/produces/0/0", "https://registry.npmjs.org", "produced", "r1", ["r2"], true],
+    ],
+  );
+  // Drawn after what names them; no duplicate for a shared upstream.
+  const deps = layout(graph);
+  assert.ok((deps.get("r1/produces/0/0")?.x ?? 0) > (deps.get("r2")?.x ?? 0));
+  assert.ok(!codes(validate(project, schematicCatalog, graph)).includes("duplicate"));
+  // Edited away, the derived node goes with it.
+  const fewer = updateResource(project, "r1", { ...project.resources[0].doc, spec: {} });
+  const left = buildGraph(fewer, schematicCatalog).nodes.filter((n) => n.kind.kind === "Upstream");
+  assert.deepEqual(left.map((n) => [n.id, n.from, n.alsoFrom]), [["r3", undefined, undefined], ["r2/produces/0/0", "r2", undefined]]);
+});
+
+test("schematic: kept out of the manifests, exported apart and imported back", () => {
+  const { project } = importYaml(emptyProject("team-a"), schematicCatalog, DRAWING);
+  const manifests = yaml.loadAll(exportYaml(project, schematicCatalog));
+  assert.deepEqual(manifests.map((d) => d.kind), ["ExampleObject", "ExampleObject"]);
+  assert.equal(exportFiles(project, schematicCatalog).length, 2);
+  const drawing = exportSchematic(project, schematicCatalog);
+  assert.deepEqual(yaml.loadAll(drawing).map((d) => d.kind), ["Upstream", "Cluster", "AccessMethod"]);
+  const back = importYaml(emptyProject("team-a"), schematicCatalog, drawing);
+  assert.deepEqual(back.issues, []);
+  assert.equal(exportSchematic(back.project, schematicCatalog), drawing);
+  assert.equal(exportSchematic(emptyProject(), schematicCatalog), "");
+});
+
+test("schematic: a computed name — the item, the resource, a referenced instance — a field overriding it", () => {
+  const issuer = { group: S, kind: "OidcIssuer" };
+  const c = buildCatalog([
+    {
+      kinds: schemas,
+      schemas,
+      links: {
+        ...links,
+        kinds: {
+          ...links.kinds,
+          ExampleObject: {
+            references: links.kinds.ExampleObject.references,
+            produces: [{ kind: issuer, each: "spec.labels", name: ["issuer"], template: "{/spec.instanceRef>spec.url}/o/{/spec.name}/{app}", unless: { path: "off", equals: "true" } }],
+          },
+        },
+      },
+    },
+    { kinds: [{ apiVersion: `${S}/v1`, kind: "OidcIssuer", scope: "Cluster", schematic: true }], links: { version: 1, kinds: {} } },
+  ]);
+  const yamlOf = (labels, ref = "") => `
+apiVersion: ${G}/v1alpha1
+kind: ExampleInstance
+metadata: { name: login }
+spec: { url: "https://login.example.com" }
+---
+apiVersion: ${G}/v1alpha1
+kind: ExampleObject
+metadata: { name: o, namespace: team-a }
+spec: { name: docs, labels: ${labels}${ref} }
+`;
+  const names = (text) => buildGraph(importYaml(emptyProject("team-a"), c, text).project, c).nodes.filter((n) => n.kind.kind === "OidcIssuer").map((n) => n.name);
+  // Unset reference: the only instance; the trailing slash dropped.
+  assert.deepEqual(names(yamlOf("{ app: x }")), ["https://login.example.com/o/docs/x"]);
+  assert.deepEqual(names(yamlOf("{ app: x }", ", instanceRef: { name: login }")), ["https://login.example.com/o/docs/x"]);
+  // A URL written with its slash: one slash before the template's path.
+  assert.deepEqual(names(yamlOf("{ app: x }").replace('"https://login.example.com"', '"https://login.example.com/"')), ["https://login.example.com/o/docs/x"]);
+  // A hole without a value, or a reference to nothing: no node.
+  assert.deepEqual(names(yamlOf("{ other: x }")), []);
+  assert.deepEqual(names(yamlOf("{ app: x }", ", instanceRef: { name: gone }")), []);
+  // The field wins over the template; `unless` reads a boolean.
+  assert.deepEqual(names(yamlOf('{ app: x, issuer: "https://idp.example.com/" }')), ["https://idp.example.com"]);
+  assert.deepEqual(names(yamlOf("{ app: x, off: true }")), []);
+});
+
+test("schematic: a URL names one node with or without its slash; a shared kind from two sites", () => {
+  assert.equal(canonicalName("https://registry.npmjs.org//"), "https://registry.npmjs.org");
+  assert.equal(canonicalName("example.com/"), "example.com/");
+  const { project } = importYaml(
+    emptyProject("team-a"),
+    schematicCatalog,
+    `${DRAWING}---
+apiVersion: ${G}/v1alpha1
+kind: ExampleObject
+metadata: { name: other }
+spec:
+  extra: { upstreams: ["https://registry.npmjs.org/", "https://mirror.example.com/"] }
+`,
+  );
+  const upstreams = buildGraph(project, schematicCatalog).nodes.filter((n) => n.kind.kind === "Upstream");
+  assert.deepEqual(upstreams.map((n) => [n.id, n.alsoFrom]), [["r3", ["r1", "r6"]], ["r1/produces/0/0", ["r2", "r6"]]]);
+  // Every operator's site carries the shared kinds: kept once. A CRD kind twice is still refused.
+  const shared = [{ apiVersion: `${S}/v1`, kind: "Upstream", scope: "Cluster", schematic: true }];
+  const twice = buildCatalog([
+    { kinds: shared, links: { version: 1, kinds: {} } },
+    { kinds: shared, links: { version: 1, kinds: {} } },
+  ]);
+  assert.equal(twice.size, 1);
+  assert.throws(() => buildCatalog([{ kinds: schemas, links }, { kinds: schemas, links }]), /in the catalog twice/);
 });
