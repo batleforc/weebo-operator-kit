@@ -12,11 +12,13 @@
 /** @type {{ operators: { name: string, repo: string, tag: string }[], thirdParty: { name: string, url: string, kinds: string[], links?: import('@weebo/operator-docs/crd-docs').CrdLinks }[] }} */
 const catalog = {
   operators: [
-    { name: 'forgejo', repo: 'batleforc/weebo-forgejo', tag: 'v0.6.0' },
-    { name: 'authentik', repo: 'batleforc/weebo-authentik', tag: 'v0.20.1' },
-    { name: 'angos', repo: 'batleforc/weebo-angos', tag: 'v0.2.0' },
-    { name: 'batlehub', repo: 'batleforc/weebo-batlehub', tag: 'v0.4.0' },
-    { name: 'stalwart', repo: 'batleforc/weebo-stalwart', tag: 'v0.2.0' },
+    { name: 'forgejo', repo: 'batleforc/weebo-forgejo', tag: 'v0.7.0' },
+    { name: 'authentik', repo: 'batleforc/weebo-authentik', tag: 'v0.21.0' },
+    { name: 'angos', repo: 'batleforc/weebo-angos', tag: 'v0.3.0' },
+    { name: 'batlehub', repo: 'batleforc/weebo-batlehub', tag: 'v0.5.0' },
+    { name: 'stalwart', repo: 'batleforc/weebo-stalwart', tag: 'v0.3.0' },
+    // Not a weebo operator, but on the kit's docs and api crate (its crdgen).
+    { name: 'proxyauthk8s', repo: 'batleforc/ProxyAuthK8S', tag: 'v0.3.0' },
   ],
   thirdParty: [
     {

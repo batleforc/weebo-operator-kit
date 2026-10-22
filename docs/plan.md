@@ -1912,7 +1912,7 @@ fusionneraient pas.
 Un kind propre à un seul opérateur reste dans son groupe
 (`schematic.<groupe de l'opérateur>`).
 
-#### Kit (v0.24.0, mineure) — fait, à publier
+#### Kit (v0.24.0, mineure) — publié le 2026-10-22
 
 Fait le 2026-10-22, vérifié dans une copie jetable du site (`target/`,
 les kinds du template rendu plus deux productions de test) pilotée par
@@ -1996,6 +1996,38 @@ tag dans `site/crd-catalog.config.mjs`.
    `metadata.name` : par les `links` de sa config docs, le marqueur ne lit
    pas `metadata`) et `spec.aliases[]` ; `HttpEndpoint` par
    `spec.submission` ; `VaultServer`.
+
+#### Avancement (2026-10-22)
+
+Publiés sur le kit v0.24.0 : weebo-batlehub v0.5.0, weebo-angos v0.3.0,
+weebo-authentik v0.21.0, weebo-forgejo v0.7.0, weebo-stalwart v0.3.0 ;
+ProxyAuthK8S v0.3.0 (#289, puis sa branche `release/v0.3.0`, #290 ; son
+job `integration` passe à 45 min, #291 : un cache de build froid, après
+un bump de version, l'avait coupé deux fois à 30). Le catalogue du site les épingle à ces tags. Vérifié
+sur le modèle de l'IDE avec les schémas générés : l'issuer calculé d'une
+application authentik (URL d'instance écrite avec son slash), celui d'un
+`ProxyKubeApi` et celui d'une instance Angos (sans slash) sont un seul
+nœud, les kinds partagés sont une fois au catalogue.
+
+Écarts au plan :
+
+- kit, dans la même release : un marqueur `x-weebo-produces` sur un champ
+  liste produit un objet par item (`extraHosts`), comme `x-weebo-link` ;
+- angos : `downstreams[].url` est un `HttpEndpoint` (une cible de
+  réplication, pas un registre amont) ;
+- authentik : `proxy.externalHost` est une URL, dessinée en
+  `HttpEndpoint` ; `proxy.internalHost` (un Service du cluster) n'est pas
+  dessiné. `spec.provider.oauth2.issuerUrl` est une vraie surcharge :
+  écrite en `AUTHENTIK_URL` à la place de l'issuer calculé, et l'issuer
+  écrit est enregistré en `status.issuerUrl` ;
+- stalwart : `submission.host` est un `DnsName` (un hôte SMTP, pas un
+  `HttpEndpoint`) ; le nom du domaine passe par les `links` de sa config
+  docs (`spec.name`, sinon `metadata.name`) ;
+- ProxyAuthK8S : ses références (Secrets, `Service` d'un
+  `KubernetesService`) restent dans sa config docs, les productions sont
+  des marqueurs sur ses types `crd` (sans dépendance), `weebo-kit-api`
+  n'entre que dans son `crdgen` (`--links`, `publish = false`, la source
+  git du kit autorisée dans `deny.toml`).
 
 #### Limites acceptées
 
