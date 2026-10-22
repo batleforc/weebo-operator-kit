@@ -13,7 +13,7 @@
 const catalog = {
   operators: [
     { name: 'forgejo', repo: 'batleforc/weebo-forgejo', tag: 'v0.6.0' },
-    { name: 'authentik', repo: 'batleforc/weebo-authentik', tag: 'v0.20.0' },
+    { name: 'authentik', repo: 'batleforc/weebo-authentik', tag: 'v0.20.1' },
     { name: 'angos', repo: 'batleforc/weebo-angos', tag: 'v0.2.0' },
     { name: 'batlehub', repo: 'batleforc/weebo-batlehub', tag: 'v0.4.0' },
     { name: 'stalwart', repo: 'batleforc/weebo-stalwart', tag: 'v0.2.0' },
