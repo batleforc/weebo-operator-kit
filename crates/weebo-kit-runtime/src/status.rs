@@ -17,7 +17,7 @@ use serde::de::DeserializeOwned;
 use weebo_kit_api::Condition;
 use weebo_kit_domain::{Advisory, Failure, Reason};
 
-use crate::conditions::conditions;
+use crate::conditions::{TypedCondition, conditions_with};
 use crate::events;
 
 /// Extra attempts of a failed status patch.
@@ -65,11 +65,31 @@ where
     K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Serialize,
     R: Reason,
 {
+    publish_with(api, recorder, field_manager, obj, previous, update, &[]).await
+}
+
+/// [`publish`], with conditions of the operator's own types after `Ready`
+/// and the advisories ([`TypedCondition`]): written in the same patch, so
+/// the next publish keeps them instead of dropping them.
+pub async fn publish_with<K, R>(
+    api: &Api<K>,
+    recorder: &kube::runtime::events::Recorder,
+    field_manager: &str,
+    obj: &K,
+    previous: &[Condition],
+    update: StatusUpdate<'_, R>,
+    extra: &[TypedCondition<R>],
+) -> Result<Vec<Condition>, kube::Error>
+where
+    K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Serialize,
+    R: Reason,
+{
     let generation = obj.meta().generation;
-    let conds = conditions(
+    let conds = conditions_with(
         previous,
         update.ready,
         update.advisories,
+        extra,
         generation,
         &Time(Timestamp::now()),
     );

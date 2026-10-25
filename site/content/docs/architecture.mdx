@@ -147,9 +147,13 @@ logic.
   (`api::<K>()`), the watcher config, `without_selector()`.
 - **`status`**: `publish` (one merge patch of the conditions,
   `observedGeneration` on success and the operator's fields, retried on
-  transient errors, then the Events) and `record` (a status field written
-  right after the remote write it records). **`conditions`** builds the
-  condition list.
+  transient errors, then the Events), `publish_with` (the same patch, with
+  conditions of the operator's own types after `Ready` and the advisories)
+  and `record` (a status field written right after the remote write it
+  records). **`conditions`** builds the condition list (`conditions`, and
+  `conditions_with` for a `TypedCondition`: `True`/`False`/`Unknown`, one of
+  the operator's reason codes; see
+  [RFC 0006](https://github.com/batleforc/weebo-operator-kit/blob/main/docs/rfc-0006-typed-conditions.md)).
 - **`events`**: `announce_outcome` (a `Warning` on every reconcile ending
   `Ready: False`, `Normal` on changes), `announce_change`,
   `announce_drift`, `announce_error`/`spawn_error`.

@@ -54,6 +54,56 @@ pub fn conditions<R: Reason>(
     out
 }
 
+/// A condition of its own type next to `Ready` and the advisories: a state
+/// an operator reports as `True`, `False` or `Unknown` (a tunnel connected,
+/// a dependency degraded), with one of its reason codes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypedCondition<R> {
+    /// PascalCase, unique, never `Ready` nor an advisory reason's name.
+    pub type_: &'static str,
+    /// `Some(true)` `True`, `Some(false)` `False`, `None` `Unknown`.
+    pub status: Option<bool>,
+    pub reason: R,
+    pub message: String,
+}
+
+/// [`conditions`], then `extra` in their order. A type already present
+/// (`Ready`, an advisory) keeps its first occurrence: `extra` never hides
+/// the outcome. `lastTransitionTime` moves only when its status flips.
+pub fn conditions_with<R: Reason>(
+    previous: &[Condition],
+    outcome: &Result<String, Failure<R>>,
+    advisories: &[Advisory<R>],
+    extra: &[TypedCondition<R>],
+    generation: Option<i64>,
+    now: &Time,
+) -> Vec<Condition> {
+    let mut out = conditions(previous, outcome, advisories, generation, now);
+    for typed in extra {
+        if out.iter().any(|c| c.type_ == typed.type_) {
+            continue;
+        }
+        let status = match typed.status {
+            Some(true) => "True",
+            Some(false) => "False",
+            None => "Unknown",
+        };
+        let last_transition_time = match previous.iter().find(|c| c.type_ == typed.type_) {
+            Some(p) if p.status == status => p.last_transition_time.clone(),
+            _ => Some(now.clone()),
+        };
+        out.push(Condition {
+            type_: typed.type_.to_string(),
+            status: status.to_string(),
+            reason: typed.reason.as_str().to_string(),
+            message: typed.message.clone(),
+            last_transition_time,
+            observed_generation: generation,
+        });
+    }
+    out
+}
+
 /// Emits an Event when `Ready`'s status or reason changed between the
 /// `previous` and `current` condition lists — transitions only; prefer
 /// [`crate::events::announce_outcome`], which also warns on every repeated
@@ -154,6 +204,37 @@ mod tests {
         assert_eq!(conds.len(), 2);
         assert_eq!(conds[1].type_, "Pending");
         assert_eq!(conds[1].status, "True");
+    }
+
+    #[test]
+    fn typed_conditions_follow_and_keep_their_transition_time() {
+        let typed = |status| TypedCondition {
+            type_: "Connected",
+            status,
+            reason: Code::Pending,
+            message: "tunnel".into(),
+        };
+        let ok: Result<String, Failure<Code>> = Ok("fine".into());
+        let first = conditions_with(&[], &ok, &[], &[typed(Some(false))], None, &at(1));
+        assert_eq!(first.len(), 2);
+        assert_eq!(
+            (first[1].type_.as_str(), first[1].status.as_str()),
+            ("Connected", "False")
+        );
+        let same = conditions_with(&first, &ok, &[], &[typed(Some(false))], None, &at(2));
+        assert_eq!(same[1].last_transition_time, Some(at(1)));
+        let flipped = conditions_with(&same, &ok, &[], &[typed(None)], None, &at(3));
+        assert_eq!(flipped[1].status, "Unknown");
+        assert_eq!(flipped[1].last_transition_time, Some(at(3)));
+        // Never a second Ready, nor a copy of an advisory's type.
+        let ready = TypedCondition {
+            type_: "Ready",
+            ..typed(Some(false))
+        };
+        assert_eq!(
+            conditions_with(&[], &ok, &[], &[ready], None, &at(4)).len(),
+            1
+        );
     }
 
     #[test]

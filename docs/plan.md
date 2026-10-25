@@ -311,7 +311,9 @@ erreurs que l'opérateur traduit) :
   même backoff), `finalize` (cleanup sauf `force-orphan`, puis Event du code
   `released` de l'opérateur), `status::publish` (merge patch des
   conditions + `observedGeneration` au succès + champs de l'opérateur,
-  retenté sur erreur transitoire, puis Events). `Ctx`, l'enum `Error` et
+  retenté sur erreur transitoire, puis Events ; `publish_with` y ajoute,
+  dans le même patch, des `TypedCondition` de types propres à l'opérateur,
+  RFC 0006). `Ctx`, l'enum `Error` et
   `needs_a_change` restent aux opérateurs.
 - **Importer** (`weebo-kit-adapters::adopt`) : `Adopter { field_manager,
   annotations }.adopt(api, cr, remote_id, seed, bound_to, force)` — crée
