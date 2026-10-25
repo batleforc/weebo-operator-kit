@@ -2,7 +2,7 @@
 
 | Field       | Value                                                                  |
 | ----------- | ---------------------------------------------------------------------- |
-| Status      | In review (implémentation dans la même PR)                             |
+| Status      | In review (PR #32, implémentation comprise)                            |
 | Short       | Conditions typées dans `status::publish_with`                          |
 | Settles     | Comment un opérateur publie une condition de son propre type (`True`/`False`/`Unknown`) sans qu'elle soit défaite par le patch suivant |
 | Author      | Max Batleforc <maxleriche.60@gmail.com>                                |
@@ -377,3 +377,4 @@ Aucune.
 | Date | Changement |
 | --- | --- |
 | 2026-10-25 | Brouillon et implémentation, écrits depuis la RFC 0012 de ProxyAuthK8S |
+| 2026-10-25 | Déposée avec son implémentation (PR #32) |
