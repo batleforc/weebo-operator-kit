@@ -71,10 +71,16 @@ tasks:
       # What the kit's own site ships (from its lockfile, like repo:audit).
       - mise exec -- npm audit --prefix site --omit=dev --audit-level=high
 
+  test:envtest:
+    desc: "The testkit's envtest tests: a real control plane, never left running (KUBEBUILDER_ASSETS naming kube-apiserver/etcd: those, nothing downloaded)"
+    cmds:
+      - mise exec -- cargo test -p weebo-kit-testkit --test envtest_teardown -- --ignored --test-threads=1
+
   test:all:
-    desc: "Every test, then the operator template rendered and built on this working tree (the release suite, before every tag)"
+    desc: "Every test, the testkit's envtest ones, then the operator template rendered and built on this working tree (the release suite, before every tag)"
     cmds:
       - task: test
+      - task: test:envtest
       - task: template:check
 
   chart:check:

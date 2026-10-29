@@ -4103,9 +4103,11 @@ name = "weebo-kit-testkit"
 version = "0.24.0"
 dependencies = [
  "envtest",
+ "k8s-openapi",
  "kube",
  "rustls",
  "serde",
+ "serde_json",
  "serde_norway",
  "tokio",
 ]
