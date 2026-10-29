@@ -13,3 +13,6 @@ serde = { workspace = true }
 tokio = { workspace = true }
 weebo-kit-api = { workspace = true }
 weebo-kit-testkit = { workspace = true }
+
+[lints]
+workspace = true

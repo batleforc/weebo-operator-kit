@@ -225,7 +225,7 @@ where
         fields.insert("remoteId".into(), id.clone().into());
     }
     if let Some(instance) = &outcome.instance {
-        let instance = serde_json::to_value(instance).expect("a BoundInstance serializes");
+        let instance = serde_json::to_value(instance).map_err(kube::Error::SerdeError)?;
         fields.insert("instance".into(), instance);
     }
     weebo_kit_runtime::status::publish(

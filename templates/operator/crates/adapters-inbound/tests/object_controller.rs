@@ -3,6 +3,12 @@
 //! for an in-memory {{product}} (`testkit::FakeGateway`). The template for
 //! every other kind's controller test.
 
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers fail the test on purpose"
+)]
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -81,7 +87,11 @@ async fn wait_for_event(client: &Client, name: &str, reason: &str) -> String {
 
 #[tokio::test]
 async fn object_lifecycle_creates_reports_and_deletes_the_remote_object() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Another test of this binary may have installed one first.
+    tracing_subscriber::fmt()
+        .with_test_writer()
+        .try_init()
+        .unwrap_or_default();
     let cluster = testkit::envtest::start().await;
     let client = cluster.client();
     let gateway = Arc::new(FakeGateway::default());

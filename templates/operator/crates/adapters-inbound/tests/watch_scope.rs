@@ -11,6 +11,8 @@
 //! The rules below mirror the library chart's `clusterRole` and
 //! `watchRole` (`weebo-operator.kindRules`): keep them in step.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -253,7 +255,11 @@ async fn operator_client(cluster: &EnvTestCluster) -> Client {
 
 #[tokio::test]
 async fn a_namespaced_scope_runs_on_namespaced_rbac_and_sees_only_its_objects() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Another test of this binary may have installed one first.
+    tracing_subscriber::fmt()
+        .with_test_writer()
+        .try_init()
+        .unwrap_or_default();
     let cluster = testkit::envtest::start().await;
     let admin = cluster.client();
     grant_rbac(&admin, "team-a", true).await;
@@ -365,7 +371,11 @@ async fn a_namespaced_scope_runs_on_namespaced_rbac_and_sees_only_its_objects() 
 
 #[tokio::test]
 async fn a_full_namespaced_operator_runs_on_one_role_only() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Another test of this binary may have installed one first.
+    tracing_subscriber::fmt()
+        .with_test_writer()
+        .try_init()
+        .unwrap_or_default();
     let cluster = testkit::envtest::start().await;
     let admin = cluster.client();
     grant_rbac(&admin, "team-a", false).await;

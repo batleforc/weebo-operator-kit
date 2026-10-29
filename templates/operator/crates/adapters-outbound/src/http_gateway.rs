@@ -77,6 +77,10 @@ impl HttpGateway {
     }
 
     /// `{url}/<segments…>`, each segment percent-encoded.
+    #[expect(
+        clippy::expect_used,
+        reason = "`new` only accepts an http(s) URL that can be a base"
+    )]
     fn url(&self, segments: &[&str]) -> Url {
         let mut url = self.base.clone();
         url.path_segments_mut()

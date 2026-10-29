@@ -1,6 +1,10 @@
 //! In-memory [`RemoteGateway`] for use-case and controller tests (exposed
 //! to other crates by the `test-support` feature).
 
+// A test double, only built for tests (`cfg(test)` or the `test-support`
+// feature): a poisoned lock fails the test.
+#![expect(clippy::unwrap_used, reason = "test double: a panic is a failed test")]
+
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -84,7 +88,7 @@ impl RemoteGateway for FakeGateway {
         self.check()?;
         let id = {
             let mut next = self.next_id.lock().unwrap();
-            *next += 1;
+            *next = next.saturating_add(1);
             next.to_string()
         };
         self.objects

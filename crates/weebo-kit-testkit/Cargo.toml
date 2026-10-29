@@ -9,11 +9,17 @@ repository.workspace = true
 
 [dependencies]
 envtest = { workspace = true }
+k8s-openapi = { workspace = true }
 kube = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_norway = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+# The version the kit is tested with (RFC 0005).
+k8s-openapi = { workspace = true, features = ["v1_36"] }
 
 [lints]
 workspace = true

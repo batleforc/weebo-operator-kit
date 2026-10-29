@@ -19,3 +19,6 @@ tokio = { workspace = true }
 [features]
 # Exposes `test_support` (in-memory gateway) to other crates' tests.
 test-support = []
+
+[lints]
+workspace = true
