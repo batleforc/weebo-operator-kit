@@ -1,6 +1,7 @@
 //! The validating admission webhook's `/validate` endpoint: decoding the
 //! review, the decisions counter, the denial shape (403 + reason code),
-//! failing closed — around the operator's own decision ([`Admission`]).
+//! failing closed, the warnings `kubectl` prints — around the operator's
+//! own decision ([`Admission`]).
 //! And `/scope` ([`ScopeGuard`]): no object the operator manages leaves
 //! its label selector by accident.
 
@@ -53,6 +54,23 @@ pub trait Admission: Send + Sync + 'static {
         object: &DynamicObject,
     ) -> Result<(), Denial<Self::Reason>>;
 
+    /// [`admit`](Self::admit), plus the warnings of an admitted object:
+    /// returned in the response's `warnings`, which `kubectl` prints (a
+    /// deprecated field, a setting that will be ignored…). What `/validate`
+    /// calls. By default `admit`, with no warning: override it to warn, and
+    /// have `admit` keep the decision alone (e.g.
+    /// `self.admit_with_warnings(…).await.map(drop)`).
+    async fn admit_with_warnings(
+        &self,
+        kind: &str,
+        namespace: &str,
+        object: &DynamicObject,
+    ) -> Result<Vec<String>, Denial<Self::Reason>> {
+        self.admit(kind, namespace, object)
+            .await
+            .map(|()| Vec::new())
+    }
+
     /// The reason of a request that can't be decided on at all (no
     /// object).
     fn undecidable(&self) -> Self::Reason;
@@ -73,7 +91,8 @@ struct AdmissionState<A> {
     decisions: Counter<u64>,
 }
 
-/// `POST /validate` deciding through `admission`, plus the kit's
+/// `POST /validate` deciding through `admission`
+/// ([`Admission::admit_with_warnings`]), plus the kit's
 /// `/readyz`, `/livez`, `/healthz` probes. `meter`/`prefix` name the
 /// decisions counter (`<prefix>_webhook_decisions_total`, by `kind` and
 /// `result`).
@@ -141,9 +160,9 @@ pub async fn handle<A: Admission>(
 async fn decide<A: Admission>(
     admission: &A,
     req: &AdmissionRequest<DynamicObject>,
-) -> Result<(), Denial<A::Reason>> {
+) -> Result<Vec<String>, Denial<A::Reason>> {
     if req.operation == Operation::Delete {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let Some(object) = req.object.as_ref() else {
         return Err(Denial::new(
@@ -154,18 +173,26 @@ async fn decide<A: Admission>(
     if let Some(old) = req.old_object.as_ref()
         && old.data.get("spec") == object.data.get("spec")
     {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let namespace = req.namespace.as_deref().unwrap_or_default();
-    admission.admit(&req.kind.kind, namespace, object).await
+    admission
+        .admit_with_warnings(&req.kind.kind, namespace, object)
+        .await
 }
 
+/// The review answering `req`: allowed with its warnings (none: no
+/// `warnings` field), or denied with a 403 and the reason code.
 fn respond<R: Reason>(
     req: &AdmissionRequest<DynamicObject>,
-    decision: Result<(), Denial<R>>,
+    decision: Result<Vec<String>, Denial<R>>,
 ) -> AdmissionReview<DynamicObject> {
     match decision {
-        Ok(()) => AdmissionResponse::from(req).into_review(),
+        Ok(warnings) => {
+            let mut response = AdmissionResponse::from(req);
+            response.warnings = (!warnings.is_empty()).then_some(warnings);
+            response.into_review()
+        }
         Err(denial) => {
             let mut response = AdmissionResponse::from(req).deny(denial.message);
             response.result.code = 403;
@@ -305,7 +332,7 @@ async fn scope<R: Reason + Send + Sync + 'static>(
     let Ok(req): Result<AdmissionRequest<DynamicObject>, _> = review.try_into() else {
         return Json(AdmissionResponse::invalid("AdmissionReview without a request").into_review());
     };
-    let decision = guard.check(&req);
+    let decision = guard.check(&req).map(|()| Vec::new());
     Json(respond(&req, decision))
 }
 
@@ -401,12 +428,127 @@ mod tests {
         );
     }
 
+    /// [`OnlyTeamA`], warning about a `spec.v` above 1.
+    struct WarnsOnBigV;
+
+    #[async_trait::async_trait]
+    impl Admission for WarnsOnBigV {
+        type Reason = Code;
+        async fn admit(
+            &self,
+            kind: &str,
+            ns: &str,
+            object: &DynamicObject,
+        ) -> Result<(), Denial<Code>> {
+            self.admit_with_warnings(kind, ns, object).await.map(drop)
+        }
+        async fn admit_with_warnings(
+            &self,
+            kind: &str,
+            ns: &str,
+            object: &DynamicObject,
+        ) -> Result<Vec<String>, Denial<Code>> {
+            OnlyTeamA.admit(kind, ns, object).await?;
+            let big = object.data["spec"]["v"].as_i64().is_some_and(|v| v > 1);
+            Ok(big
+                .then(|| "spec.v above 1 is ignored".to_string())
+                .into_iter()
+                .collect())
+        }
+        fn undecidable(&self) -> Code {
+            Code::NotAllowed
+        }
+    }
+
+    /// The review, through the `/validate` route (JSON in and out).
+    async fn validate_json<A: Admission>(
+        admission: A,
+        review: serde_json::Value,
+    ) -> serde_json::Value {
+        use tower::ServiceExt;
+        let app = router(
+            Arc::new(admission),
+            Arc::new(Health::default()),
+            "test",
+            "test",
+        );
+        let response = app
+            .oneshot(
+                axum::http::Request::post("/validate")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(review.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    fn review_json(ns: &str, spec: i32) -> serde_json::Value {
+        serde_json::json!({
+            "apiVersion": "admission.k8s.io/v1", "kind": "AdmissionReview",
+            "request": {
+                "uid": "11111111-1111-1111-1111-111111111111",
+                "namespace": ns,
+                "kind": {"group": "x.weebo.io", "version": "v1", "kind": "Thing"},
+                "resource": {"group": "x.weebo.io", "version": "v1", "resource": "things"},
+                "operation": "CREATE",
+                "userInfo": {},
+                "object": {"apiVersion": "x.weebo.io/v1", "kind": "Thing",
+                    "metadata": {"name": "t", "namespace": ns}, "spec": {"v": spec}},
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn warnings_of_an_admitted_object_reach_the_review() {
+        let warned = validate_json(WarnsOnBigV, review_json("team-a", 2)).await;
+        assert_eq!(warned["response"]["allowed"], true);
+        assert_eq!(
+            warned["response"]["warnings"],
+            serde_json::json!(["spec.v above 1 is ignored"])
+        );
+        let quiet = validate_json(WarnsOnBigV, review_json("team-a", 1)).await;
+        assert_eq!(quiet["response"]["allowed"], true);
+        assert!(quiet["response"].get("warnings").is_none(), "{quiet}");
+        let denied = validate_json(WarnsOnBigV, review_json("team-b", 2)).await;
+        assert_eq!(denied["response"]["allowed"], false);
+        assert_eq!(denied["response"]["status"]["code"], 403);
+        assert!(denied["response"].get("warnings").is_none(), "{denied}");
+    }
+
+    #[tokio::test]
+    async fn an_admission_that_only_admits_sends_no_warning() {
+        // `OnlyTeamA` implements `admit` alone: the provided
+        // `admit_with_warnings` decides the same, without a warning.
+        let req = request("CREATE", "team-a", 2, None);
+        assert_eq!(
+            OnlyTeamA
+                .admit_with_warnings("Thing", "team-a", req.object.as_ref().unwrap())
+                .await,
+            Ok(vec![])
+        );
+        let allowed = validate_json(OnlyTeamA, review_json("team-a", 2)).await;
+        assert_eq!(allowed["response"]["allowed"], true);
+        assert!(allowed["response"].get("warnings").is_none(), "{allowed}");
+        let denied = validate_json(OnlyTeamA, review_json("team-b", 2)).await;
+        assert_eq!(denied["response"]["allowed"], false);
+        assert_eq!(
+            denied["response"]["status"]["reason"],
+            "NamespaceNotAllowed"
+        );
+    }
+
     #[tokio::test]
     async fn deletes_and_spec_preserving_updates_always_pass() {
         let delete = request("DELETE", "team-b", 1, None);
-        assert_eq!(decide(&OnlyTeamA, &delete).await, Ok(()));
+        assert_eq!(decide(&OnlyTeamA, &delete).await, Ok(vec![]));
         let finalizer_removal = request("UPDATE", "team-b", 1, Some(1));
-        assert_eq!(decide(&OnlyTeamA, &finalizer_removal).await, Ok(()));
+        assert_eq!(decide(&OnlyTeamA, &finalizer_removal).await, Ok(vec![]));
         let spec_change = request("UPDATE", "team-b", 2, Some(1));
         assert!(decide(&OnlyTeamA, &spec_change).await.is_err());
     }
