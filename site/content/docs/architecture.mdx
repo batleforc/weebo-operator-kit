@@ -165,7 +165,8 @@ logic.
   shutdown, port 8443 by default) the probes and webhooks run on;
   **`admission`**: the `/validate` router around the operator's
   `Admission` trait (`Denial`, fail closed, `DELETE` and spec-less
-  `UPDATE` always admitted, `<prefix>_webhook_decisions_total`),
+  `UPDATE` always admitted, `<prefix>_webhook_decisions_total`,
+  `admit_with_warnings` for the warnings `kubectl` prints),
   `check_vault_targets`, and `ScopeGuard`/`scope_router` (`/scope`:
   refuses taking a managed object out of the label selector).
 - **`telemetry`**: logs, traces, OTLP and Prometheus metrics
@@ -178,7 +179,11 @@ logic.
 ## weebo-kit-testkit
 
 `EnvTestCluster::start(crd_dir)` runs a real `kube-apiserver` and `etcd`
-through the `envtest` crate, with the operator's CRDs installed;
+through the `envtest` crate, with the operator's CRDs installed
+(`try_start` returns the failure instead of panicking). The control plane
+stops when the cluster is dropped, and when the start fails once it is up
+(a CRD refused). With `KUBEBUILDER_ASSETS` naming a directory that holds
+`kube-apiserver` and `etcd`, those are used and nothing is fetched.
 `client_as_service_account` impersonates a ServiceAccount to prove RBAC.
 `polling::wait_for`/`wait_for_absence` poll an object. Building it needs
 Go and `libclang` (`task doctor`).

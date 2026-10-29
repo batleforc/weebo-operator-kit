@@ -54,7 +54,7 @@ read it before any non-trivial change.
 ```bash
 task lint    # fmt --check, clippy -D warnings, actionlint, chart:check
 task test    # unit + contract + doctests
-task test:all       # + template:check (the operator template, built and tested)
+task test:all       # + test:envtest (the testkit's own envtest) + template:check (the operator template, built and tested)
 task template:render  # the template rendered for "Example" in target/template/
 task audit   # cargo-deny + trivy + npm audit (operator-docs, site)
 task doctor  # envtest prerequisites

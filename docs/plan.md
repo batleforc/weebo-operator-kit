@@ -2033,3 +2033,58 @@ nœud, les kinds partagés sont une fois au catalogue.
 
 - Les valeurs tenues dans des Secrets (URL Redis d'angos, DSN de
   batlehub, `issuerFrom` d'angos) ne seront jamais vues par l'IDE.
+
+### Manques relevés par weebo-notify (2026-10-29, non cassant)
+
+Trouvés en créant weebo-notify depuis le template (kit v0.24.0) ; chacun
+avait été contourné par une copie dans l'opérateur.
+
+- **Lints du template** : un projet rendu n'avait ni `[workspace.lints]`,
+  ni `clippy.toml`, ni `[lints] workspace = true` dans ses crates, alors
+  que les lints weebo-good-practice valent pour tout workspace. Le
+  template porte désormais les mêmes que le kit (et weebo-angos) ; ce qui
+  les enfreignait est corrigé (`let _ =` sur `install_default` et sur
+  l'attente du serveur, `expect` de sérialisation remplacé par
+  `kube::Error::SerdeError`), ou excusé là où une panique est légitime
+  (`#[expect]` sur l'URL de la gateway, vérifiée par `new` ; doublure
+  `test_support` et helpers des tests d'intégration, comme dans le kit).
+  Vérifié : `task template:render` puis `clippy --all-targets -D warnings`
+  sur le rendu.
+- **Avertissements d'admission** : `Admission` ne savait qu'admettre ou
+  refuser. Nouvelle méthode fournie `admit_with_warnings` →
+  `Result<Vec<String>, Denial<_>>` (par défaut `admit`, sans
+  avertissement), celle qu'appelle `/validate` ; les avertissements d'un
+  objet admis vont dans `warnings` de la réponse (affichés par `kubectl`),
+  aucun champ quand il n'y en a pas. Compteur de décisions inchangé ; un
+  implémenteur existant ne change ni de build ni de comportement.
+- **Teardown d'envtest** : `env.Start()` de controller-runtime ne
+  s'arrête pas quand l'installation des CRD échoue, et le crate `envtest`
+  ne garde alors aucun handle : `kube-apiserver` et `etcd` restaient
+  lancés. Le testkit ne donne plus les CRD à envtest : il démarre le
+  control plane nu, le possède (`Drop` l'arrête, panique comprise), puis
+  installe les CRD lui-même (fichiers `.yaml`/`.yml`/`.json`, documents de
+  kind `CustomResourceDefinition`, comme envtest) et attend qu'elles soient
+  servies par la découverte. Nouveau `EnvTestCluster::try_start` (l'échec
+  rendu au lieu d'une panique). Reste hors d'atteinte : un échec à
+  l'intérieur du démarrage d'envtest (namespace `default` jamais créé…).
+  Tests envtest `tests/envtest_teardown.rs` (ignorés par `cargo test`,
+  `task test:envtest`, dans `test:all`).
+- **`KUBEBUILDER_ASSETS` sans réseau** : avec le téléchargement activé,
+  envtest lit son index de releases même quand les binaires sont là. Si
+  `KUBEBUILDER_ASSETS` nomme un répertoire qui contient `kube-apiserver` et
+  `etcd`, le testkit les prend tels quels, sans téléchargement ni appel
+  réseau ; défini sans eux, comportement d'avant (avec un message).
+
+weebo-notify peut retirer ses copies au `kit:sync` suivant : son
+`/validate` (`admit_with_warnings`) et son `testkit/src/envtest.rs`.
+
+### À faire — une variante « gérée » du template
+
+Le template ne connaît que la forme pilotée par API (une `RemoteGateway`
+vers le produit) ; or weebo-batlehub, weebo-angos et weebo-notify
+déploient tous leur produit avec la couche « workload géré » (v0.17.0 :
+`OwnedObjects`…), et chacun a remplacé la gateway à la main. Piste : une
+variante (placeholder de cargo-generate, ou second template) qui rend une
+`<Product>LocalInstance` déployée par `OwnedObjects` et des objets liés à
+leur instance, au lieu de la gateway HTTP — vérifiée par `template:check`
+comme l'autre.
