@@ -2,6 +2,14 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.25.0](https://github.com/batleforc/weebo-operator-kit/compare/228911e515c8511970fa102c6ba96198d19885e6..v0.25.0) - 2026-10-29
+#### Features
+- close the gaps weebo-notify found (template lints, admission warnings, envtest teardown) (#33) - ([e872d61](https://github.com/batleforc/weebo-operator-kit/commit/e872d619ce55eef1ff087abf16335d2d74594bcf)) - Maxime, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5
+#### Miscellaneous Chores
+- (**site**) the CRD catalog on the operators released on kit v0.24.0, ProxyAuthK8S added (#31) - ([228911e](https://github.com/batleforc/weebo-operator-kit/commit/228911e515c8511970fa102c6ba96198d19885e6)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.24.0](https://github.com/batleforc/weebo-operator-kit/compare/7f2862191f17de91290c4e860748e88af8488c6a..v0.24.0) - 2026-10-22
 #### Features
 - (**operator-docs**) schematic kinds, drawn in the CRD IDE and never applied (#30) - ([38d1cc4](https://github.com/batleforc/weebo-operator-kit/commit/38d1cc4ecf5d01f00e0d6152f445fc00ae895aa0)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
