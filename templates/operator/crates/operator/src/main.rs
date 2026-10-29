@@ -53,7 +53,13 @@ async fn operator() -> anyhow::Result<()> {
 /// operator stopped, new CRDs applied, then this, then the operator.
 async fn migrate_instance_ref() -> anyhow::Result<()> {
     let dry_run = std::env::args().any(|a| a == "--dry-run");
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // An `Err` only means a provider is installed already.
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
+        tracing::debug!("a rustls crypto provider was already installed");
+    }
     let client = Client::try_default().await?;
     let kinds = [ApiResource::erase::<Object>(&())];
     let migration = weebo_kit_adapters::migrate::migrate_instance_refs(
@@ -79,8 +85,14 @@ async fn migrate_instance_ref() -> anyhow::Result<()> {
 async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     // `ring` and `aws-lc-rs` are both linked transitively (`kube`'s rustls
     // vs. reqwest's); rustls refuses to pick a default provider when more
-    // than one is present.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // than one is present. An `Err` only means one is installed already,
+    // which is all rustls needs.
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
+        tracing::debug!("a rustls crypto provider was already installed");
+    }
 
     telemetry.serve_metrics().await?;
     // `<prefix>_leader`: 1 on the replica holding the lease.
@@ -191,6 +203,11 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     // instead of making the next leader wait out the TTL.
     leadership.release().await;
     // Bounded: the drain started with the signal, long before.
-    let _ = tokio::time::timeout(Duration::from_secs(30), server.stopped()).await;
+    if tokio::time::timeout(Duration::from_secs(30), server.stopped())
+        .await
+        .is_err()
+    {
+        tracing::warn!("the webhook server was still draining after 30 s; exiting anyway");
+    }
     Ok(())
 }

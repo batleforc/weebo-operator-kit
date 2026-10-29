@@ -2,6 +2,8 @@
 //! the requests it sends and how each answer maps onto a `GatewayError`.
 //! Rewrite it along with the gateway when moving to the real API.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use adapters_outbound::HttpGateway;
 use application::ports::{GatewayError, ObjectPatch, RemoteGateway, RemoteObject};
 use wiremock::matchers::{body_json, header, method, path};

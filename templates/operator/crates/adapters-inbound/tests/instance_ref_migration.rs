@@ -2,6 +2,14 @@
 //! are rewritten as `{name: …}` by the kit's migration (the operator's
 //! `migrate-instance-ref` command), after the new CRD is applied.
 
+#![expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::arithmetic_side_effects,
+    reason = "test helpers fail the test on purpose"
+)]
+
 use std::time::Duration;
 
 use api::Object;

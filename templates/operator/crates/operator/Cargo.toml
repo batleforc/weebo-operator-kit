@@ -21,3 +21,6 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 weebo-kit-adapters = { workspace = true }
 weebo-kit-runtime = { workspace = true }
+
+[lints]
+workspace = true
