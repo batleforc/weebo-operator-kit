@@ -259,7 +259,10 @@ pub async fn acquire(lease: &LeaseLock, retry: Duration) {
 /// taken over, or not renewed for so long that another replica could hold
 /// it by now: the caller must stop reconciling at once. A failed or hanging
 /// renewal alone is retried until then, so an apiserver hiccup shorter
-/// than the lease's `ttl` doesn't depose the leader.
+/// than the lease's `ttl` doesn't depose the leader. Each attempt is bounded
+/// on its own (`renew` × 3/5): a request stuck on one connection — the
+/// client has no read timeout — is dropped and retried on another, instead
+/// of holding the whole window.
 pub async fn hold(lease: &LeaseLock, renew: Duration, ttl: Duration) -> String {
     hold_with(
         || async {
@@ -290,6 +293,9 @@ where
     let window = ttl.saturating_sub(renew / 2);
     // A failed renewal is retried sooner than the next regular one.
     let retry = renew / 5;
+    // A renewal answers in milliseconds: one that hasn't after this is
+    // stuck, and given up for a fresh attempt.
+    let attempt = renew * 3 / 5;
     let mut renewed_at = Instant::now();
     let mut next = renewed_at + renew;
     loop {
@@ -299,7 +305,10 @@ where
             return "could not renew the leader lease before it could expire".to_string();
         }
         let sent = Instant::now();
-        match tokio::time::timeout_at(deadline, renew_once()).await {
+        let outcome = tokio::time::timeout_at((sent + attempt).min(deadline), renew_once()).await;
+        let took = sent.elapsed();
+        tracing::debug!(took_ms = took.as_millis(), "leader lease renewal");
+        match outcome {
             Ok(Ok(true)) => {
                 renewed_at = sent;
                 next = sent + renew;
@@ -309,9 +318,14 @@ where
                 tracing::warn!(error = %err, "leader lease renewal failed, retrying");
                 next = Instant::now() + retry;
             }
+            // Its deadline: the next pass returns, the lease may be lost.
+            Err(_) if Instant::now() >= deadline => {}
             Err(_) => {
-                return "the leader lease renewal did not complete before the lease could expire"
-                    .to_string();
+                tracing::warn!(
+                    took_ms = took.as_millis(),
+                    "leader lease renewal did not answer, retrying"
+                );
+                next = Instant::now() + retry;
             }
         }
     }
@@ -368,6 +382,33 @@ mod tests {
         let why = hold_with(pending::<Result<bool, String>>, RENEW, TTL).await;
         assert!(why.contains("expire"), "{why}");
         assert!(start.elapsed() < TTL, "{:?}", start.elapsed());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stuck_renewal_is_retried_and_the_lease_kept() {
+        let calls = Cell::new(0);
+        let held = tokio::time::timeout(
+            Duration::from_secs(120),
+            hold_with(
+                || {
+                    calls.set(calls.get() + 1);
+                    // The second renewal hangs (a stuck connection), the
+                    // next ones answer.
+                    let stuck = calls.get() == 2;
+                    async move {
+                        if stuck {
+                            pending::<()>().await;
+                        }
+                        Ok(true)
+                    }
+                },
+                RENEW,
+                TTL,
+            ),
+        )
+        .await;
+        assert!(held.is_err(), "gave up the lease: {:?}", held.unwrap());
+        assert!(calls.get() > 5);
     }
 
     #[tokio::test(start_paused = true)]
