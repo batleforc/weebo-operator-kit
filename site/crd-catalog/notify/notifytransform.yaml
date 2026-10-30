@@ -1,0 +1,257 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: notifytransforms.notify.weebo.io
+spec:
+  group: notify.weebo.io
+  names:
+    kind: NotifyTransform
+    plural: notifytransforms
+    shortNames:
+    - ntr
+    singular: notifytransform
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.instance.name
+      name: Instance
+      type: string
+    - jsonPath: .status.id
+      name: Id
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for NotifyTransformSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A JSON webhook transform of a Notify instance (`[[transforms]]`): CEL
+              programs that turn the JSON a third party posts to a channel into
+              notifications. The expressions are checked with Notify's own compiler
+              when the CR is applied. Rendered into the instance's configuration;
+              `Ready` once every pod of the instance applied it. Holds no state in
+              Notify: deleting it removes it at once.
+            properties:
+              ack:
+                description: 'CEL: a button label, or `null` for none.'
+                nullable: true
+                type: string
+              body:
+                description: 'CEL: a string, Markdown.'
+                nullable: true
+                type: string
+              channels:
+                description: |-
+                  The channel ids it publishes into. One that no `NotifyChannel`
+                  declares is accepted (it may be a dynamic channel), with an advisory.
+                items:
+                  type: string
+                minItems: 1
+                type: array
+              externalId:
+                description: 'CEL: a string or a number; unset, a digest of the element.'
+                nullable: true
+                type: string
+              groupKey:
+                description: 'CEL: a string.'
+                nullable: true
+                type: string
+              id:
+                description: |-
+                  Its id in Notify, unique on the instance and the path segment
+                  producers post to (`/api/v1/compat/json/{id}/{channel}`): unset,
+                  `metadata.name`.
+                maxLength: 64
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              instanceRef:
+                description: |-
+                  The instance it belongs to: unset, the only one of this namespace.
+                  An instance of another namespace must accept this one
+                  (`objectSelector.namespaces`).
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              lang:
+                description: |-
+                  The language of the strings it writes: the "Open" label, the
+                  truncation marker.
+                enum:
+                - en
+                - fr
+                type: string
+              link:
+                description: 'CEL: an http(s) URL, the "Open" button.'
+                nullable: true
+                type: string
+              maxItems:
+                description: |-
+                  With `split` only: the most elements one post may carry (more is a
+                  `422`). Notify: 20.
+                format: uint32
+                maximum: 50.0
+                minimum: 1.0
+                nullable: true
+                type: integer
+              priority:
+                description: 'CEL: `min`, `low`, `default`, `high` or `urgent`.'
+                nullable: true
+                type: string
+              raw:
+                description: |-
+                  The received JSON appended to the body: `item` (with `split`) or the
+                  whole `payload`.
+                enum:
+                - off
+                - item
+                - payload
+                type: string
+              split:
+                description: |-
+                  The expressions below are CEL over `body`, the received JSON (and
+                  `item` with `split`); a literal string needs CEL quotes
+                  (`'"news"'`). CEL, optional: a list, one notification per element.
+                nullable: true
+                type: string
+              state:
+                description: 'CEL: `open`, `working` or `closed`.'
+                nullable: true
+                type: string
+              status:
+                description: 'CEL: `success`, `failure`, `warning`, `info` or `cancelled`.'
+                nullable: true
+                type: string
+              tags:
+                description: 'CEL: a list of strings.'
+                nullable: true
+                type: string
+              title:
+                description: 'CEL: a string.'
+                minLength: 1
+                type: string
+              titleFallback:
+                description: |-
+                  A plain string, the title when `title` fails or is empty; unset, the
+                  id.
+                nullable: true
+                type: string
+              update:
+                description: |-
+                  `false`: an element already published is skipped; `true`: it is
+                  revised.
+                type: boolean
+            required:
+            - channels
+            - title
+            type: object
+          status:
+            description: The status of a channel, service account, transform or trust policy.
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: |-
+                  `Ready` (in a configuration every ready pod of the instance applied),
+                  carrying one of the operator's reason codes.
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              id:
+                description: The id it has in Notify (`spec.id`, or `metadata.name`).
+                nullable: true
+                type: string
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under the same name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+            type: object
+        required:
+        - spec
+        title: NotifyTransform
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

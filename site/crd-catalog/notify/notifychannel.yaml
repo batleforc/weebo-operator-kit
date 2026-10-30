@@ -1,0 +1,381 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: notifychannels.notify.weebo.io
+spec:
+  group: notify.weebo.io
+  names:
+    kind: NotifyChannel
+    plural: notifychannels
+    shortNames:
+    - nch
+    singular: notifychannel
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.instance.name
+      name: Instance
+      type: string
+    - jsonPath: .status.id
+      name: Id
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for NotifyChannelSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A managed channel of a Notify instance (`[[channels.managed]]`): its
+              policy, who may publish, subscribe and manage, where it forwards, what
+              it polls. Rendered into the instance's configuration; `Ready` once
+              every pod of the instance applied it. Deleting it archives the channel
+              in Notify (it becomes dynamic, its history kept) or deletes it with its
+              notifications, as the instance's `channels.onRemoved` says.
+            properties:
+              access:
+                description: |-
+                  Who holds which scopes. A `serviceAccount` names a service account
+                  id of the same instance (a `NotifyServiceAccount`). At most 256.
+                items:
+                  description: One subject and the scopes it holds.
+                  properties:
+                    email:
+                      description: |-
+                        One person, by their verified email; takes effect at their first
+                        login.
+                      nullable: true
+                      type: string
+                    oidcGroup:
+                      description: Everyone in this group of the identity provider.
+                      nullable: true
+                      type: string
+                    oidcSub:
+                      description: One person, by their `sub` at the identity provider.
+                      nullable: true
+                      type: string
+                    scopes:
+                      items:
+                        description: What a principal may do in a channel.
+                        enum:
+                        - publish
+                        - subscribe
+                        - manage
+                        type: string
+                      minItems: 1
+                      type: array
+                    serviceAccount:
+                      description: A service account id of the instance.
+                      nullable: true
+                      type: string
+                  required:
+                  - scopes
+                  type: object
+                  x-kubernetes-validations:
+                  - message: an access binding names exactly one of oidcGroup, oidcSub, email and serviceAccount
+                    rule: '[has(self.oidcGroup), has(self.oidcSub), has(self.email), has(self.serviceAccount)].filter(x, x).size() == 1'
+                maxItems: 256
+                type: array
+              closeAfter:
+                description: |-
+                  Inactivity after which Notify closes an open notification
+                  (revisions and acknowledgements count as activity); `"0"`:
+                  publishers close their own. Unset: one week.
+                nullable: true
+                type: string
+              defaultPriority:
+                enum:
+                - min
+                - low
+                - default
+                - high
+                - urgent
+                - null
+                nullable: true
+                type: string
+              defaultTtl:
+                description: |-
+                  How long a notification is kept when its publisher says nothing
+                  (`48h`, `30d`; `"0"`, for ever, needs the instance's
+                  `retention.allowForever`). Unset: the instance's.
+                nullable: true
+                type: string
+              feeds:
+                description: RSS, Atom and JSON feeds polled into the channel. At most 32.
+                items:
+                  description: |-
+                    A feed Notify's leader polls, publishing each new item as `publisher`.
+                    The first poll only records what is already there.
+                  properties:
+                    allowPrivateNetwork:
+                      description: Poll a non-public address (refused otherwise).
+                      type: boolean
+                    every:
+                      description: 'How often it is polled, from `5m` to `24h`. Notify: `30m`.'
+                      nullable: true
+                      type: string
+                    lang:
+                      description: The language of the "Open" label and the summary title.
+                      enum:
+                      - en
+                      - fr
+                      type: string
+                    maxPerPoll:
+                      description: 'The most new items one poll publishes, from 1 to 50. Notify: 10.'
+                      format: uint32
+                      maximum: 50.0
+                      minimum: 1.0
+                      nullable: true
+                      type: integer
+                    publisher:
+                      description: |-
+                        The service account it publishes as: it must hold `publish` in this
+                        channel's `access`.
+                      type: string
+                    tags:
+                      description: Added to every item.
+                      items:
+                        type: string
+                      type: array
+                    url:
+                      description: |-
+                        http(s), no `user:pass@`. Changing it makes another feed, which
+                        primes again.
+                      maxLength: 2048
+                      minLength: 1
+                      type: string
+                  required:
+                  - publisher
+                  - url
+                  type: object
+                maxItems: 32
+                type: array
+                x-kubernetes-validations:
+                - message: a feed url appears once per channel
+                  rule: self.all(f, self.exists_one(o, o.url == f.url))
+              id:
+                description: |-
+                  Its id in Notify, unique on the instance, what publishers address:
+                  unset, `metadata.name`. **Immutable**: another id is another
+                  channel.
+                maxLength: 64
+                minLength: 1
+                pattern: ^[a-z0-9]([-_.a-z0-9]*[a-z0-9])?$
+                type: string
+                x-kubernetes-validations:
+                - message: 'id is immutable: delete the channel and create another'
+                  rule: self == oldSelf
+              instanceRef:
+                description: |-
+                  The instance it belongs to: unset, the only one of this namespace.
+                  An instance of another namespace must accept this one
+                  (`objectSelector.namespaces`).
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              maxTtl:
+                description: The longest TTL a publisher may ask for; a longer one is clamped.
+                nullable: true
+                type: string
+              name:
+                description: The name the inbox shows.
+                nullable: true
+                type: string
+              publishPerMin:
+                description: The most notifications one principal may publish per minute.
+                format: uint32
+                minimum: 1.0
+                nullable: true
+                type: integer
+              publishers:
+                description: |-
+                  CI jobs that may publish here with their forge's OIDC token: a
+                  trust policy scoped to this channel, taking priority over the
+                  instance's `NotifyTrustPolicy`s.
+                items:
+                  description: A CI identity allowed to publish here.
+                  properties:
+                    issuer:
+                      description: The forge's OIDC issuer.
+                      minLength: 1
+                      type: string
+                    scopes:
+                      items:
+                        description: What a principal may do in a channel.
+                        enum:
+                        - publish
+                        - subscribe
+                        - manage
+                        type: string
+                      minItems: 1
+                      type: array
+                    subject:
+                      description: The token's `sub` claim.
+                      minLength: 1
+                      type: string
+                  required:
+                  - issuer
+                  - scopes
+                  - subject
+                  type: object
+                maxItems: 64
+                type: array
+              receipts:
+                description: Record who read each notification.
+                type: boolean
+              sinks:
+                description: Where every notification is also delivered. At most 16.
+                items:
+                  description: An outbound delivery of every notification of the channel.
+                  properties:
+                    address:
+                      description: '`email`: where it goes, through the instance''s `smtp` relay.'
+                      nullable: true
+                      type: string
+                    secretRef:
+                      description: |-
+                        `webhook`: the secret each delivery is signed with, in a `Secret` of
+                        the channel's namespace labelled `notify.weebo.io/credential:
+                        "true"`. Mounted into the instance's pods, never written into its
+                        configuration.
+                      nullable: true
+                      properties:
+                        key:
+                          type: string
+                        name:
+                          type: string
+                      required:
+                      - key
+                      - name
+                      type: object
+                    type:
+                      enum:
+                      - webhook
+                      - email
+                      type: string
+                    url:
+                      description: |-
+                        `webhook`: where it posts, http(s), with no credentials in it (the
+                        url is stored and logged): put them in `secretRef`.
+                      nullable: true
+                      type: string
+                  required:
+                  - type
+                  type: object
+                  x-kubernetes-validations:
+                  - message: a webhook sink has a url and a secretRef (it signs every delivery), no address
+                    rule: self.type != 'webhook' || (has(self.url) && has(self.secretRef) && !has(self.address))
+                  - message: an email sink has an address only; the relay is the instance's smtp
+                    rule: self.type != 'email' || (has(self.address) && !has(self.url) && !has(self.secretRef))
+                maxItems: 16
+                type: array
+            type: object
+          status:
+            description: The status of a channel, service account, transform or trust policy.
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: |-
+                  `Ready` (in a configuration every ready pod of the instance applied),
+                  carrying one of the operator's reason codes.
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              id:
+                description: The id it has in Notify (`spec.id`, or `metadata.name`).
+                nullable: true
+                type: string
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under the same name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+            type: object
+        required:
+        - spec
+        title: NotifyChannel
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

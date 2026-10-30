@@ -17,6 +17,7 @@ const catalog = {
     { name: 'angos', repo: 'batleforc/weebo-angos', tag: 'v0.3.0' },
     { name: 'batlehub', repo: 'batleforc/weebo-batlehub', tag: 'v0.5.0' },
     { name: 'stalwart', repo: 'batleforc/weebo-stalwart', tag: 'v0.3.0' },
+    { name: 'notify', repo: 'batleforc/weebo-notify', tag: 'v0.1.0' },
     // Not a weebo operator, but on the kit's docs and api crate (its crdgen).
     { name: 'proxyauthk8s', repo: 'batleforc/ProxyAuthK8S', tag: 'v0.3.0' },
   ],
