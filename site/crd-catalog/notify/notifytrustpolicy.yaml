@@ -1,0 +1,187 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: notifytrustpolicies.notify.weebo.io
+spec:
+  group: notify.weebo.io
+  names:
+    kind: NotifyTrustPolicy
+    plural: notifytrustpolicies
+    shortNames:
+    - ntp
+    singular: notifytrustpolicy
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.instance.name
+      name: Instance
+      type: string
+    - jsonPath: .spec.issuer
+      name: Issuer
+      type: string
+    - jsonPath: .spec.subject
+      name: Subject
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for NotifyTrustPolicySpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A federation trust policy of a Notify instance (`[[trust_policy]]`):
+              CI jobs whose OIDC token comes from `issuer` with subject `subject`
+              exchange it for a Notify token holding `scopes` on `channels`. Rendered
+              into the instance's configuration; `Ready` once every pod of the
+              instance applied it. A new `issuer` takes a restart of the instance's
+              pods (its verifier is built at boot): the operator rolls them.
+            properties:
+              channels:
+                description: The channel ids the exchanged token reaches.
+                items:
+                  type: string
+                minItems: 1
+                type: array
+              instanceRef:
+                description: |-
+                  The instance it belongs to: unset, the only one of this namespace.
+                  An instance of another namespace must accept this one
+                  (`objectSelector.namespaces`).
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              issuer:
+                description: |-
+                  The CI forge's OIDC issuer, e.g.
+                  `https://token.actions.githubusercontent.com`.
+                minLength: 1
+                type: string
+              scopes:
+                items:
+                  description: What a principal may do in a channel.
+                  enum:
+                  - publish
+                  - subscribe
+                  - manage
+                  type: string
+                minItems: 1
+                type: array
+              subject:
+                description: The token's `sub` claim, as the forge writes it.
+                minLength: 1
+                type: string
+            required:
+            - channels
+            - issuer
+            - scopes
+            - subject
+            type: object
+          status:
+            description: The status of a channel, service account, transform or trust policy.
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: |-
+                  `Ready` (in a configuration every ready pod of the instance applied),
+                  carrying one of the operator's reason codes.
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              id:
+                description: The id it has in Notify (`spec.id`, or `metadata.name`).
+                nullable: true
+                type: string
+              instance:
+                description: |-
+                  The instance this object was resolved to and stays bound to: a
+                  `spec.instanceRef` by name only never silently moves to another
+                  instance created later under the same name.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+            type: object
+        required:
+        - spec
+        title: NotifyTrustPolicy
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

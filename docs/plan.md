@@ -2009,6 +2009,9 @@ application authentik (URL d'instance écrite avec son slash), celui d'un
 `ProxyKubeApi` et celui d'une instance Angos (sans slash) sont un seul
 nœud, les kinds partagés sont une fois au catalogue.
 
+weebo-notify v0.1.0 (kit v0.25.0, 2026-10-30) rejoint le catalogue avec
+ses cinq kinds et son `links.json`.
+
 Écarts au plan :
 
 - kit, dans la même release : un marqueur `x-weebo-produces` sur un champ

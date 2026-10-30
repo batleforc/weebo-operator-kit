@@ -1,0 +1,864 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: notifylocalinstances.notify.weebo.io
+spec:
+  group: notify.weebo.io
+  names:
+    kind: NotifyLocalInstance
+    plural: notifylocalinstances
+    shortNames:
+    - nli
+    singular: notifylocalinstance
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.endpoint
+      name: Endpoint
+      type: string
+    - jsonPath: .status.version
+      name: Version
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for NotifyLocalInstanceSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              A Notify instance the operator runs in this namespace: the server's
+              `Deployment` and its migration `Job`, the web UI, their configuration
+              (rendered from this spec and the channels, service accounts,
+              transforms and trust policies that attach to it) and the objects
+              around them. The database is yours: the instance only reads its URL.
+              `Ready` tells whether every pod runs the desired configuration.
+            properties:
+              admin:
+                description: 'The platform role, declared here only: no API path grants it.'
+                properties:
+                  oidcGroups:
+                    description: |-
+                      The identity provider's groups whose members administer the
+                      instance. Read at boot: changing it rolls the pods.
+                    items:
+                      type: string
+                    type: array
+                type: object
+              affinity:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              attachments:
+                description: 'Where attachments are stored: exactly one of `s3` and `filesystem`.'
+                properties:
+                  filesystem:
+                    description: |-
+                      A volume the operator creates (`<name>-attachments`), served through
+                      the server's own routes: one replica only.
+                    nullable: true
+                    properties:
+                      publicBaseUrl:
+                        description: |-
+                          The API's external base URL, which attachment links are signed
+                          against (`https://notify.example.com`).
+                        minLength: 1
+                        type: string
+                      size:
+                        default: 5Gi
+                        description: The claim's size. **Can only grow.**
+                        nullable: true
+                        x-kubernetes-int-or-string: true
+                      storageClassName:
+                        description: 'Unset: the cluster''s default class.'
+                        nullable: true
+                        type: string
+                      tokenSecretRef:
+                        description: |-
+                          The key the links are signed with (at least 32 bytes), in a
+                          labelled `Secret`. Unset: the operator generates one
+                          (`<name>-attachments-key`).
+                        nullable: true
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    required:
+                    - publicBaseUrl
+                    type: object
+                  s3:
+                    description: An S3-compatible bucket (RustFS, MinIO, AWS…).
+                    nullable: true
+                    properties:
+                      bucket:
+                        minLength: 1
+                        type: string
+                      credentialsSecretRef:
+                        description: |-
+                          A `Secret` of this namespace labelled `notify.weebo.io/credential:
+                          "true"`.
+                        properties:
+                          accessKeyIdKey:
+                            default: AWS_ACCESS_KEY_ID
+                            type: string
+                          name:
+                            type: string
+                          secretAccessKeyKey:
+                            default: AWS_SECRET_ACCESS_KEY
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      endpoint:
+                        minLength: 1
+                        type: string
+                      region:
+                        description: 'Notify: `us-east-1`.'
+                        nullable: true
+                        type: string
+                    required:
+                    - bucket
+                    - credentialsSecretRef
+                    - endpoint
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: attachments are stored in exactly one of s3 and filesystem
+                  rule: has(self.s3) != has(self.filesystem)
+              channels:
+                default:
+                  onRemoved: Archive
+                properties:
+                  onRemoved:
+                    default: Archive
+                    description: |-
+                      What a deleted `NotifyChannel` does to its channel: `Archive` keeps
+                      it and its history (it becomes dynamic, managed from the UI);
+                      `Delete` deletes it, history included.
+                    enum:
+                    - Archive
+                    - Delete
+                    type: string
+                type: object
+              database:
+                description: The Postgres database, yours to run (CloudNativePG, a managed service…).
+                properties:
+                  maxConnections:
+                    description: |-
+                      The pool size, from 10. Notify also holds one connection per
+                      background job it leads.
+                    format: uint32
+                    minimum: 10.0
+                    nullable: true
+                    type: integer
+                  urlSecretRef:
+                    description: |-
+                      Its URL (`postgres://user:password@host:5432/notify`), in a
+                      `Secret` of this namespace labelled `notify.weebo.io/credential:
+                      "true"`. Read at boot: changing it rolls the pods.
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                required:
+                - urlSecretRef
+                type: object
+              extraConfig:
+                description: |-
+                  Keys of Notify's `config.toml` no typed field renders, merged last.
+                  May not hold `channels.managed`, `service_accounts`, `transforms` or
+                  `trust_policy` (their CRs are the only source), nor a secret: put
+                  those in a `Secret` and reference it with an `env:`/`file:` value.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              federation:
+                description: |-
+                  The key the CI tokens the instance mints are signed with. Rendered
+                  as soon as a trust policy or a channel's `publishers` is bound (or a
+                  key is given here): without it Notify ignores both.
+                properties:
+                  audience:
+                    description: |-
+                      The minted tokens' audience. Notify: `weebo-notify`; change it when
+                      instances share an ingress.
+                    nullable: true
+                    type: string
+                  signingKeySecretRef:
+                    description: |-
+                      The Ed25519 private key (PKCS#8 PEM, `openssl genpkey -algorithm
+                      ed25519`), in a labelled `Secret`. Unset: the operator generates one
+                      (`<name>-federation-key`). Read at boot.
+                    nullable: true
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                type: object
+              image:
+                description: |-
+                  The server's image. Its repository must be one the operator allows
+                  (`managedInstances.allowedImages`). Its tag must be a Notify version
+                  the operator supports, never below the version the database was last
+                  migrated to (`status.migratedVersion`), and at most one minor ahead of
+                  it — unless the annotation `notify.weebo.io/approved-upgrade` names
+                  that tag. A new tag is migrated first (a `<name>-migrate-<hash>`
+                  `Job`, condition `Migrated`); the pods keep the previous one until it
+                  succeeds.
+                properties:
+                  pullPolicy:
+                    enum:
+                    - Always
+                    - IfNotPresent
+                    - Never
+                    - null
+                    nullable: true
+                    type: string
+                  repository:
+                    description: |-
+                      Default: `ghcr.io/batleforc/weebo-notify-v2` (the server),
+                      `ghcr.io/batleforc/weebo-notify-v2-web` (the web UI).
+                    nullable: true
+                    type: string
+                  tag:
+                    description: 'Default: the Notify version the operator targets.'
+                    nullable: true
+                    type: string
+                type: object
+              imagePullSecrets:
+                items:
+                  description: LocalObjectReference contains enough information to let you locate the referenced object inside the same namespace.
+                  properties:
+                    name:
+                      description: 'Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names'
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              ingress:
+                description: 'Unset: no `Ingress`; reach the `Service`s some other way.'
+                nullable: true
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  api:
+                    description: The API's host. `/healthz`, `/readyz` and `/metrics` are not routed.
+                    properties:
+                      host:
+                        minLength: 1
+                        type: string
+                      tlsSecretName:
+                        description: The `Secret` holding its certificate (cert-manager's, often).
+                        nullable: true
+                        type: string
+                    required:
+                    - host
+                    type: object
+                  className:
+                    nullable: true
+                    type: string
+                  web:
+                    description: |-
+                      The web UI's host (another one: the UI and the API are separate
+                      origins). Unset with the web UI on: no `Ingress` for it.
+                    nullable: true
+                    properties:
+                      host:
+                        minLength: 1
+                        type: string
+                      tlsSecretName:
+                        description: The `Secret` holding its certificate (cert-manager's, often).
+                        nullable: true
+                        type: string
+                    required:
+                    - host
+                    type: object
+                required:
+                - api
+                type: object
+              networkPolicy:
+                description: |-
+                  The `NetworkPolicy` the operator always puts around the pods: they
+                  answer the operator, the ingress controller and these peers; they
+                  reach DNS, the database, the object store, the identity provider and
+                  these.
+                properties:
+                  egressTo:
+                    description: |-
+                      Where the pods may connect besides DNS and 443/5432 anywhere: an SMTP
+                      relay, a collector, the hosts of webhooks and feeds on other ports.
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    type: array
+                  ingressFrom:
+                    description: More peers that may reach the API and the web UI.
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    type: array
+                type: object
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                type: object
+              objectSelector:
+                description: |-
+                  Which `NotifyChannel`s, `NotifyServiceAccount`s, `NotifyTransform`s
+                  and `NotifyTrustPolicy`s the instance takes, and from which
+                  namespaces.
+                properties:
+                  namespaces:
+                    description: |-
+                      The namespaces whose objects may attach to this instance (with an
+                      `instanceRef` naming it): its own always.
+                    properties:
+                      from:
+                        default: Same
+                        description: '`Same` (the instance''s namespace), `All`, or `Selector`.'
+                        enum:
+                        - Same
+                        - All
+                        - Selector
+                        type: string
+                      selector:
+                        description: 'The labels of the namespaces accepted, with `from: Selector`.'
+                        nullable: true
+                        properties:
+                          matchExpressions:
+                            description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                            items:
+                              description: A label selector requirement is a selector that contains values, a key, and an operator that relates the key and values.
+                              properties:
+                                key:
+                                  description: key is the label key that the selector applies to.
+                                  type: string
+                                operator:
+                                  description: operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist.
+                                  type: string
+                                values:
+                                  description: values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch.
+                                  items:
+                                    type: string
+                                  type: array
+                              required:
+                              - key
+                              - operator
+                              type: object
+                            type: array
+                          matchLabels:
+                            additionalProperties:
+                              type: string
+                            description: matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed.
+                            type: object
+                        type: object
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'namespaces.selector is required with from: Selector'
+                      rule: self.from != 'Selector' || has(self.selector)
+                  selector:
+                    description: Only the objects whose labels match; all of them when unset.
+                    nullable: true
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                        items:
+                          description: A label selector requirement is a selector that contains values, a key, and an operator that relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector applies to.
+                              type: string
+                            operator:
+                              description: operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                type: object
+              oidc:
+                description: |-
+                  The identity provider people sign in with. Read at boot: changing it
+                  rolls the pods.
+                properties:
+                  audiences:
+                    description: More audiences a token may carry; the client id always is one.
+                    items:
+                      type: string
+                    type: array
+                  clientId:
+                    description: The public client the web UI and the CLI sign in with.
+                    minLength: 1
+                    type: string
+                  groupsClaim:
+                    description: 'The claim carrying group membership. Notify: `groups`.'
+                    nullable: true
+                    type: string
+                  issuer:
+                    minLength: 1
+                    type: string
+                  trustUnverifiedEmail:
+                    description: |-
+                      Trust an `email` the issuer does not mark verified. Only for an
+                      issuer that never sends `email_verified`.
+                    type: boolean
+                required:
+                - clientId
+                - issuer
+                type: object
+              podAnnotations:
+                additionalProperties:
+                  type: string
+                type: object
+              reconcile:
+                default:
+                  maxRemovals: 5
+                description: |-
+                  Notify's guard on removals: a pass that would remove more channels and
+                  service accounts than this applies everything else and refuses the
+                  removals (their CRs keep their finalizer, `RemovalRefused`).
+                properties:
+                  allowMassRemoval:
+                    description: |-
+                      Lift the guard, for the one change that removes a lot on purpose;
+                      unset it after.
+                    type: boolean
+                  maxRemovals:
+                    default: 5
+                    format: uint32
+                    minimum: 0.0
+                    type: integer
+                type: object
+              replicas:
+                default: 2
+                description: |-
+                  The server's pods. The API is stateless; background jobs run on one
+                  of them, elected through the database.
+                format: int32
+                minimum: 0.0
+                type: integer
+              resources:
+                description: 'Unset: requests 100m CPU / 128Mi, limit 512Mi.'
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              retention:
+                properties:
+                  allowForever:
+                    description: 'Let a channel keep notifications for ever (`defaultTtl: "0"`).'
+                    type: boolean
+                  audit:
+                    description: 'How long audit entries are kept, at least `90d`. Unset: for ever.'
+                    nullable: true
+                    type: string
+                  defaultTtl:
+                    description: The TTL of a notification on a channel that sets none (`30d`).
+                    nullable: true
+                    type: string
+                  maxTtl:
+                    description: The longest TTL any channel may set.
+                    nullable: true
+                    type: string
+                type: object
+              server:
+                properties:
+                  corsOrigins:
+                    description: |-
+                      Origins allowed to call the API from a browser, besides the web
+                      UI's own (added by the operator).
+                    items:
+                      type: string
+                    type: array
+                  docs:
+                    description: 'Serve the API reference at `/api/docs`. Notify: `true`.'
+                    nullable: true
+                    type: boolean
+                  publicUrl:
+                    description: |-
+                      The API's external base URL, when something other than this
+                      instance's `ingress` exposes it (a Gateway API route, an external
+                      proxy): `https://notify.example.com`, an absolute http(s) URL with no
+                      path. What the web UI calls. Unset: `https://<ingress.api.host>`, or
+                      — no `ingress` either — the in-cluster `Service`, which browsers
+                      can't reach (`ApiNotExposed`).
+                    nullable: true
+                    type: string
+                    x-kubernetes-validations:
+                    - message: 'publicUrl is an absolute http(s) URL with no path, query or credentials: https://notify.example.com'
+                      rule: self.matches('^https?://[^/?#@\\s]+/?$')
+                type: object
+              serviceMonitor:
+                default:
+                  enabled: true
+                description: A `ServiceMonitor` on `/metrics`, created when its CRD exists.
+                properties:
+                  enabled:
+                    default: true
+                    type: boolean
+                  labels:
+                    additionalProperties:
+                      type: string
+                    type: object
+                type: object
+              sinks:
+                properties:
+                  deadLetterRetention:
+                    description: How long a dead letter is kept (`30d`, Notify's default).
+                    nullable: true
+                    type: string
+                  fingerprintKeySecretRef:
+                    description: |-
+                      The key webhook and feed urls are fingerprinted under (at least 32
+                      bytes), in a labelled `Secret`. Unset: the operator generates one
+                      (`<name>-fingerprint-key`). Read at boot; rotating it has a runbook
+                      (Notify's docs).
+                    nullable: true
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                  previousFingerprintKeySecretRefs:
+                    description: |-
+                      The keys used before `fingerprintKeySecretRef`, for one rollout after
+                      a rotation (Notify re-keys the stored ids at boot), in labelled
+                      `Secret`s. Without `"` or `\` (base64 or hex keys are fine).
+                    items:
+                      description: A key of a `Secret` in the referencing CR's own namespace.
+                      properties:
+                        key:
+                          type: string
+                        name:
+                          type: string
+                      required:
+                      - key
+                      - name
+                      type: object
+                    type: array
+                type: object
+              smtp:
+                description: The relay `email` sinks hand their mail to.
+                nullable: true
+                properties:
+                  from:
+                    description: The envelope sender.
+                    minLength: 1
+                    type: string
+                  passwordSecretRef:
+                    description: In a labelled `Secret`.
+                    nullable: true
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                  permalinkBase:
+                    description: |-
+                      The web UI's base URL, for the mail's link (`<base>/n/<id>`, a UI
+                      route). Unset: `https://<ingress.web.host>` when the UI has an
+                      `Ingress`, else no link.
+                    nullable: true
+                    type: string
+                  url:
+                    description: '`smtp://host:port` inside a cluster, `smtps://…` across one.'
+                    minLength: 1
+                    type: string
+                  username:
+                    nullable: true
+                    type: string
+                required:
+                - from
+                - url
+                type: object
+              telemetry:
+                description: 'Where traces go. Unset: none exported.'
+                nullable: true
+                properties:
+                  otlpEndpoint:
+                    description: The collector's OTLP HTTP base URL, e.g. `http://collector:4318`.
+                    minLength: 1
+                    type: string
+                  sampleRatio:
+                    description: The fraction of root traces recorded, `"0.0"` to `"1.0"`.
+                    nullable: true
+                    type: string
+                  serviceName:
+                    description: 'Unset: the instance''s name.'
+                    nullable: true
+                    type: string
+                required:
+                - otlpEndpoint
+                type: object
+              tolerations:
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                type: array
+              web:
+                default:
+                  enabled: true
+                  replicas: 1
+                description: |-
+                  The web UI: a `<name>-web` Deployment serving the browser client,
+                  pointed at this instance's API and identity provider.
+                properties:
+                  enabled:
+                    default: true
+                    type: boolean
+                  image:
+                    description: Its repository must be one the operator allows.
+                    properties:
+                      pullPolicy:
+                        enum:
+                        - Always
+                        - IfNotPresent
+                        - Never
+                        - null
+                        nullable: true
+                        type: string
+                      repository:
+                        description: |-
+                          Default: `ghcr.io/batleforc/weebo-notify-v2` (the server),
+                          `ghcr.io/batleforc/weebo-notify-v2-web` (the web UI).
+                        nullable: true
+                        type: string
+                      tag:
+                        description: 'Default: the Notify version the operator targets.'
+                        nullable: true
+                        type: string
+                    type: object
+                  replicas:
+                    default: 1
+                    format: int32
+                    minimum: 0.0
+                    type: integer
+                  resources:
+                    description: 'Unset: requests 10m CPU / 16Mi, limit 64Mi.'
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                type: object
+              webPush:
+                description: |-
+                  Web Push (RFC 8292). Unset: no push transport, every push degrades
+                  to a poke the client fetches.
+                nullable: true
+                properties:
+                  contact:
+                    description: '`mailto:…` or `https://…`: how a push relay reaches you.'
+                    minLength: 1
+                    type: string
+                  vapidKeySecretRef:
+                    description: |-
+                      The P-256 VAPID private key (PEM), in a labelled `Secret`. Rotating
+                      it silently invalidates every existing subscription.
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                required:
+                - contact
+                - vapidKeySecretRef
+                type: object
+            required:
+            - attachments
+            - database
+            - oidc
+            type: object
+            x-kubernetes-validations:
+            - message: 'more than one replica needs S3 attachments: a filesystem store lives on one pod''s volume'
+              rule: self.replicas <= 1 || !has(self.attachments.filesystem)
+          status:
+            description: The status of a `NotifyLocalInstance`.
+            nullable: true
+            properties:
+              appliedConfigDigest:
+                description: The last `configDigest` every ready pod reported applied.
+                nullable: true
+                type: string
+              availableReplicas:
+                format: int32
+                nullable: true
+                type: integer
+              bootHash:
+                description: |-
+                  The hash of what the server reads at boot only; a new one rolls the
+                  pods.
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                description: '`Ready`, `Migrated`, carrying one of the operator''s reason codes.'
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              configDigest:
+                description: The SHA-256 of the `config.toml` last written to the `ConfigMap`.
+                nullable: true
+                type: string
+              endpoint:
+                description: The API's URL inside the cluster (its `Service`).
+                nullable: true
+                type: string
+              migratedVersion:
+                description: The tag the database schema was last migrated to.
+                nullable: true
+                type: string
+              objects:
+                additionalProperties:
+                  description: What an instance made of an object bound to it.
+                  properties:
+                    appliedGeneration:
+                      description: |-
+                        The `metadata.generation` every pod of the instance confirmed
+                        loading.
+                      format: int64
+                      nullable: true
+                      type: integer
+                    conflictWith:
+                      description: The object holding its id (`namespace/name`), in conflict.
+                      nullable: true
+                      type: string
+                    generation:
+                      description: The `metadata.generation` rendered.
+                      format: int64
+                      nullable: true
+                      type: integer
+                    id:
+                      description: Its id in Notify (none for a trust policy).
+                      nullable: true
+                      type: string
+                    message:
+                      description: Why it isn't rendered.
+                      nullable: true
+                      type: string
+                    state:
+                      enum:
+                      - Rendered
+                      - Conflict
+                      - SecretMissing
+                      - SecretNotAllowed
+                      - Invalid
+                      type: string
+                    unmanagedChannels:
+                      description: |-
+                        The channel ids it names that no `NotifyChannel` of the instance
+                        declares (dynamic channels, or a typo).
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - state
+                  type: object
+                description: |-
+                  The channels, service accounts, transforms and trust policies bound
+                  to the instance and what became of each (`<kind>/<namespace>/<name>`,
+                  [`object_key`]): rendered, or why not.
+                type: object
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              refusedRemovals:
+                description: |-
+                  The removals Notify's guard (`reconcile.maxRemovals`) refused in its
+                  last pass: their objects keep their finalizer.
+                properties:
+                  channels:
+                    items:
+                      type: string
+                    type: array
+                  serviceAccounts:
+                    items:
+                      type: string
+                    type: array
+                type: object
+              version:
+                description: The Notify tag the pods run.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: NotifyLocalInstance
+        type: object
+        x-kubernetes-validations:
+        - message: 'the instance''s name names its Services (and <name>-web): a DNS-1035 label (lowercase letters, digits and ''-'', starting with a letter), at most 50 characters'
+          rule: size(self.metadata.name) <= 50 && self.metadata.name.matches('^[a-z]([-a-z0-9]*[a-z0-9])?$')
+    served: true
+    storage: true
+    subresources:
+      status: {}
