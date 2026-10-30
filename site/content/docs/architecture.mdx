@@ -29,8 +29,10 @@ Pure building blocks.
   `Severity` (`Blocking`/`Advisory`); the `reason_codes!` macro declares
   an operator's catalog enum with `as_str()`, `ALL` and `Display` from one
   list. The kit never defines a code.
-- **`failure`**: `Failure<R>` (blocks `Ready`) and `Advisory<R>` (a
-  non-blocking condition), generic over the operator's reason codes.
+- **`failure`**: `Failure<R>` (blocks `Ready`), `Advisory<R>` (a
+  non-blocking condition) and `Aspect<R>` (a condition of the operator's
+  own `type`, `True`, `False` or `Unknown`), generic over the operator's
+  reason codes.
 - **`drift`**: write only what differs. `Drift` clears every PATCH field
   already holding its desired value and records the ones that differ
   (`keep`, `keep_opt`, `keep_with`, `note`), with comparisons for what
@@ -149,9 +151,10 @@ logic.
   `observedGeneration` on success and the operator's fields, retried on
   transient errors, then the Events) and `record` (a status field written
   right after the remote write it records). **`conditions`** builds the
-  condition list.
+  condition list; `conditions_with_aspects` adds the operator's own
+  condition types between `Ready` and the advisories.
 - **`events`**: `announce_outcome` (a `Warning` on every reconcile ending
-  `Ready: False`, `Normal` on changes), `announce_change`,
+  `Ready: False` or any condition turning `False`, `Normal` on changes), `announce_change`,
   `announce_drift`, `announce_error`/`spawn_error`.
 - **`metrics`**: `ReconcileMetrics` — `<prefix>_reconcile_total`,
   `<prefix>_reconcile_duration_seconds` and, through `record_write`,

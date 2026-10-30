@@ -8,5 +8,5 @@ pub mod reason;
 pub mod vault_paths;
 
 pub use drift::{Drift, RemoteWrite};
-pub use failure::{Advisory, Failure};
+pub use failure::{Advisory, Aspect, AspectStatus, Failure};
 pub use reason::{Reason, Severity};

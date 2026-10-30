@@ -6,7 +6,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use kube::runtime::events::{Event, EventType, Recorder};
 use weebo_kit_api::Condition;
 use weebo_kit_api::status::ready;
-use weebo_kit_domain::{Advisory, Failure, Reason};
+use weebo_kit_domain::{Advisory, Aspect, Failure, Reason};
 
 /// The full condition list: `Ready` first, then one condition per advisory
 /// reason (its `type` is the reason's name; condition types are unique, so
@@ -15,6 +15,21 @@ use weebo_kit_domain::{Advisory, Failure, Reason};
 pub fn conditions<R: Reason>(
     previous: &[Condition],
     outcome: &Result<String, Failure<R>>,
+    advisories: &[Advisory<R>],
+    generation: Option<i64>,
+    now: &Time,
+) -> Vec<Condition> {
+    conditions_with_aspects(previous, outcome, &[], advisories, generation, now)
+}
+
+/// [`conditions`] with the operator's own condition types: `Ready`, then
+/// one condition per [`Aspect`], then the advisories. An aspect whose
+/// `type` is already taken (`Ready`, or an earlier aspect) is dropped, so
+/// condition types stay unique.
+pub fn conditions_with_aspects<R: Reason>(
+    previous: &[Condition],
+    outcome: &Result<String, Failure<R>>,
+    aspects: &[Aspect<R>],
     advisories: &[Advisory<R>],
     generation: Option<i64>,
     now: &Time,
@@ -39,6 +54,18 @@ pub fn conditions<R: Reason>(
         Ok(message) => condition(Condition::READY, "True", R::SUCCESS, message),
         Err(f) => condition(Condition::READY, "False", f.reason, &f.message),
     }];
+    for aspect in aspects {
+        if out.iter().any(|c| c.type_ == aspect.type_) {
+            tracing::warn!(type_ = aspect.type_, "duplicate condition type dropped");
+            continue;
+        }
+        out.push(condition(
+            aspect.type_,
+            aspect.status.as_str(),
+            aspect.reason,
+            &aspect.message,
+        ));
+    }
     for advisory in advisories {
         if let Some(same) = out.iter_mut().find(|c| c.type_ == advisory.reason.as_str()) {
             same.message = format!("{}; {}", same.message, advisory.message);
@@ -171,5 +198,47 @@ mod tests {
         );
         assert_eq!(conds.len(), 2);
         assert_eq!(conds[1].message, "carol; dave");
+    }
+
+    #[test]
+    fn aspects_carry_their_own_type_and_status() {
+        use weebo_kit_domain::AspectStatus;
+        let aspect = |type_, status| Aspect {
+            type_,
+            status,
+            reason: Code::Unreachable,
+            message: "probe".into(),
+        };
+        let advisories = [Advisory {
+            reason: Code::Pending,
+            message: "carol".into(),
+        }];
+        let conds = conditions_with_aspects(
+            &[],
+            &Ok("fine".into()),
+            &[
+                aspect("Trusted", AspectStatus::False),
+                aspect("Ready", AspectStatus::False),
+                aspect("Trusted", AspectStatus::True),
+            ],
+            &advisories,
+            None,
+            &at(1),
+        );
+        let types: Vec<_> = conds.iter().map(|c| c.type_.as_str()).collect();
+        assert_eq!(types, ["Ready", "Trusted", "Pending"]);
+        assert_eq!(conds[0].status, "True");
+        assert_eq!(conds[1].status, "False");
+        assert_eq!(conds[1].reason, "Unreachable");
+
+        let trusted = conditions_with_aspects(
+            &conds,
+            &Ok("fine".into()),
+            &[aspect("Trusted", AspectStatus::True)],
+            &[],
+            None,
+            &at(2),
+        );
+        assert_eq!(trusted[1].last_transition_time, Some(at(2)));
     }
 }

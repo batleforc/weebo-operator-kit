@@ -12,7 +12,7 @@ logic, in the same hexagonal layout the operators use.
 
 | Crate                   | What it gives an operator                                                                                                 |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `weebo-kit-domain`      | `reason_codes!` + `Reason`, `Failure<R>`/`Advisory<R>`, the namespace allow-list engine                                   |
+| `weebo-kit-domain`      | `reason_codes!` + `Reason`, `Failure<R>`/`Advisory<R>`/`Aspect<R>`, the namespace allow-list engine                       |
 | `weebo-kit-api`         | CRD field types: `Condition`, `SecretKeyRef`, `ObjectRef`, `SecretTarget`, `TlsOptions`; the common annotations          |
 | `weebo-kit-application` | `SecretStore`/`PolicySource` ports, secret-emission helpers, `*Ref` resolution, `FakeSecretStore` (feature `test-support`) |
 | `weebo-kit-adapters`    | Kubernetes and Vault secret stores, per-target routing, instance resolution, the importer's adoption flow                 |

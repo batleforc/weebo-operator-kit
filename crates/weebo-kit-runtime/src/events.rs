@@ -71,12 +71,13 @@ pub fn outcome_events(previous: &[Condition], current: &[Condition]) -> Vec<Even
     }
     for cond in current.iter().filter(|c| c.type_ != Condition::READY) {
         if !same_state(find(previous, &cond.type_), cond) {
-            out.push(event(
-                EventType::Normal,
-                &cond.reason,
-                RECONCILE,
-                &cond.message,
-            ));
+            // Advisories are always `True`; only an aspect turns `False`.
+            let type_ = if cond.status == "False" {
+                EventType::Warning
+            } else {
+                EventType::Normal
+            };
+            out.push(event(type_, &cond.reason, RECONCILE, &cond.message));
         }
     }
     for gone in previous.iter().filter(|c| c.type_ != Condition::READY) {
@@ -227,6 +228,24 @@ mod tests {
             message: "carol".to_string(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn an_aspect_turning_false_warns_once() {
+        let ok = ready_cond("True", "Reconciled");
+        let mut untrusted = ok.clone();
+        untrusted.push(Condition {
+            type_: "Trusted".to_string(),
+            status: "False".to_string(),
+            reason: "NotTrusted".to_string(),
+            message: "probe refused".to_string(),
+            ..Default::default()
+        });
+        let events = outcome_events(&ok, &untrusted);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].type_, EventType::Warning);
+        assert_eq!(events[0].reason, "NotTrusted");
+        assert!(outcome_events(&untrusted, &untrusted).is_empty());
     }
 
     #[test]
