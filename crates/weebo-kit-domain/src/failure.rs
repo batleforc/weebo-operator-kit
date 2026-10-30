@@ -31,3 +31,35 @@ pub struct Advisory<R> {
     pub reason: R,
     pub message: String,
 }
+
+/// A condition of the operator's own `type` (`UpstreamTrusted`), beside
+/// `Ready` and the advisories: one facet of the object, which can be
+/// `True`, `False` or `Unknown` while `Ready` says whether it works. The
+/// reason's severity says nothing here: an aspect never blocks `Ready` by
+/// itself, the reconcile decides that through its outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Aspect<R> {
+    /// PascalCase, never `Ready` nor an advisory reason's name.
+    pub type_: &'static str,
+    pub status: AspectStatus,
+    pub reason: R,
+    pub message: String,
+}
+
+/// The `status` of an [`Aspect`] condition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AspectStatus {
+    True,
+    False,
+    Unknown,
+}
+
+impl AspectStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            AspectStatus::True => "True",
+            AspectStatus::False => "False",
+            AspectStatus::Unknown => "Unknown",
+        }
+    }
+}
