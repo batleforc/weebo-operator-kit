@@ -15,7 +15,7 @@ kit release is v0.25.0.
 | [weebo-batlehub](https://github.com/batleforc/weebo-batlehub) | BatleHub registry proxy-caches | v0.5.0 | v0.24.0 | [site](https://batleforc.github.io/weebo-batlehub/) |
 | [weebo-angos](https://github.com/batleforc/weebo-angos) | Angos OCI registries | v0.3.0 | v0.24.0 | [site](https://batleforc.github.io/weebo-angos/) |
 | [weebo-stalwart](https://github.com/batleforc/weebo-stalwart) | a Stalwart mail server | v0.3.0 | v0.24.0 | [site](https://batleforc.github.io/weebo-stalwart/) |
-| [weebo-notify](https://github.com/batleforc/weebo-notify) | weebo-notify instances and their configuration | v0.1.0 | v0.25.0 | — |
+| [weebo-notify](https://github.com/batleforc/weebo-notify) | weebo-notify instances and their configuration | v0.2.0 | v0.25.0 | — |
 | [ProxyAuthK8S](https://github.com/batleforc/ProxyAuthK8S) | an authenticating proxy in front of Kubernetes API servers | v0.3.0 | v0.24.0 (tasks, docs, `weebo-kit-api` in crdgen) | [site](https://batleforc.github.io/ProxyAuthK8S/) (French) |
 
 ## The weebo operators
@@ -85,7 +85,10 @@ Runs [weebo-notify](https://github.com/batleforc/weebo-notify-v2)
 (`NotifyLocalInstance`: workload, migration Job, version guard) and the
 objects it is configured with — channels, service accounts, JSON webhook
 transforms, federation trust policies — rendered into the instance's
-`config.toml` by Notify's own `notify-config` crate. Like angos, it has
+`config.toml` by Notify's own `notify-config` crate. Its `NotifyApiKey`
+mints a service account's key through the instance's key issuer and
+writes it to the kit's secret targets (Kubernetes Secrets, or the
+operator's own Vault, set in its chart). Like angos, it has
 no administration API to call: Notify reloads the file and reports the
 digest it loaded on `/healthz`, which the operator waits for before
 marking an object applied. Generated from the kit's template; what it

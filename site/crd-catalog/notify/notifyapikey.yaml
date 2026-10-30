@@ -1,0 +1,246 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: notifyapikeys.notify.weebo.io
+spec:
+  group: notify.weebo.io
+  names:
+    kind: NotifyApiKey
+    plural: notifyapikeys
+    shortNames:
+    - nak
+    singular: notifyapikey
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.instance.name
+      name: Instance
+      type: string
+    - jsonPath: .status.serviceAccount
+      name: Account
+      type: string
+    - jsonPath: .status.keyPrefix
+      name: Prefix
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for NotifyApiKeySpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              An API key of a `NotifyServiceAccount`, minted by the operator through
+              the instance's key issuer and written to `secretTargets` as
+              `NOTIFY_API_KEY` (`wnk_…`) and `NOTIFY_URL`.
+
+              A key can't be read back: a lost target, a new
+              `notify.weebo.io/rotate-secret` value, or a change of the service
+              account, scopes or channels mints a new key. The new key is written to
+              every target before the previous one is revoked. Deleting the CR
+              revokes its key and deletes its targets; deleting the service account
+              revokes it too.
+            properties:
+              channels:
+                description: The channel ids the key may act in.
+                items:
+                  type: string
+                minItems: 1
+                type: array
+              instanceRef:
+                description: |-
+                  The instance: unset, the only one of this namespace. An instance of
+                  another namespace must accept this one
+                  (`objectSelector.namespaces`).
+                nullable: true
+                properties:
+                  kind:
+                    description: The kind of instance a reference designates.
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    nullable: true
+                    type: string
+                  name:
+                    description: '`metadata.name` of the instance.'
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of a `LocalInstance`. Defaults to this object's own;
+                      required on a cluster-scoped object. Another namespace's local
+                      instance must share itself with this one (its `sharedWith`).
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: namespace only applies to kind LocalInstance
+                  rule: '!has(self.namespace) || !has(self.kind) || self.kind == ''LocalInstance'''
+              scopes:
+                description: |-
+                  What the key may do. Notify refuses a scope the service account
+                  doesn't hold in every channel listed.
+                items:
+                  description: What a principal may do in a channel.
+                  enum:
+                  - publish
+                  - subscribe
+                  - manage
+                  type: string
+                minItems: 1
+                type: array
+              secretTargets:
+                description: |-
+                  Defaults to one target named after the CR, in its namespace, on the
+                  operator's default backend (`secretStore.defaultBackend` of its
+                  chart). A Vault target uses the operator's Vault connection and
+                  stays under `<pathPrefix>/<namespace>/`.
+                items:
+                  description: |-
+                    Where an emitted secret (generated password or key, OAuth2 credentials,
+                    access token) is written. A CR may list several targets — the same
+                    value is fanned out to each.
+                  properties:
+                    backend:
+                      default: kubernetes
+                      description: |-
+                        `kubernetes` (default) or `vault`. A Vault target reuses the Vault
+                        connection (address, mount, auth) the instance configures, which it
+                        must then do.
+                      enum:
+                      - kubernetes
+                      - vault
+                      type: string
+                    name:
+                      description: |-
+                        Kubernetes: the `Secret` name. Vault: names the default path
+                        `<pathPrefix>/<namespace>/<name>` when `path` is unset.
+                      type: string
+                    namespace:
+                      description: |-
+                        Kubernetes `Secret` namespace (Vault: the namespace segment of the
+                        default path). Defaults to the CR's own namespace; required on
+                        cluster-scoped CRs. A namespaced CR may only name its own namespace.
+                      nullable: true
+                      type: string
+                    path:
+                      description: |-
+                        Vault only: explicit KV v2 path under the instance's mount. It must
+                        stay under `<pathPrefix>/<namespace>/` (this object's namespace, or
+                        the target's on a cluster-scoped object), unless the instance's
+                        `pathGrants` open it to this object.
+                      nullable: true
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              serviceAccountRef:
+                description: |-
+                  The `NotifyServiceAccount` of this namespace the key acts as, bound
+                  to the same instance.
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - channels
+            - scopes
+            - serviceAccountRef
+            type: object
+          status:
+            description: The status of an API key.
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: '`Ready`, carrying one of the operator''s reason codes.'
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      description: One of the operator's reason codes — never a hand-written string.
+                      type: string
+                    status:
+                      description: '`"True"`, `"False"`, or `"Unknown"`.'
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              instance:
+                description: The instance this key was resolved to and stays bound to.
+                nullable: true
+                properties:
+                  kind:
+                    description: '`Instance` or `LocalInstance`.'
+                    enum:
+                    - Instance
+                    - LocalInstance
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    description: The local instance's namespace; absent for a cluster-scoped one.
+                    nullable: true
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              keyId:
+                description: The key's id in Notify.
+                nullable: true
+                type: string
+              keyPrefix:
+                description: The key's public prefix (`wnk_<prefix>_…`), as Notify lists it.
+                nullable: true
+                type: string
+              lastRotation:
+                description: The `notify.weebo.io/rotate-secret` value the key was minted for.
+                nullable: true
+                type: string
+              observedGeneration:
+                description: The `metadata.generation` the last successful reconcile applied.
+                format: int64
+                nullable: true
+                type: integer
+              serviceAccount:
+                description: The service account id the key acts as.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: NotifyApiKey
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
