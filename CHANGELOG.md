@@ -2,6 +2,17 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.25.1](https://github.com/batleforc/weebo-operator-kit/compare/a5f569ece7d6662dc4cc4f469b5943394a961568..v0.25.1) - 2026-10-30
+#### Bug Fixes
+- (**leader**) bound each lease renewal attempt, retry a stuck one (#38) - ([a02541b](https://github.com/batleforc/weebo-operator-kit/commit/a02541bbcf1ac5d426a0096bc7caa766cbd40155)) - Maxime, Claude Opus 5.5
+#### Documentation
+- (**site**) weebo-notify's docs site is published (#37) - ([8afcd83](https://github.com/batleforc/weebo-operator-kit/commit/8afcd83ae5f34a90cf4af8e6b06df67b99ac3737)) - Maxime, Claude Opus 5.5
+#### Miscellaneous Chores
+- (**site**) the CRD catalog on weebo-notify v0.2.0 (NotifyApiKey) (#36) - ([c1417e6](https://github.com/batleforc/weebo-operator-kit/commit/c1417e68e27753ffaeb8df2890c2400cd132ded2)) - Maxime, Claude Opus 5.5
+- (**site**) weebo-notify v0.1.0 in the CRD catalog (#35) - ([a5f569e](https://github.com/batleforc/weebo-operator-kit/commit/a5f569ece7d6662dc4cc4f469b5943394a961568)) - Maxime, Claude Opus 5.5
+
+- - -
+
 ## [v0.25.0](https://github.com/batleforc/weebo-operator-kit/compare/228911e515c8511970fa102c6ba96198d19885e6..v0.25.0) - 2026-10-29
 #### Features
 - close the gaps weebo-notify found (template lints, admission warnings, envtest teardown) (#33) - ([e872d61](https://github.com/batleforc/weebo-operator-kit/commit/e872d619ce55eef1ff087abf16335d2d74594bcf)) - Maxime, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5
