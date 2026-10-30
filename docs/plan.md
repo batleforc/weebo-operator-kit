@@ -2010,7 +2010,8 @@ application authentik (URL d'instance écrite avec son slash), celui d'un
 nœud, les kinds partagés sont une fois au catalogue.
 
 weebo-notify v0.1.0 (kit v0.25.0, 2026-10-30) rejoint le catalogue avec
-ses cinq kinds et son `links.json`.
+ses cinq kinds et son `links.json` ; v0.2.0 (même jour) y ajoute
+`NotifyApiKey`.
 
 Écarts au plan :
 

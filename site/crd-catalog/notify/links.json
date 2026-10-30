@@ -1,5 +1,48 @@
 {
   "kinds": {
+    "NotifyApiKey": {
+      "produces": [
+        {
+          "each": "spec.secretTargets[]",
+          "keyNames": [
+            "NOTIFY_API_KEY",
+            "NOTIFY_URL"
+          ],
+          "kind": {
+            "group": "",
+            "kind": "Secret"
+          },
+          "name": [
+            "name"
+          ],
+          "namespace": "namespace",
+          "unless": {
+            "equals": "vault",
+            "path": "backend"
+          }
+        }
+      ],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "notify.weebo.io",
+              "kind": "NotifyLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.serviceAccountRef",
+          "to": [
+            {
+              "group": "notify.weebo.io",
+              "kind": "NotifyServiceAccount"
+            }
+          ]
+        }
+      ]
+    },
     "NotifyChannel": {
       "produces": [],
       "references": [
