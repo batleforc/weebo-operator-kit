@@ -3,7 +3,7 @@
 //! would turn every failover into an outage for the governed kinds.
 
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -61,7 +61,7 @@ impl WebhookServer {
     }
 }
 
-fn drain() -> Duration {
+fn drain_from_env() -> Duration {
     let Ok(raw) = std::env::var("WEEBO_SHUTDOWN_DRAIN_SECONDS") else {
         return DEFAULT_DRAIN;
     };
@@ -74,6 +74,54 @@ fn drain() -> Duration {
     )
 }
 
+/// What the server does when its certificate isn't mounted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissingCertificate {
+    /// Serve nothing and report ready: a local run, where reconcilers
+    /// re-check what admission would have (what [`spawn`] does).
+    Disable,
+    /// Fail the start: a webhook whose configuration routes the apiserver
+    /// to it must not come up ready without serving.
+    Fail,
+}
+
+/// Where and how [`spawn_with`] serves. [`WebhookServerConfig::from_env`]
+/// is what [`spawn`] reads; an operator taking these from its own command
+/// line builds the struct instead.
+#[derive(Debug, Clone)]
+pub struct WebhookServerConfig {
+    pub addr: SocketAddr,
+    pub cert_file: PathBuf,
+    pub key_file: PathBuf,
+    /// How long the server keeps answering after shutdown starts.
+    pub drain: Duration,
+    pub missing_certificate: MissingCertificate,
+}
+
+impl WebhookServerConfig {
+    /// `WEBHOOK_PORT` (default 8443) on every interface,
+    /// `WEBHOOK_TLS_CERT_FILE`/`WEBHOOK_TLS_KEY_FILE` (default
+    /// `/etc/webhook/certs/tls.{crt,key}`), `WEEBO_SHUTDOWN_DRAIN_SECONDS`
+    /// (default 5), and [`MissingCertificate::Disable`].
+    pub fn from_env() -> Self {
+        let port: u16 = std::env::var("WEBHOOK_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(DEFAULT_PORT);
+        Self {
+            addr: SocketAddr::from(([0, 0, 0, 0], port)),
+            cert_file: std::env::var("WEBHOOK_TLS_CERT_FILE")
+                .unwrap_or_else(|_| "/etc/webhook/certs/tls.crt".to_string())
+                .into(),
+            key_file: std::env::var("WEBHOOK_TLS_KEY_FILE")
+                .unwrap_or_else(|_| "/etc/webhook/certs/tls.key".to_string())
+                .into(),
+            drain: drain_from_env(),
+            missing_certificate: MissingCertificate::Disable,
+        }
+    }
+}
+
 /// Serves `router` over TLS when the certificate is mounted
 /// (`WEBHOOK_TLS_CERT_FILE`/`WEBHOOK_TLS_KEY_FILE`, default
 /// `/etc/webhook/certs/tls.{crt,key}`) on `WEBHOOK_PORT` (default 8443),
@@ -84,17 +132,40 @@ fn drain() -> Duration {
 /// On `shutdown`, `health` turns not-ready, the server keeps answering for
 /// `WEEBO_SHUTDOWN_DRAIN_SECONDS` (default 5), then finishes in-flight
 /// requests. The process exits if the server fails.
+///
+/// [`spawn_with`] fed with [`WebhookServerConfig::from_env`].
 pub async fn spawn(
     router: axum::Router,
     health: Arc<Health>,
     shutdown: Shutdown,
 ) -> std::io::Result<WebhookServer> {
-    let cert = std::env::var("WEBHOOK_TLS_CERT_FILE")
-        .unwrap_or_else(|_| "/etc/webhook/certs/tls.crt".to_string());
-    let key = std::env::var("WEBHOOK_TLS_KEY_FILE")
-        .unwrap_or_else(|_| "/etc/webhook/certs/tls.key".to_string());
+    spawn_with(WebhookServerConfig::from_env(), router, health, shutdown).await
+}
+
+/// [`spawn`], served where `config` says. The certificate is re-read
+/// every [`TLS_RELOAD_INTERVAL`]; with [`MissingCertificate::Fail`], a
+/// certificate that isn't there is a `NotFound` error and nothing starts.
+pub async fn spawn_with(
+    config: WebhookServerConfig,
+    router: axum::Router,
+    health: Arc<Health>,
+    shutdown: Shutdown,
+) -> std::io::Result<WebhookServer> {
+    let WebhookServerConfig {
+        addr,
+        cert_file: cert,
+        key_file: key,
+        drain,
+        missing_certificate,
+    } = config;
     if !Path::new(&cert).exists() {
-        tracing::warn!(%cert, "no webhook certificate, admission webhook disabled");
+        if missing_certificate == MissingCertificate::Fail {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("webhook certificate {} not found", cert.display()),
+            ));
+        }
+        tracing::warn!(cert = %cert.display(), "no webhook certificate, admission webhook disabled");
         health.set_ready(true);
         tokio::spawn({
             let health = health.clone();
@@ -106,11 +177,6 @@ pub async fn spawn(
         });
         return Ok(WebhookServer(None));
     }
-    let port: u16 = std::env::var("WEBHOOK_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(DEFAULT_PORT);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let tls = RustlsConfig::from_pem_file(&cert, &key).await?;
 
     tokio::spawn({
@@ -134,7 +200,6 @@ pub async fn spawn(
         async move {
             shutdown.wait().await;
             health.set_ready(false);
-            let drain = drain();
             tracing::info!(seconds = drain.as_secs(), "draining the admission webhook");
             tokio::time::sleep(drain).await;
             handle.graceful_shutdown(Some(GRACEFUL_SHUTDOWN));
@@ -183,5 +248,48 @@ mod tests {
             response.status(),
             axum::http::StatusCode::SERVICE_UNAVAILABLE
         );
+    }
+
+    fn missing(missing_certificate: MissingCertificate) -> WebhookServerConfig {
+        WebhookServerConfig {
+            addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+            cert_file: "/nonexistent/tls.crt".into(),
+            key_file: "/nonexistent/tls.key".into(),
+            drain: Duration::ZERO,
+            missing_certificate,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_missing_certificate_fails_the_start_when_asked_to() {
+        let health = Arc::new(Health::new(Duration::from_secs(60)));
+        let result = spawn_with(
+            missing(MissingCertificate::Fail),
+            axum::Router::new(),
+            health.clone(),
+            Shutdown::never(),
+        )
+        .await;
+        let err = result.err().expect("the start must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(
+            !health.ready(),
+            "a webhook that serves nothing must not report ready"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_certificate_disables_the_server_by_default() {
+        let health = Arc::new(Health::new(Duration::from_secs(60)));
+        let server = spawn_with(
+            missing(MissingCertificate::Disable),
+            axum::Router::new(),
+            health.clone(),
+            Shutdown::never(),
+        )
+        .await
+        .expect("disabled, not failed");
+        assert!(server.0.is_none());
+        assert!(health.ready());
     }
 }

@@ -2092,3 +2092,34 @@ variante (placeholder de cargo-generate, ou second template) qui rend une
 `<Product>LocalInstance` déployée par `OwnedObjects` et des objets liés à
 leur instance, au lieu de la gateway HTTP — vérifiée par `template:check`
 comme l'autre.
+
+### Le serveur webhook configurable — `webhook_server::spawn_with` (ajout, non cassant)
+
+weebo-si-hardening (RFC 0012 de ce dépôt) migre sa plomberie sur le kit
+mais garde ses flags CLI (`--addr`, `--cert-dir`) : c'est un contrat, et
+`std::env::set_var` est `unsafe` en édition 2024 (`unsafe_code` interdit
+chez lui), donc impossible de les traduire en variables d'environnement au
+démarrage. Son webhook doit aussi refuser de démarrer sans certificat : il
+est derrière des règles `failurePolicy: Fail`, un pod prêt qui ne sert rien
+y est une panne.
+
+- `WebhookServerConfig { addr, cert_file, key_file, drain,
+  missing_certificate }` et `WebhookServerConfig::from_env()`, qui lit
+  exactement ce que lisait `spawn` (`WEBHOOK_PORT`, `WEBHOOK_TLS_*`,
+  `WEEBO_SHUTDOWN_DRAIN_SECONDS`).
+- `MissingCertificate::{Disable, Fail}` : `Disable` est le comportement
+  d'avant (rien de servi, prêt tout de suite) ; `Fail` rend une erreur
+  `NotFound` et ne marque pas le process prêt.
+- `spawn_with(config, router, health, shutdown)` ; `spawn` devient
+  `spawn_with(WebhookServerConfig::from_env(), …)`, rien ne change pour
+  les opérateurs existants.
+
+Ne nomme aucun produit ; tout opérateur qui prend son adresse et ses
+certificats en ligne de commande s'en sert.
+
+Dans la même release : `controller::reconciled(object)`, qui termine la
+série d'échecs d'un objet après un reconcile réussi qui choisit sa propre
+`Action` au lieu de `requeue_after`. Sans elle, un opérateur qui utilise
+`retry_after_error` sans `requeue_after` (weebo-si-hardening, dont les
+boucles requeue à leur propre rythme) reprenait la série suivante au
+backoff déjà atteint au lieu de 30 s.

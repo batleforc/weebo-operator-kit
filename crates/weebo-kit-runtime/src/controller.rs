@@ -218,6 +218,14 @@ fn recovered(uid: Option<&str>) {
     }
 }
 
+/// Ends `object`'s failure streak, for a reconcile that succeeded and
+/// chose its own [`Action`] rather than [`requeue_after`]'s: the next
+/// failure is retried after [`RETRY_REQUEUE_SECS`] again, not after the
+/// backoff the previous streak had reached.
+pub fn reconciled<K: Resource>(object: &K) {
+    recovered(object.meta().uid.as_deref());
+}
+
 /// When to reconcile `object` again after a reconcile that reached its
 /// status: [`STEADY_REQUEUE_SECS`] after a success — or a failure only a
 /// change of the CR can clear (a change triggers a reconcile by itself) —,
@@ -404,6 +412,18 @@ mod tests {
         recovered(uid);
         // No uid (an object not from the API): no streak to keep.
         assert_eq!([failed(None), failed(None)], [30, 30]);
+    }
+
+    #[test]
+    fn a_successful_reconcile_ends_the_streak() {
+        let obj = cr("reconciled-streak");
+        let uid = Some("reconciled-streak");
+        let start = std::time::Instant::now();
+        assert_eq!(failed_at(uid, start), 30);
+        assert_eq!(failed_at(uid, start + Duration::from_secs(30)), 60);
+        reconciled(&obj);
+        assert_eq!(failed_at(uid, start + Duration::from_secs(31)), 30);
+        recovered(uid);
     }
 
     #[tokio::test]
