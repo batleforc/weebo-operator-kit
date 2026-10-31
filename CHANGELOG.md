@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.26.0](https://github.com/batleforc/weebo-operator-kit/compare/fca6115362bb350b91ff3b361a4d894aa23a6f1b..v0.26.0) - 2026-10-31
+#### Features
+- (**runtime**) spawn_with, a webhook server configured by the caller, and controller::reconciled (#39) - ([fca6115](https://github.com/batleforc/weebo-operator-kit/commit/fca6115362bb350b91ff3b361a4d894aa23a6f1b)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.25.1](https://github.com/batleforc/weebo-operator-kit/compare/a5f569ece7d6662dc4cc4f469b5943394a961568..v0.25.1) - 2026-10-30
 #### Bug Fixes
 - (**leader**) bound each lease renewal attempt, retry a stuck one (#38) - ([a02541b](https://github.com/batleforc/weebo-operator-kit/commit/a02541bbcf1ac5d426a0096bc7caa766cbd40155)) - Maxime, Claude Opus 5.5

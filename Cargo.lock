@@ -4044,7 +4044,7 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-adapters"
-version = "0.25.1"
+version = "0.26.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -4071,7 +4071,7 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-api"
-version = "0.25.1"
+version = "0.26.0"
 dependencies = [
  "k8s-openapi",
  "schemars",
@@ -4081,7 +4081,7 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-application"
-version = "0.25.1"
+version = "0.26.0"
 dependencies = [
  "async-trait",
  "k8s-openapi",
@@ -4095,11 +4095,11 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-domain"
-version = "0.25.1"
+version = "0.26.0"
 
 [[package]]
 name = "weebo-kit-perf"
-version = "0.25.1"
+version = "0.26.0"
 dependencies = [
  "http",
  "k8s-openapi",
@@ -4113,7 +4113,7 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-runtime"
-version = "0.25.1"
+version = "0.26.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -4143,7 +4143,7 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-testkit"
-version = "0.25.1"
+version = "0.26.0"
 dependencies = [
  "envtest",
  "k8s-openapi",
